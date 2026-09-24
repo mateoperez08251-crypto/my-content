@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Content App Pro - Web Edition</title>
+    
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        :root {
+            --bg-base: #000000;
+            --panel-bg: rgba(18, 18, 22, 0.45);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            
+            --accent-primary: #00f2fe;
+            --accent-secondary: #4facfe;
+            
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dark: #0f172a;
+            
+            --terminal-bg: #0d1117;
+            --terminal-text: #4ade80;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Ambient Glow */
+        body::before, body::after {
+            content: '';
+            position: fixed;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            filter: blur(120px);
+            z-index: -1;
+            opacity: 0.15;
+            animation: float 20s infinite alternate ease-in-out;
+        }
+        body::before { background: var(--accent-primary); top: -10%; left: -10%; }
+        body::after { background: #8b5cf6; bottom: -10%; right: -10%; animation-delay: -10s; }
+        @keyframes float { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(50px, 50px) scale(1.1); } }
+
+        /* TopNav */
+        .topnav {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 70px;
+            background: rgba(15, 15, 18, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--panel-border);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 30px; box-sizing: border-box; z-index: 900;
+        }
+        .topnav-brand {
+            font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 800;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            display: flex; align-items: center; gap: 10px;
+        }
+
+        /* App Layout (Sidebar + Main) */
+        .app-layout {
+            display: flex; min-height: 100vh; padding-top: 70px;
+        }
+        .sidebar {
+            width: 250px; background: rgba(15, 15, 18, 0.85);
+            backdrop-filter: blur(40px); border-right: 1px solid rgba(255,255,255,0.08);
+            position: fixed; height: calc(100vh - 70px); left: 0; top: 70px; z-index: 800;
+            padding: 30px 15px; display: flex; flex-direction: column; gap: 10px;
+        }
+        .nav-item {
+            display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+            border-radius: 12px; color: var(--text-muted); font-weight: 600;
+            font-size: 0.95rem; cursor: pointer; transition: all 0.3s ease; border: 1px solid transparent;
+        }
+        .nav-item i { font-size: 1.3rem; }
+        .nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+        .nav-item.active {
+            background: rgba(0, 242, 254, 0.15); color: #00f2fe;
+            border: 1px solid rgba(0, 242, 254, 0.3); box-shadow: 0 5px 15px rgba(0, 242, 254, 0.1);
+        }
+
+        .dashboard-main {
+            flex: 1; margin-left: 250px; padding: 30px;
+            display: grid; grid-template-columns: 350px 1fr; gap: 24px;
+        }
+
+        /* Bento Panels */
+        .bento-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(60px) saturate(180%); -webkit-backdrop-filter: blur(60px) saturate(180%);
+            border: 1px solid var(--panel-border); border-top: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 28px; padding: 25px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            display: flex; flex-direction: column; height: calc(100vh - 160px);
+        }
+        .bento-title {
+            font-family: 'Outfit', sans-serif; font-size: 1.2rem; font-weight: 700;
+            color: #fff; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;
+        }
+        .bento-title i { color: var(--accent-primary); font-size: 1.4rem; }
+
+        /* Bot List */
+        .bot-list { overflow-y: auto; flex-grow: 1; padding-right: 5px; }
+        .bot-list::-webkit-scrollbar { width: 6px; }
+        .bot-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+        .bot-card {
+            background: rgba(255,255,255,0.03); border-radius: 16px; padding: 15px; margin-bottom: 12px;
+            cursor: pointer; transition: all 0.3s ease; border: 1px solid transparent;
+        }
+        .bot-card:hover { background: rgba(255,255,255,0.08); transform: translateY(-2px); }
+        .bot-card.active {
+            background: rgba(0, 242, 254, 0.1); border-color: rgba(0, 242, 254, 0.3);
+            box-shadow: 0 5px 15px rgba(0, 242, 254, 0.15);
+        }
+        .bot-name { font-weight: 600; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; color: #fff; }
+        .bot-status { font-size: 0.85rem; color: var(--text-muted); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Terminal Window */
+        .terminal-container { flex-grow: 1; display: flex; flex-direction: column; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05); }
+        .terminal-header-bar {
+            background: #161b22; padding: 12px 15px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .mac-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .mac-dot.red { background: #ff5f56; } .mac-dot.yellow { background: #ffbd2e; } .mac-dot.green { background: #27c93f; }
+        .terminal-label { margin-left: 10px; color: #8b949e; font-size: 0.9rem; font-weight: 500; font-family: 'Inter', sans-serif; }
+
+        .terminal-box {
+            flex-grow: 1; background: var(--terminal-bg); color: var(--terminal-text);
+            font-family: 'JetBrains Mono', 'Courier New', monospace; padding: 20px;
+            font-size: 0.95rem; line-height: 1.6; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;
+        }
+        .terminal-box::-webkit-scrollbar { width: 8px; }
+        .terminal-box::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        
+        .no-selection { display: flex; align-items: center; justify-content: center; height: 100%; color: #64748b; font-size: 1.1rem; flex-direction: column; gap: 15px; }
+        .no-selection i { font-size: 3rem; color: #334155; }
+
+        /* SPLASH SCREEN (INTRO) */
+        #splash-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000;
+            z-index: 9999; display: flex; align-items: center; justify-content: center; transition: opacity 0.5s ease;
+        }
+        .loader-intro { position: absolute; top: 50%; margin-left: -50px; left: 50%; animation: speeder 0.4s linear infinite; }
+        .loader-intro > span { height: 5px; width: 35px; background: #00f2fe; position: absolute; top: -19px; left: 60px; border-radius: 2px 10px 1px 0; }
+        .base span { position: absolute; width: 0; height: 0; border-top: 6px solid transparent; border-right: 100px solid #00f2fe; border-bottom: 6px solid transparent; }
+        .base span:before { content: ""; height: 22px; width: 22px; border-radius: 50%; background: #00f2fe; position: absolute; right: -110px; top: -16px; }
+        .base span:after { content: ""; position: absolute; width: 0; height: 0; border-top: 0 solid transparent; border-right: 55px solid #00f2fe; border-bottom: 16px solid transparent; top: -16px; right: -98px; }
+        .face { position: absolute; height: 12px; width: 20px; background: #00f2fe; border-radius: 20px 20px 0 0; transform: rotate(-40deg); right: -125px; top: -15px; }
+        .face:after { content: ""; height: 12px; width: 12px; background: #00f2fe; right: 4px; top: 7px; position: absolute; transform: rotate(40deg); transform-origin: 50% 50%; border-radius: 0 0 0 2px; }
+        .loader-intro > span > span { width: 30px; height: 1px; background: #fff; position: absolute; animation: fazer1 0.2s linear infinite; }
+        .loader-intro > span > span:nth-child(2) { top: 3px; animation: fazer2 0.4s linear infinite; }
+        .loader-intro > span > span:nth-child(3) { top: 1px; animation: fazer3 0.4s linear infinite; animation-delay: -1s; }
+        .loader-intro > span > span:nth-child(4) { top: 4px; animation: fazer4 1s linear infinite; animation-delay: -1s; }
+        @keyframes fazer1 { 0% { left: 0; } 100% { left: -80px; opacity: 0; } }
+        @keyframes fazer2 { 0% { left: 0; } 100% { left: -100px; opacity: 0; } }
+        @keyframes fazer3 { 0% { left: 0; } 100% { left: -50px; opacity: 0; } }
+        @keyframes fazer4 { 0% { left: 0; } 100% { left: -150px; opacity: 0; } }
+        @keyframes speeder { 0% { transform: translate(2px, 1px) rotate(0deg); } 10% { transform: translate(-1px, -3px) rotate(-1deg); } 20% { transform: translate(-2px, 0px) rotate(1deg); } 30% { transform: translate(1px, 2px) rotate(0deg); } 40% { transform: translate(1px, -1px) rotate(1deg); } 50% { transform: translate(-1px, 3px) rotate(-1deg); } 60% { transform: translate(-1px, 1px) rotate(0deg); } 70% { transform: translate(3px, 1px) rotate(-1deg); } 80% { transform: translate(-2px, -1px) rotate(1deg); } 90% { transform: translate(2px, 1px) rotate(0deg); } 100% { transform: translate(1px, -2px) rotate(-1deg); } }
+        .longfazers { position: absolute; width: 100%; height: 100%; }
+        .longfazers span { position: absolute; height: 2px; width: 20%; background: #4facfe; }
+        .longfazers span:nth-child(1) { top: 20%; animation: lf 0.6s linear infinite; animation-delay: -5s; }
+        .longfazers span:nth-child(2) { top: 40%; animation: lf2 0.8s linear infinite; animation-delay: -1s; }
+        .longfazers span:nth-child(3) { top: 60%; animation: lf3 0.6s linear infinite; }
+        .longfazers span:nth-child(4) { top: 80%; animation: lf4 0.5s linear infinite; animation-delay: -3s; }
+        @keyframes lf { 0% { left: 200%; } 100% { left: -200%; opacity: 0; } }
+        @keyframes lf2 { 0% { left: 200%; } 100% { left: -200%; opacity: 0; } }
+        @keyframes lf3 { 0% { left: 200%; } 100% { left: -100%; opacity: 0; } }
+        @keyframes lf4 { 0% { left: 200%; } 100% { left: -100%; opacity: 0; } }
+        
+        .intro-title {
+            position: absolute; bottom: 25%; width: 100%; text-align: center; font-family: 'Outfit', sans-serif;
+            font-size: 2.5rem; font-weight: 800; color: #00f2fe; text-transform: uppercase; letter-spacing: 15px;
+            text-shadow: 0 0 20px rgba(0, 242, 254, 0.6); animation: pulse-title 2s infinite alternate;
+        }
+        @keyframes pulse-title { 0% { opacity: 0.6; transform: scale(0.98); } 100% { opacity: 1; transform: scale(1.02); text-shadow: 0 0 40px rgba(0, 242, 254, 1); } }
+    </style>
+</head>
+<body>
+
+    <!-- Splash Screen -->
+    <div id="splash-screen">
+        <div class="loader-intro">
+            <span><span></span><span></span><span></span><span></span></span>
+            <div class="base"><span></span><div class="face"></div></div>
+        </div>
+        <div class="longfazers"><span></span><span></span><span></span><span></span></div>
+        <div class="intro-title">MY CONTENT</div>
+    </div>
+
+    <!-- Top Navigation -->
+    <header class="topnav">
+        <div class="topnav-brand">
+            <i class="ph-fill ph-robot"></i> Content App Pro
+        </div>
+    </header>
+
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="nav-item active"><i class="ph-duotone ph-desktop"></i> Monitor de Bots</div>
+            <div class="nav-item"><i class="ph-duotone ph-gear"></i> Ajustes</div>
+            <div class="nav-item"><i class="ph-duotone ph-shield-check"></i> Seguridad</div>
+        </aside>
+
+        <!-- Main Dashboard -->
+        <main class="dashboard-main">
+            <!-- Left: Bot List (Bento Panel) -->
+            <div class="bento-panel">
+                <div class="bento-title"><i class="ph-bold ph-desktop"></i> Bots Activos</div>
+                <div class="bot-list" id="botsContainer">
+                    <div style="text-align: center; color: #64748b; margin-top: 20px;">
+                        <i class="ph-duotone ph-spinner-gap" style="animation: spin 1s linear infinite; display: block; font-size: 2rem; margin: 0 auto 10px;"></i>
+                        Buscando bots...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Terminal Viewer (Bento Panel) -->
+            <div class="bento-panel">
+                <div class="bento-title"><i class="ph-bold ph-terminal-window"></i> Terminal en Vivo</div>
+                
+                <div class="terminal-container">
+                    <div class="terminal-header-bar" id="terminalTitle">
+                        <div class="mac-dot red"></div><div class="mac-dot yellow"></div><div class="mac-dot green"></div>
+                        <span class="terminal-label">Selecciona un bot de la lista</span>
+                    </div>
+                    
+                    <div class="terminal-box" id="liveTerminal">
+                        <div class="no-selection">
+                            <i class="ph-duotone ph-mouse"></i>
+                            Haz clic en un bot a la izquierda para ver sus logs
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Intro Splash Screen Logic
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                const splash = document.getElementById('splash-screen');
+                splash.style.opacity = '0';
+                setTimeout(() => { splash.style.display = 'none'; }, 500);
+            }, 2500);
+        });
+
+        // Backend Integration Logic (Preserved entirely)
+        let selectedBot = null;
+
+        function selectBot(pcName) {
+            selectedBot = pcName;
+            
+            document.querySelectorAll('.bot-card').forEach(el => el.classList.remove('active'));
+            const card = document.getElementById('bot-' + pcName);
+            if (card) card.classList.add('active');
+
+            document.getElementById('terminalTitle').innerHTML = `
+                <div class="mac-dot red"></div><div class="mac-dot yellow"></div><div class="mac-dot green"></div>
+                <span class="terminal-label">root@${pcName} ~</span>
+            `;
+            
+            updateTerminal();
+        }
+
+        function updateBotsList() {
+            fetch('/api/get_bots')
+                .then(res => res.json())
+                .then(data => {
+                    const container = document.getElementById('botsContainer');
+                    if (data.length === 0) {
+                        container.innerHTML = '<div style="text-align: center; color: #64748b; margin-top: 20px;">Esperando conexión de bots...</div>';
+                        return;
+                    }
+
+                    let html = '';
+                    data.forEach(bot => {
+                        const activeClass = (selectedBot === bot.name) ? 'active' : '';
+                        html += `
+                            <div class="bot-card ${activeClass}" id="bot-${bot.name}" onclick="selectBot('${bot.name}')">
+                                <div class="bot-name"><i class="ph-fill ph-desktop"></i> ${bot.name}</div>
+                                <div class="bot-status">${bot.last_log}</div>
+                            </div>
+                        `;
+                    });
+                    container.innerHTML = html;
+                })
+                .catch(err => console.error("Error obteniendo bots:", err));
+        }
+
+        function updateTerminal() {
+            if (!selectedBot) return;
+
+            fetch('/api/get_terminal/' + selectedBot)
+                .then(res => res.json())
+                .then(data => {
+                    const terminal = document.getElementById('liveTerminal');
+                    const isScrolledToBottom = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 20;
+                    
+                    if (terminal.querySelector('.no-selection')) {
+                        terminal.innerHTML = '';
+                    }
+                    
+                    terminal.textContent = data.logs;
+                    
+                    if (isScrolledToBottom) {
+                        terminal.scrollTop = terminal.scrollHeight;
+                    }
+                })
+                .catch(err => console.error("Error obteniendo terminal:", err));
+        }
+
+        setInterval(() => {
+            updateBotsList();
+            updateTerminal();
+        }, 1000);
+
+        updateBotsList();
+    </script>
+</body>
+</html>

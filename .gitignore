@@ -1,0 +1,60 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos de caché y compilación de Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Carpetas generadas por PyInstaller
+build/
+dist/
+*.spec
+*.exe
+
+# Credenciales y Secretos (¡NUNCA SUBIR A GITHUB!)
+*.env
+.env
+client_secret_*.json
+secrets.json
+youtube_token.json
+tiktok_token.json
+firebase_credentials.json
+firebase-key.json
+serviceAccountKey.json
+token.pickle
+ig_data.txt
+
+# Archivos multimedia generados / temporales
+*.mp4
+*.avi
+*.mov
+*.wav
+*.mp3
+*.webm
+
+# Carpetas de trabajo pesado y cache
+node_modules/
+.firebase/
+downloads/
+temp/
+videos_descargados/
+videos_procesados/
+chrome_tiktok/
+firebase_radar/
+
+# Modelos y pesos de la IA de voz (son demasiado pesados para Git)
+Clonar-voz/modelos/*.gguf
+Clonar-voz/modelos/*.bin
+Clonar-voz/modelos/*.pt
+Clonar-voz/salidas/
+
+# IDE y Sistema Operativo
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

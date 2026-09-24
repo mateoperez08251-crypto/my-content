@@ -1,0 +1,16 @@
+moviepy
+yt-dlp
+playwright
+requests
+pillow
+imageio-ffmpeg
+pynput
+pyautogui
+send2trash
+flask
+pyperclip
+demucs
+faster-whisper
+mediapipe
+opencv-python
+pystray
