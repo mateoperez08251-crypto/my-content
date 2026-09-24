@@ -1190,6 +1190,13 @@
                     localStorage.setItem('mySessionId', mySessionId);
                     firebase.database().ref('users/' + user.uid + '/sessionId').set(mySessionId);
                 }
+                
+                // Mostrar correo del usuario logueado en la interfaz
+                const userEmailElement = document.getElementById('currentUserEmail');
+                if (userEmailElement) {
+                    userEmailElement.innerText = user.email;
+                    userEmailElement.title = user.email;
+                }
 
                 // Escuchar cambios de sesión
                 firebase.database().ref('users/' + user.uid + '/sessionId').on('value', (snapshot) => {
@@ -1643,6 +1650,20 @@
         
         <!-- Sidebar -->
         <div class="sidebar">
+            <div style="padding: 0 20px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
+                    <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; flex-shrink: 0;">
+                        <i class="ph-duotone ph-user"></i>
+                    </div>
+                    <div style="overflow: hidden;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Usuario</div>
+                        <div id="currentUserEmail" style="font-size: 0.85rem; font-weight: 500; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Cargando...">Cargando...</div>
+                    </div>
+                </div>
+                <button onclick="firebase.auth().signOut().then(() => { localStorage.removeItem('mySessionId'); window.location.reload(); })" title="Cerrar Sesión" style="background: rgba(255,0,0,0.1); color: #ff4444; border: none; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                    <i class="ph-bold ph-sign-out"></i>
+                </button>
+            </div>
             <a href="#" class="nav-item active" onclick="openAutoModule()"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
             <a href="#" class="nav-item" onclick="openInboxModal()"><i class="ph-duotone ph-tray"></i> Bandeja de Entrada</a>
             
