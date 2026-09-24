@@ -670,6 +670,18 @@ def start_voice_cloner():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+@app.route("/api/stop-voice-cloner", methods=["POST"])
+def stop_voice_cloner():
+    global voice_process
+    try:
+        if voice_process and voice_process.poll() is None:
+            voice_process.terminate()
+            voice_process = None
+            return jsonify({"success": True, "message": "IA apagada exitosamente. RAM liberada."})
+        return jsonify({"success": True, "message": "La IA ya estaba apagada."})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 @app.route("/api/auth/tiktok", methods=["GET"])
 def auth_tiktok():
     import api_subidor

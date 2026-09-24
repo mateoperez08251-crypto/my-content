@@ -2674,6 +2674,12 @@
         
         function closeVoiceClonerModal() {
             document.getElementById('voiceClonerModal').style.display = 'none';
+            // Apagar la IA para liberar memoria RAM y CPU
+            fetch('/api/stop-voice-cloner', { method: 'POST' });
+            
+            // Limpiar el iframe para que no consuma recursos
+            let iframe = document.getElementById('voiceClonerFrame');
+            iframe.src = '';
         }
 
         function openInboxModal() {
