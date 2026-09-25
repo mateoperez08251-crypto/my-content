@@ -48,8 +48,12 @@ if len(sys.argv) > 1:
 
 
 os.environ["PYTHONUTF8"] = "1"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+    EXEC_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    EXEC_DIR = BASE_DIR
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -306,8 +310,10 @@ def run_automation_thread(data):
             
             # Obtener calidad o 'best' si no se especifica
             calidad = data.get('video_quality', '1440')
+            custom_dir = data.get('custom_output_dir', '')
+            output_folder = custom_dir if custom_dir else os.path.join(EXEC_DIR, "videos_descargados")
             
-            video = yt_downloader.download_video(video, output_dir=os.path.join(BASE_DIR, "videos_descargados"), quality=calidad)
+            video = yt_downloader.download_video(video, output_dir=output_folder, quality=calidad)
             if not video:
                 unlock_mouse()
                 return
@@ -383,7 +389,7 @@ def run_automation_thread(data):
                             log("¡Edición terminada! Descargando ZIP...")
                             d_url = s_data.get("url")
                             zip_r = requests.get(f"{colab_url}{d_url}", timeout=1200)
-                            zip_path = os.path.join(BASE_DIR, "resultados_colab.zip")
+                            zip_path = os.path.join(EXEC_DIR, "resultados_colab.zip")
                             with open(zip_path, 'wb') as f: f.write(zip_r.content)
                             break
                         elif s_data.get("status") == "error":
@@ -394,13 +400,13 @@ def run_automation_thread(data):
                 time.sleep(10)
                 
             import zipfile
-            extract_dir = os.path.join(BASE_DIR, "temp")
+            extract_dir = os.path.join(EXEC_DIR, "temp")
             os.makedirs(extract_dir, exist_ok=True)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
             for i in range(num_partes):
-                video_editado = os.path.join(BASE_DIR, "temp", f"parte_{i+1}.mp4")
+                video_editado = os.path.join(EXEC_DIR, "temp", f"parte_{i+1}.mp4")
                 if not os.path.exists(video_editado): continue
                 
                 parte_num = i + 1
@@ -462,7 +468,7 @@ def run_automation_thread(data):
                     import tempfile
                     import json
                     import uuid
-                    editor_cfg_path = os.path.join(BASE_DIR, "temp", f"config_editor_{uuid.uuid4().hex}.json")
+                    editor_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_editor_{uuid.uuid4().hex}.json")
                     os.makedirs(os.path.dirname(editor_cfg_path), exist_ok=True)
                     with open(editor_cfg_path, 'w', encoding='utf-8') as cf:
                         json.dump({
@@ -525,7 +531,7 @@ def run_automation_thread(data):
                     import tempfile
                     import json
                     import uuid
-                    subidor_cfg_path = os.path.join(BASE_DIR, "temp", f"config_subidor_{uuid.uuid4().hex}.json")
+                    subidor_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_subidor_{uuid.uuid4().hex}.json")
                     os.makedirs(os.path.dirname(subidor_cfg_path), exist_ok=True)
                     with open(subidor_cfg_path, 'w', encoding='utf-8') as cf:
                         json.dump({
@@ -621,7 +627,7 @@ def get_system_specs():
 @app.route("/api/start-voice-cloner", methods=["POST"])
 def start_voice_cloner():
     global voice_process
-    cloner_dir = os.path.join(BASE_DIR, "Clonar-voz")
+    cloner_dir = os.path.join(EXEC_DIR, "Clonar-voz")
     if not os.path.exists(cloner_dir):
         return jsonify({"success": False, "error": f"No se encontró la carpeta 'Clonar-voz' junto al programa."})
         
@@ -663,7 +669,21 @@ def start_voice_cloner():
             if BASE_DIR not in env.get("PATH", ""):
                 env["PATH"] = BASE_DIR + os.pathsep + env.get("PATH", "")
                 
-            python_cmd = "python" if getattr(sys, 'frozen', False) else sys.executable
+            # Intentar encontrar un python local o de entorno virtual
+            python_cmd = "python"
+            if not getattr(sys, 'frozen', False):
+                python_cmd = sys.executable
+            else:
+                possible_pythons = [
+                    os.path.join(cloner_dir, ".venv", "Scripts", "python.exe"),
+                    os.path.join(cloner_dir, "env", "Scripts", "python.exe"),
+                    os.path.join(EXEC_DIR, "..", ".venv", "Scripts", "python.exe"), # Entorno del desarrollador
+                ]
+                for p in possible_pythons:
+                    if os.path.exists(p):
+                        python_cmd = p
+                        break
+                        
             voice_process = subprocess.Popen([python_cmd, "app.py"], cwd=cloner_dir, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
             
         return jsonify({"success": True, "message": "Iniciando clonador de voz..."})
@@ -889,7 +909,7 @@ def abrir_chrome():
     log("Abriendo Chrome especial...")
     # Read default profile if needed, or pass via JSON
     perfil = "Default"
-    base_dir = os.path.join(BASE_DIR, "chrome_tiktok")
+    base_dir = os.path.join(EXEC_DIR, "chrome_tiktok")
     flags = (
         "--restore-last-session "
         "--disable-blink-features=AutomationControlled "
@@ -919,7 +939,7 @@ def generar_preview():
     import tempfile
     import json
     import uuid
-    preview_cfg_path = os.path.join(BASE_DIR, "temp", f"config_preview_{uuid.uuid4().hex}.json")
+    preview_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_preview_{uuid.uuid4().hex}.json")
     os.makedirs(os.path.dirname(preview_cfg_path), exist_ok=True)
     with open(preview_cfg_path, 'w', encoding='utf-8') as cf:
         json.dump({
@@ -958,7 +978,7 @@ def extract_audio_api():
         return jsonify({"success": False, "error": "Ruta o URL no proporcionada."})
     try:
         import audio_extractor
-        output_dir = os.path.join(BASE_DIR, "downloads", "audio")
+        output_dir = os.path.join(EXEC_DIR, "downloads", "audio")
         result_path = audio_extractor.extract_audio(source, output_dir)
         filename = os.path.basename(result_path)
         return jsonify({"success": True, "download_url": f"/api/download_audio?file={filename}"})
@@ -970,7 +990,7 @@ def download_audio():
     filename = request.args.get("file")
     if not filename:
         return "File not specified", 400
-    directory = os.path.join(BASE_DIR, "downloads", "audio")
+    directory = os.path.join(EXEC_DIR, "downloads", "audio")
     return send_from_directory(directory, filename, as_attachment=True)
 
 @app.route("/api/separate_audio", methods=["POST"])
@@ -982,7 +1002,7 @@ def separate_audio_api():
         return jsonify({"success": False, "error": "Ruta o URL no proporcionada."})
     try:
         import audio_separator
-        output_dir = os.path.join(BASE_DIR, "downloads", "separated")
+        output_dir = os.path.join(EXEC_DIR, "downloads", "separated")
         results = audio_separator.separate_music(source, output_dir, stems)
         download_links = []
         for key, filename in results.items():
@@ -997,7 +1017,7 @@ def download_separated():
     filename = request.args.get("file")
     if not filename:
         return "File not specified", 400
-    directory = os.path.join(BASE_DIR, "downloads", "separated")
+    directory = os.path.join(EXEC_DIR, "downloads", "separated")
     return send_from_directory(directory, filename, as_attachment=True)
 
 @app.route("/api/preview_img")
@@ -1013,7 +1033,7 @@ def get_preview_img():
         # Generar un nombre único basado en la ruta del archivo
         path_hash = hashlib.md5(path.encode('utf-8')).hexdigest()
         thumb_filename = f"thumb_{path_hash}.jpg"
-        temp_dir = os.path.join(BASE_DIR, "temp")
+        temp_dir = os.path.join(EXEC_DIR, "temp")
         os.makedirs(temp_dir, exist_ok=True)
         thumb_path = os.path.join(temp_dir, thumb_filename)
         
@@ -1064,21 +1084,25 @@ def run_smart_split_thread(data):
         
         if source.startswith("http"):
             log("Descargando video para Smart Split...")
-            source = yt_downloader.download_video(source, output_dir=os.path.join(BASE_DIR, "videos_descargados"), quality="1440")
+            custom_dl = data.get('custom_output_dir', '')
+            dl_dir = custom_dl if custom_dl else os.path.join(EXEC_DIR, "videos_descargados")
+            source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440")
             if not source:
                 raise Exception("Error al descargar video")
                 
         if cancel_requested: raise Exception("Cancelado.")
         
-        output_dir = os.path.join(BASE_DIR, "videos_procesados")
+        custom_out = data.get('custom_output_dir', '')
+        output_dir = custom_out if custom_out else os.path.join(EXEC_DIR, "videos_procesados")
         os.makedirs(output_dir, exist_ok=True)
         filename = "smart_" + os.path.basename(source)
         if not filename.endswith(".mp4"):
             filename += ".mp4"
         output_path = os.path.join(output_dir, filename)
         
-        log(f"Iniciando procesamiento de Smart Split...")
-        result_paths = smart_editor.process_smart_split(source, output_path, clip_duration, num_clips, start_time, end_time)
+        subtitle_scale = float(data.get('subtitle_scale', 100))
+        log(f"Iniciando procesamiento de Smart Split (Escala Subtítulos: {subtitle_scale}%)...")
+        result_paths = smart_editor.process_smart_split(source, output_path, clip_duration, num_clips, start_time, end_time, subtitle_scale)
         
         if result_paths:
             log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips.")
@@ -1105,7 +1129,7 @@ def run_smart_split_thread(data):
                         if not clip_title:
                             clip_title = "Clip generado por Smart Split #viral"
                         
-                        subidor_cfg_path = os.path.join(BASE_DIR, "temp", f"config_subidor_smart_{uuid.uuid4().hex}.json")
+                        subidor_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_subidor_smart_{uuid.uuid4().hex}.json")
                         os.makedirs(os.path.dirname(subidor_cfg_path), exist_ok=True)
                         with open(subidor_cfg_path, 'w', encoding='utf-8') as cf:
                             json.dump({
@@ -1273,6 +1297,21 @@ def get_logs():
     out = list(logs_queue)
     logs_queue.clear()
     return jsonify({"logs": out, "status": automation_status})
+
+@app.route("/api/select-folder", methods=["GET"])
+def select_folder():
+    import tkinter as tk
+    from tkinter import filedialog
+    # Ocultar ventana principal de tkinter
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True) # Hacer que aparezca encima
+    folder_path = filedialog.askdirectory(parent=root, title="Selecciona una carpeta para guardar los videos")
+    root.destroy()
+    
+    if folder_path:
+        return jsonify({"success": True, "folder": folder_path})
+    return jsonify({"success": False, "error": "No se seleccionó ninguna carpeta"})
 
 if __name__ == "__main__":
     import sys

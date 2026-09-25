@@ -105,7 +105,7 @@ def group_words_into_phrases(words, max_words=5):
         phrases.append(current_phrase)
     return phrases
 
-def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, clip_et=0.0):
+def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, clip_et=0.0, subtitle_scale=100):
     pil_img = Image.fromarray(frame)
     draw = ImageDraw.Draw(pil_img)
     
@@ -148,7 +148,10 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
     if not current_phrase:
         return np.array(pil_img)
         
-    font_size = int(h * 0.04) # 4% de la altura
+    # Aplicar la escala enviada por el usuario (por defecto 100%)
+    scale_multiplier = subtitle_scale / 100.0
+    font_size = int(h * 0.045 * scale_multiplier)
+    
     try:
         font = ImageFont.truetype("arialbd.ttf", font_size)
     except:
@@ -161,7 +164,24 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
     texts = [w["word"].upper() for w in current_phrase]
     full_text = " ".join(texts)
     
-    try:
+    # Anti-desbordamiento (Asegurar que el texto no se salga de la pantalla)
+    max_w = int(w * 0.95)
+    while font_size > 15:
+        try:
+            bbox = draw.textbbox((0, 0), full_text, font=font)
+            total_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+        except AttributeError:
+            total_w, text_h = draw.textsize(full_text, font=font)
+            
+        if total_w <= max_w:
+            break
+            
+        font_size -= 2
+        try:
+            font = ImageFont.truetype("arialbd.ttf", font_size)
+        except:
+            font = ImageFont.truetype("impact.ttf", font_size)
         bbox = draw.textbbox((0, 0), full_text, font=font)
         total_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
@@ -393,7 +413,7 @@ Transcripción con marcas de tiempo (en segundos):
     return best_times
 
 
-def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, start_time="", end_time=""):
+def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, start_time="", end_time="", subtitle_scale=100):
     write_progress("Iniciando Smart Split...", 5)
     print("Iniciando Smart Split...")
     
@@ -548,7 +568,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             cropped_frame = frame[0:orig_h, x1:x2]
             cropped_frame = cv2.resize(cropped_frame, (final_w, final_h), interpolation=cv2.INTER_AREA)
                 
-            final_frame = draw_text_tiktok_style(cropped_frame, phrases, global_t, final_w, final_h, gen_title, st, et)
+            final_frame = draw_text_tiktok_style(cropped_frame, phrases, global_t, final_w, final_h, gen_title, st, et, subtitle_scale)
             return final_frame
 
         processed_clip = subclip.transform(process_frame)

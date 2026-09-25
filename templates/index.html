@@ -1747,6 +1747,17 @@
                     </div>
                     
                     <div class="form-group" style="margin-top: 15px;">
+                        <label style="display:flex;align-items:center;">Carpeta de Guardado (Para enlaces web) <div class="custom-tooltip"><i class="ph-duotone ph-info"></i><span class="tooltip-text">Selecciona dónde se guardará el video descargado. Si lo dejas vacío, se usará la carpeta por defecto.</span></div></label>
+                        <div class="modern-file-picker" onclick="selectOutputFolder('auto_custom_output_dir')">
+                            <div class="picker-icon"><i class="ph-duotone ph-folder-open"></i></div>
+                            <div class="picker-content">
+                                <span class="picker-title">Elegir Carpeta de Descarga</span>
+                                <input type="text" id="auto_custom_output_dir" name="custom_output_dir" class="picker-input" placeholder="Opcional. Deja vacío para usar valor por defecto." onclick="event.stopPropagation();">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group" style="margin-top: 15px;">
                         <label style="display:flex;align-items:center;">Título del Video (Opcional) <div class="custom-tooltip"><i class="ph-duotone ph-info"></i><span class="tooltip-text">Añade un título para el video (ej. para subir a TikTok). Soporta hashtags y emojis.</span></div></label>
                         <input type="text" id="title" name="title" class="form-control" placeholder="Ej: ¡Mira este increíble video! #viral #trending">
                     </div>
@@ -1868,6 +1879,16 @@
                 </div>
                 
                 <div class="form-group" style="margin-top: 20px;">
+                    <label style="display:flex;align-items:center;">Carpeta de Guardado <div class="custom-tooltip"><i class="ph-duotone ph-info"></i><span class="tooltip-text">Selecciona dónde se guardarán los clips. Si lo dejas vacío, se usará la carpeta por defecto.</span></div></label>
+                    <div class="modern-file-picker" onclick="selectOutputFolder('smart_split_output_dir')" style="padding: 10px;">
+                        <div class="picker-icon" style="font-size: 1.5rem;"><i class="ph-duotone ph-folder-open"></i></div>
+                        <div class="picker-content">
+                            <input type="text" id="smart_split_output_dir" class="picker-input" placeholder="Opcional. Deja vacío para usar valor por defecto." onclick="event.stopPropagation();">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group" style="margin-top: 20px;">
                     <label>Proporción de video</label>
                     <div style="display: flex; gap: 10px;">
                         <button class="btn btn-primary" style="flex: 1; pointer-events: none; background: rgba(0,242,254,0.1); color: #00f2fe; border: 1px solid rgba(0,242,254,0.3);">
@@ -1944,12 +1965,64 @@
                 </div>
 <div class="form-group" style="margin-top: 20px;">
                     <label>Ajustes predeterminados de subtítulos</label>
-                    <div style="display: flex; gap: 15px; padding-bottom: 10px;">
-                        <div class="subtitle-option active" style="border: 2px solid var(--accent-primary); border-radius: 8px; padding: 10px; cursor: pointer; flex: 1; text-align: center; background: rgba(255,255,255,0.05);" onclick="selectSubtitleStyle('tiktok_yellow', this)">
-                            <div style="background: #000; height: 100px; border-radius: 4px; display:flex; align-items:center; justify-content:center; margin-bottom: 8px;">
-                                <span style="color: white; font-weight: bold; font-family: Impact, sans-serif; font-size: 1.2rem;">LIFE IN <span style="color: yellow;">MOTION</span></span>
-                            </div>
-                            <small style="color: #fff; font-weight: 600;">Estilo TikTok (Palabra Amarilla)</small>
+                    <style>
+                        .presets-gallery::-webkit-scrollbar { height: 8px; }
+                        .presets-gallery::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 4px; }
+                        .presets-gallery::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+                        .presets-gallery::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+                        .subtitle-option { transition: all 0.2s; border: 2px solid transparent; border-radius: 8px; cursor: pointer; flex: 0 0 120px; height: 180px; scroll-snap-align: start; overflow: hidden; position: relative; opacity: 0.6; }
+                        .subtitle-option:hover { opacity: 0.8; transform: scale(1.02); }
+                        .subtitle-option.active { border-color: var(--accent-primary); opacity: 1; transform: scale(1.05); box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+                        .subtitle-option img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+                    </style>
+                    <div class="presets-gallery" style="display: flex; gap: 15px; padding-bottom: 15px; overflow-x: auto; scroll-snap-type: x mandatory; align-items: center; padding-top: 10px; margin-left: -5px; padding-left: 5px;">
+                        <div class="subtitle-option active" onclick="selectSubtitleStyle('style1', this)">
+                            <img src="/static/presets/style1.webp" alt="Estilo 1">
+                        </div>
+                        <div class="subtitle-option" onclick="selectSubtitleStyle('style2', this)">
+                            <img src="/static/presets/style2.webp" alt="Estilo 2">
+                        </div>
+                        <div class="subtitle-option" onclick="selectSubtitleStyle('style3', this)">
+                            <img src="/static/presets/style3.webp" alt="Estilo 3">
+                        </div>
+                        <div class="subtitle-option" onclick="selectSubtitleStyle('style4', this)">
+                            <img src="/static/presets/style4.webp" alt="Estilo 4">
+                        </div>
+                        <div class="subtitle-option" onclick="selectSubtitleStyle('style5', this)">
+                            <img src="/static/presets/style5.webp" alt="Estilo 5">
+                        </div>
+                        <div class="subtitle-option" onclick="selectSubtitleStyle('style6', this)">
+                            <img src="/static/presets/style6.webp" alt="Estilo 6">
+                        </div>
+                        <div class="subtitle-option" onclick="selectSubtitleStyle('style7', this)">
+                            <img src="/static/presets/style7.webp" alt="Estilo 7">
+                        </div>
+                        <div class="subtitle-option" onclick="selectSubtitleStyle('style8', this)">
+                            <img src="/static/presets/style8.webp" alt="Estilo 8">
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <label style="margin:0;"><i class="ph-duotone ph-text-aa"></i> Tamaño de Subtítulos</label>
+                            <span id="subtitleScaleValue" style="color: var(--accent-primary); font-weight: bold;">100%</span>
+                        </div>
+                        <div class="rangeWrapper">
+                            <input type="range" id="subtitle_scale" value="100" min="50" max="150" step="5" oninput="document.getElementById('subtitleScaleValue').innerText = this.value + '%'">
+                        </div>
+                        <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 5px;">Mueve a la izquierda para achicar, a la derecha para agrandar.</small>
+                    </div>
+
+                    <div style="margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+                        <label style="margin:0; margin-bottom: 10px; display: block; color: var(--accent-primary);"><i class="ph-duotone ph-shield-check"></i> Modo Anti-Copyright (Evasión)</label>
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <label class="custom-checkbox" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="smart_anti_copyright_filter" checked style="width: 18px; height: 18px; accent-color: var(--accent-primary);">
+                                <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Filtro visual imperceptible (1% ruido/tinte)</span>
+                            </label>
+                            <label class="custom-checkbox" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="smart_anti_copyright_audio" checked style="width: 18px; height: 18px; accent-color: var(--accent-primary);">
+                                <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Pista de audio inaudible de fondo (-45dB)</span>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -2446,11 +2519,13 @@
                 document.getElementById('slider_end').value = parseTimeString(endStr);
             }
         }
+        window.selectedSubtitleStyle = 'style1';
         function selectSubtitleStyle(styleId, element) {
             document.querySelectorAll('.subtitle-option').forEach(el => {
-                el.style.borderColor = 'rgba(255,255,255,0.1)';
+                el.classList.remove('active');
             });
-            element.style.borderColor = 'var(--accent-primary)';
+            element.classList.add('active');
+            window.selectedSubtitleStyle = styleId;
         }
         let smartSplitProgressInterval = null;
         
@@ -2528,12 +2603,15 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         source: source, 
-                        style: 'tiktok_yellow',
+                        style: window.selectedSubtitleStyle || 'style1',
                         clip_duration: parseFloat(duration),
                         num_clips: parseInt(numClips),
                         start_time: startTime,
                         end_time: endTime,
                         smart_split_title: smart_split_title,
+                        subtitle_scale: document.getElementById('subtitle_scale') ? document.getElementById('subtitle_scale').value : 100,
+                        anti_copyright_filter: document.getElementById('smart_anti_copyright_filter') ? document.getElementById('smart_anti_copyright_filter').checked : true,
+                        anti_copyright_audio: document.getElementById('smart_anti_copyright_audio') ? document.getElementById('smart_anti_copyright_audio').checked : true,
                         subir_tiktok: subir_tiktok_smart === 'on',
                         subir_youtube: subir_youtube_smart === 'on',
                         subir_facebook: subir_facebook_smart === 'on'
@@ -2701,6 +2779,9 @@
             // Limpiar el iframe para que no consuma recursos
             let iframe = document.getElementById('voiceClonerFrame');
             iframe.src = '';
+            
+            // Resetear el estado para que vuelva a cargar cuando se abra
+            clonerStarted = false;
         }
 
         function openInboxModal() {
@@ -2815,6 +2896,20 @@
                 input.addEventListener('keyup', saveFormSettings);
             });
         });
+
+        async function selectOutputFolder(inputId) {
+            try {
+                const res = await fetch('/api/select-folder');
+                const data = await res.json();
+                if (data.success && data.folder) {
+                    document.getElementById(inputId).value = data.folder;
+                } else if (data.error && data.error !== "No se seleccionó ninguna carpeta") {
+                    console.error(data.error);
+                }
+            } catch (err) {
+                console.error("Error seleccionando carpeta:", err);
+            }
+        }
 
         // Fetch para abrir el explorador de archivos nativo
         async function browseFile(type) {

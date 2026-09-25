@@ -16,7 +16,13 @@ def download_video(url, output_dir="videos_descargados", quality="1440"):
 
 
     import sys
-    base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    
+    # ffmpeg.exe se empaqueta dentro de la carpeta temporal de PyInstaller (sys._MEIPASS)
+    if getattr(sys, 'frozen', False):
+        base_dir = sys._MEIPASS
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        
     ffmpeg_path = os.path.join(base_dir, "ffmpeg.exe")
     if not os.path.exists(ffmpeg_path):
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
