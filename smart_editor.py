@@ -8,9 +8,9 @@ import math
 
 try:
     # pyrefly: ignore [missing-import]
-    from moviepy.editor import VideoFileClip, AudioFileClip
+    from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_audioclips
 except ImportError:
-    from moviepy import VideoFileClip, AudioFileClip
+    from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_audioclips
 
 # Usamos el detector de rostros de OpenCV con el archivo local
 _cascade_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'haarcascade_frontalface_default.xml')
@@ -105,7 +105,7 @@ def group_words_into_phrases(words, max_words=5):
         phrases.append(current_phrase)
     return phrases
 
-def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, clip_et=0.0, subtitle_scale=100):
+def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, clip_et=0.0, subtitle_scale=100, subtitle_style="style5", show_progress_bar=True):
     pil_img = Image.fromarray(frame)
     draw = ImageDraw.Draw(pil_img)
     
@@ -152,11 +152,15 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
     scale_multiplier = subtitle_scale / 100.0
     font_size = int(h * 0.045 * scale_multiplier)
     
+    font_name = "arialbd.ttf"
+    if subtitle_style in ["style3", "style8"]:
+        font_name = "impact.ttf"
+        
     try:
-        font = ImageFont.truetype("arialbd.ttf", font_size)
+        font = ImageFont.truetype(font_name, font_size)
     except:
         try:
-            font = ImageFont.truetype("impact.ttf", font_size)
+            font = ImageFont.truetype("impact.ttf" if font_name == "arialbd.ttf" else "arialbd.ttf", font_size)
         except:
             font = ImageFont.load_default()
             
@@ -179,14 +183,15 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
             
         font_size -= 2
         try:
-            font = ImageFont.truetype("arialbd.ttf", font_size)
+            font = ImageFont.truetype(font_name, font_size)
         except:
             font = ImageFont.truetype("impact.ttf", font_size)
-        bbox = draw.textbbox((0, 0), full_text, font=font)
-        total_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-    except AttributeError:
-        total_w, text_h = draw.textsize(full_text, font=font)
+        try:
+            bbox = draw.textbbox((0, 0), full_text, font=font)
+            total_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+        except AttributeError:
+            total_w, text_h = draw.textsize(full_text, font=font)
         
     start_x = (w - total_w) / 2
     # Subtítulos en la parte inferior (80% de la altura)
@@ -200,22 +205,48 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
         # Determinar si es la palabra activa
         is_active = word_obj["start"] <= t <= word_obj["end"]
         
-        # Color: Si es activa amarillo, si no, blanco
-        color = (255, 255, 0, 255) if is_active else (255, 255, 255, 255)
+        base_color = (255, 255, 255, 255)
+        active_color = (255, 255, 0, 255)
+        bg_box_color = None
+        current_stroke = stroke_width
+        
+        if subtitle_style == "style1":
+            active_color = (0, 255, 255, 255)
+        elif subtitle_style == "style2":
+            active_color = (255, 255, 255, 255)
+        elif subtitle_style == "style3":
+            active_color = (255, 255, 255, 255)
+            current_stroke = max(3, int(font_size * 0.15))
+        elif subtitle_style == "style4":
+            base_color = (150, 150, 150, 200)
+            active_color = (255, 255, 255, 255)
+        elif subtitle_style == "style6":
+            active_color = (255, 255, 255, 255)
+            bg_box_color = (200, 0, 0, 255)
+        elif subtitle_style in ["style7", "style8"]:
+            active_color = (255, 0, 0, 255)
+            
+        color = active_color if is_active else base_color
         
         try:
             w_bbox = draw.textbbox((0, 0), word + "  ", font=font)
             word_w = w_bbox[2] - w_bbox[0]
+            word_h = w_bbox[3] - w_bbox[1]
         except AttributeError:
-            word_w, _ = draw.textsize(word + "  ", font=font)
+            word_w, word_h = draw.textsize(word + "  ", font=font)
+            word_h = font_size
+            
+        if is_active and bg_box_color:
+            padding = int(font_size * 0.1)
+            draw.rectangle([current_x - padding, y - padding, current_x + word_w - padding * 2, y + word_h + padding], fill=bg_box_color)
             
         # Dibujar sombra/borde negro
         try:
-            draw.text((current_x, y), word, font=font, fill=color, stroke_width=stroke_width, stroke_fill=(0,0,0,255))
+            draw.text((current_x, y), word, font=font, fill=color, stroke_width=current_stroke, stroke_fill=(0,0,0,255))
         except:
             # Fallback para Pillow antiguo
-            for dx in [-stroke_width, 0, stroke_width]:
-                for dy in [-stroke_width, 0, stroke_width]:
+            for dx in [-current_stroke, 0, current_stroke]:
+                for dy in [-current_stroke, 0, current_stroke]:
                     if dx != 0 or dy != 0:
                         draw.text((current_x + dx, y + dy), word, font=font, fill=(0,0,0,255))
             draw.text((current_x, y), word, font=font, fill=color)
@@ -239,9 +270,9 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
         except Exception:
             pass # Si falla no dibujamos emoji
             
-    # Dibujar barra de progreso en la parte inferior
+    # Dibujar barra de progreso en la parte inferior si está habilitada
     frame_cv = np.array(pil_img)
-    if clip_et > clip_st:
+    if show_progress_bar and clip_et > clip_st:
         import cv2
         progress = (t - clip_st) / (clip_et - clip_st)
         progress = max(0.0, min(1.0, progress))
@@ -413,7 +444,7 @@ Transcripción con marcas de tiempo (en segundos):
     return best_times
 
 
-def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, start_time="", end_time="", subtitle_scale=100):
+def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, start_time="", end_time="", subtitle_scale=100, subtitle_style="style5", anti_copyright_filter=True, anti_copyright_audio=True, bg_music="", show_progress_bar=True):
     write_progress("Iniciando Smart Split...", 5)
     print("Iniciando Smart Split...")
     
@@ -422,7 +453,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     
     # 1. Extraer audio y transcribir
     write_progress("Extrayendo audio para Groq IA...", 10)
-    temp_audio = "temp_smart_audio.m4a"
+    import tempfile
+    temp_audio = os.path.join(tempfile.gettempdir(), f"temp_smart_audio_{os.getpid()}.m4a")
     extract_audio_temp(video_path, temp_audio, s_time, e_time)
     
     write_progress("Transcribiendo audio ultrarrápido (Buscando mejores momentos)...", 15)
@@ -467,6 +499,20 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         crop_h = int(orig_w / target_ratio)
         
     generated_files = []
+    
+    # Precargar audios para evitar memory leaks y "Too many open files"
+    base_dummy_clip = None
+    if anti_copyright_audio:
+        dummy_audio_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dummy.wav')
+        if os.path.exists(dummy_audio_path):
+            _dc = AudioFileClip(dummy_audio_path)
+            base_dummy_clip = _dc.with_volume_scaled(0.005) if hasattr(_dc, 'with_volume_scaled') else _dc.volumex(0.005)
+            
+    base_bg_clip = None
+    if bg_music and os.path.exists(bg_music):
+        _bc = AudioFileClip(bg_music)
+        base_bg_clip = _bc.with_volume_scaled(0.1) if hasattr(_bc, 'with_volume_scaled') else _bc.volumex(0.1)
+        
     
     for idx, clip_info in enumerate(best_times):
         st, et, gen_title = clip_info[0], clip_info[1], clip_info[2]
@@ -567,12 +613,54 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             # Recortar y escalar a 9:16
             cropped_frame = frame[0:orig_h, x1:x2]
             cropped_frame = cv2.resize(cropped_frame, (final_w, final_h), interpolation=cv2.INTER_AREA)
+            
+            # Aplicar filtro anti-copyright visual
+            if anti_copyright_filter:
+                # Incrementar brillo 1% (multiplicando por 1.01) y sumar un valor mínimo
+                cropped_frame = cv2.convertScaleAbs(cropped_frame, alpha=1.01, beta=1)
+                # Tinte minúsculo rojizo (+1 en canal R, OpenCV usa RGB en MoviePy)
+                # MoviePy maneja los frames en RGB.
+                # Como son uint8, sumamos sin desbordar usando clip
+                cropped_frame_float = cropped_frame.astype(np.float32)
+                cropped_frame_float[:, :, 0] += 1.0 # Canal R
+                cropped_frame_float[:, :, 2] += 0.5 # Canal B
+                cropped_frame = np.clip(cropped_frame_float, 0, 255).astype(np.uint8)
                 
-            final_frame = draw_text_tiktok_style(cropped_frame, phrases, global_t, final_w, final_h, gen_title, st, et, subtitle_scale)
+            final_frame = draw_text_tiktok_style(cropped_frame, phrases, global_t, final_w, final_h, gen_title, st, et, subtitle_scale, subtitle_style, show_progress_bar)
             return final_frame
 
         processed_clip = subclip.transform(process_frame)
-        processed_clip = processed_clip.with_audio(subclip.audio)
+        
+        final_audio = subclip.audio
+        final_audio = subclip.audio
+        if base_dummy_clip is not None and final_audio is not None:
+            try:
+                import math
+                num_loops = math.ceil(subclip.duration / base_dummy_clip.duration)
+                if num_loops > 1:
+                    looped_dummy = concatenate_audioclips([base_dummy_clip] * num_loops)
+                else:
+                    looped_dummy = base_dummy_clip
+                looped_dummy = looped_dummy.subclipped(0, subclip.duration)
+                final_audio = CompositeAudioClip([final_audio, looped_dummy])
+            except Exception as e:
+                print(f"Error aplicando audio anti-copyright: {e}")
+
+        if base_bg_clip is not None and final_audio is not None:
+            try:
+                import math
+                num_loops = math.ceil(subclip.duration / base_bg_clip.duration)
+                if num_loops > 1:
+                    bg_looped = concatenate_audioclips([base_bg_clip] * num_loops)
+                else:
+                    bg_looped = base_bg_clip
+                bg_looped = bg_looped.subclipped(0, subclip.duration)
+                final_audio = CompositeAudioClip([final_audio, bg_looped])
+                print(f"Música de fondo aplicada: {bg_music}")
+            except Exception as e:
+                print(f"Error aplicando música de fondo: {e}")
+
+        processed_clip = processed_clip.with_audio(final_audio)
         
         base, ext = os.path.splitext(output_path)
         out_dir = os.path.dirname(output_path)
@@ -602,6 +690,12 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         except:
             pass
 
+    if base_dummy_clip:
+        try: base_dummy_clip.close()
+        except: pass
+    if base_bg_clip:
+        try: base_bg_clip.close()
+        except: pass
     clip.close()
 
     

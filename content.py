@@ -627,9 +627,20 @@ def get_system_specs():
 @app.route("/api/start-voice-cloner", methods=["POST"])
 def start_voice_cloner():
     global voice_process
-    cloner_dir = os.path.join(EXEC_DIR, "Clonar-voz")
-    if not os.path.exists(cloner_dir):
-        return jsonify({"success": False, "error": f"No se encontró la carpeta 'Clonar-voz' junto al programa."})
+    # Buscar la carpeta Clonar-voz en múltiples ubicaciones posibles
+    possible_paths = [
+        os.path.join(EXEC_DIR, "Clonar-voz"),                          # Junto al .exe
+        os.path.join(os.path.dirname(EXEC_DIR), "Clonar-voz"),         # Un nivel arriba del .exe
+        os.path.join(BASE_DIR, "Clonar-voz"),                          # Junto al script fuente
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Clonar-voz"),  # Directorio del archivo .py
+    ]
+    cloner_dir = None
+    for p in possible_paths:
+        if os.path.exists(p):
+            cloner_dir = p
+            break
+    if cloner_dir is None:
+        return jsonify({"success": False, "error": f"No se encontró la carpeta 'Clonar-voz'. Buscada en: {EXEC_DIR}"})
         
     # Verificar requisitos del sistema
     import ctypes
@@ -669,22 +680,24 @@ def start_voice_cloner():
             if BASE_DIR not in env.get("PATH", ""):
                 env["PATH"] = BASE_DIR + os.pathsep + env.get("PATH", "")
                 
-            # Intentar encontrar un python local o de entorno virtual
-            python_cmd = "python"
-            if not getattr(sys, 'frozen', False):
-                python_cmd = sys.executable
-            else:
-                possible_pythons = [
-                    os.path.join(cloner_dir, ".venv", "Scripts", "python.exe"),
-                    os.path.join(cloner_dir, "env", "Scripts", "python.exe"),
-                    os.path.join(EXEC_DIR, "..", ".venv", "Scripts", "python.exe"), # Entorno del desarrollador
-                ]
-                for p in possible_pythons:
-                    if os.path.exists(p):
-                        python_cmd = p
-                        break
+            # Usar Python del sistema (no venv, porque los venvs no son portables)
+            python_cmd = sys.executable if not getattr(sys, 'frozen', False) else "python"
                         
-            voice_process = subprocess.Popen([python_cmd, "app.py"], cwd=cloner_dir, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+            log_path = os.path.join(EXEC_DIR, "clonar_voz_log.txt")
+            log_file = open(log_path, "w")
+            
+            # Limpiar variables de entorno de PyInstaller para no interferir con el subproceso
+            env.pop("PYTHONPATH", None)
+            env.pop("PYTHONHOME", None)
+            
+            # Agregar la carpeta 'lib' portable con las dependencias (fastapi, uvicorn, etc.)
+            lib_dir = os.path.join(cloner_dir, "lib")
+            if os.path.isdir(lib_dir):
+                env["PYTHONPATH"] = lib_dir + os.pathsep + cloner_dir
+            else:
+                env["PYTHONPATH"] = cloner_dir
+            
+            voice_process = subprocess.Popen([python_cmd, "app.py"], cwd=cloner_dir, env=env, creationflags=subprocess.CREATE_NO_WINDOW, stdout=log_file, stderr=subprocess.STDOUT)
             
         return jsonify({"success": True, "message": "Iniciando clonador de voz..."})
     except Exception as e:
@@ -881,7 +894,7 @@ def browse():
         path = filedialog.askopenfilename(filetypes=[("Media files", "*.mp4 *.mov *.avi *.mkv *.flv *.wmv *.webm *.ts *.m4v *.mp3 *.wav *.m4a *.ogg *.flac *.wma")])
     elif type_file == 'media':
         path = filedialog.askopenfilename(filetypes=[("Media files", "*.mp4 *.mov *.avi *.mkv *.flv *.wmv *.webm *.ts *.m4v *.mp3 *.wav *.m4a *.ogg *.flac *.wma")])
-    elif type_file == 'audio':
+    elif type_file == 'audio' or type_file == 'bg_music_smart':
         path = filedialog.askopenfilename(filetypes=[("Audio files", "*.mp3 *.wav *.m4a *.ogg *.flac *.wma")])
     else:
         path = filedialog.askopenfilename(filetypes=[("Image files", "*.png *.jpg *.jpeg")])
@@ -1101,8 +1114,17 @@ def run_smart_split_thread(data):
         output_path = os.path.join(output_dir, filename)
         
         subtitle_scale = float(data.get('subtitle_scale', 100))
-        log(f"Iniciando procesamiento de Smart Split (Escala Subtítulos: {subtitle_scale}%)...")
-        result_paths = smart_editor.process_smart_split(source, output_path, clip_duration, num_clips, start_time, end_time, subtitle_scale)
+        subtitle_style = data.get('style', 'style5')
+        anti_copyright_filter = data.get('anti_copyright_filter', True)
+        anti_copyright_audio = data.get('anti_copyright_audio', True)
+        bg_music = data.get('bg_music', '')
+        show_progress_bar = data.get('show_progress_bar', True)
+        
+        log(f"Iniciando procesamiento de Smart Split (Escala: {subtitle_scale}%, Estilo: {subtitle_style}, Filtro AC: {anti_copyright_filter}, Audio AC: {anti_copyright_audio}, Barra Progreso: {show_progress_bar})...")
+        result_paths = smart_editor.process_smart_split(
+            source, output_path, clip_duration, num_clips, start_time, end_time, 
+            subtitle_scale, subtitle_style, anti_copyright_filter, anti_copyright_audio, bg_music, show_progress_bar
+        )
         
         if result_paths:
             log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips.")

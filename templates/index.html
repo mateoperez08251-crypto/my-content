@@ -1977,7 +1977,7 @@
                     </style>
                     <div class="presets-gallery" style="display: flex; gap: 15px; padding-bottom: 15px; overflow-x: auto; scroll-snap-type: x mandatory; align-items: center; padding-top: 10px; margin-left: -5px; padding-left: 5px;">
                         <div class="subtitle-option active" onclick="selectSubtitleStyle('style1', this)">
-                            <img src="/static/presets/style1.webp" alt="Estilo 1">
+                            <img src="/static/presets/Neon o Brillante.webp" alt="Estilo 1">
                         </div>
                         <div class="subtitle-option" onclick="selectSubtitleStyle('style2', this)">
                             <img src="/static/presets/style2.webp" alt="Estilo 2">
@@ -2023,7 +2023,29 @@
                                 <input type="checkbox" id="smart_anti_copyright_audio" checked style="width: 18px; height: 18px; accent-color: var(--accent-primary);">
                                 <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Pista de audio inaudible de fondo (-45dB)</span>
                             </label>
+                            <label class="custom-checkbox" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="show_progress_bar" checked style="width: 18px; height: 18px; accent-color: var(--accent-primary);">
+                                <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Mostrar Barra de Progreso en el Video</span>
+                            </label>
                         </div>
+                    </div>
+                    
+                    <!-- Background Music Picker -->
+                    <div style="margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+                        <label style="margin:0; margin-bottom: 10px; display: block; color: var(--accent-primary);"><i class="ph-duotone ph-music-notes"></i> Música de Fondo (Auto-Ducking)</label>
+                        <div style="display: flex; gap: 10px; align-items: stretch;">
+                            <div class="modern-file-picker" onclick="browseFile('bg_music_smart')" style="flex: 1;">
+                                <div class="picker-icon"><i class="ph-duotone ph-music-note"></i></div>
+                                <div class="picker-content">
+                                    <span class="picker-title">Añadir Música (MP3/WAV) - Opcional</span>
+                                    <input type="text" id="bg_music_smart" name="bg_music_smart" class="picker-input" placeholder="Haz clic para explorar..." readonly>
+                                </div>
+                            </div>
+                            <button type="button" onclick="document.getElementById('bg_music_smart').value = '';" title="Quitar archivo de música" style="background: rgba(255,68,68,0.1); border: 1px solid rgba(255,68,68,0.3); color: #ff4444; border-radius: 8px; width: 50px; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: 0.2s;" onmouseover="this.style.background='rgba(255,68,68,0.2)'" onmouseout="this.style.background='rgba(255,68,68,0.1)'">
+                                <i class="ph-bold ph-trash" style="font-size: 1.3rem;"></i>
+                            </button>
+                        </div>
+                        <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 8px;">La IA ajustará automáticamente el volumen para que las voces se escuchen claras.</small>
                     </div>
                 </div>
             </div>
@@ -2597,6 +2619,7 @@
             const subir_youtube_smart = document.getElementById('subir_youtube_smart').value;
             const subir_facebook_smart = document.getElementById('subir_facebook_smart').value;
             const smart_split_title = document.getElementById('smart_split_title') ? document.getElementById('smart_split_title').value : '';
+            const bg_music_smart = document.getElementById('bg_music_smart') ? document.getElementById('bg_music_smart').value : '';
             try {
                 const res = await fetch('/api/smart_split', {
                     method: 'POST',
@@ -2612,6 +2635,8 @@
                         subtitle_scale: document.getElementById('subtitle_scale') ? document.getElementById('subtitle_scale').value : 100,
                         anti_copyright_filter: document.getElementById('smart_anti_copyright_filter') ? document.getElementById('smart_anti_copyright_filter').checked : true,
                         anti_copyright_audio: document.getElementById('smart_anti_copyright_audio') ? document.getElementById('smart_anti_copyright_audio').checked : true,
+                        show_progress_bar: document.getElementById('show_progress_bar') ? document.getElementById('show_progress_bar').checked : true,
+                        bg_music: bg_music_smart,
                         subir_tiktok: subir_tiktok_smart === 'on',
                         subir_youtube: subir_youtube_smart === 'on',
                         subir_facebook: subir_facebook_smart === 'on'
@@ -2917,7 +2942,8 @@
                 const res = await fetch(`/api/browse?type=${type}`);
                 const data = await res.json();
                 if (data.path) {
-                    document.getElementById(type + '_path').value = data.path;
+                    const el = document.getElementById(type + '_path') || document.getElementById(type);
+                    if (el) el.value = data.path;
                 }
             } catch (err) {
                 appendLog("Error al abrir explorador: " + err, "error");
