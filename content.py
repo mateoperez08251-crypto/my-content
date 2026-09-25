@@ -81,6 +81,11 @@ import threading
 threading.Thread(target=init_firebase_async, daemon=True).start()
 
 app = Flask(__name__)
+try:
+    from api_clonador_flask import clonador_bp
+    app.register_blueprint(clonador_bp)
+except Exception as e:
+    print(f"Error cargando el clonador de voz nativo: {e}")
 
 # Estado Global
 logs_queue = []
