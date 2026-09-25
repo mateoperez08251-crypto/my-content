@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clonador de voz local · Qwen3-TTS</title>
+<link rel="stylesheet" href="/static//static/clonador_style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+</head>
+<body>
+
+<header class="cabecera">
+  <div class="marca">
+    <span class="logo">🎙️</span>
+    <div>
+      <h1>Clonador de voz local</h1>
+      <p class="sub">Qwen3-TTS 1.7B · llama.cpp · CPU y GPU · sin conexión</p>
+    </div>
+  </div>
+  <div id="pastillas" class="pastillas"></div>
+</header>
+
+<div id="aviso" class="aviso oculto"></div>
+
+<!-- ========== Primer arranque: descarga de los modelos ========== -->
+<section id="panel-modelo" class="tarjeta panel-modelo oculto">
+  <h2>Primer arranque · descargar el modelo</h2>
+  <p class="ayuda">
+    La aplicación no incluye los pesos del modelo. Hacen falta <b>dos archivos</b>
+    del repositorio oficial en Hugging Face: el modelo principal y su
+    <i>mmproj</i> (el vocoder que convierte los tokens en sonido).
+    Se descargan una sola vez y quedan en la carpeta <code>modelo/</code>.
+  </p>
+
+  <div class="campos">
+    <label>
+      <span>Modelo principal</span>
+      <select id="quant-modelo"></select>
+      <small>Q4_K_M va de sobra para la mayoría de equipos</small>
+    </label>
+    <label>
+      <span>Proyector / vocoder (mmproj)</span>
+      <select id="quant-mmproj"></select>
+      <small>Necesario: sin él no hay audio</small>
+    </label>
+  </div>
+
+  <div class="acciones">
+    <button id="btn-descargar-modelo" class="btn btn-primario">Descargar ahora</button>
+    <button id="btn-cancelar-descarga" class="btn btn-peligro oculto">Cancelar</button>
+    <a id="enlace-hf" class="btn btn-sec" target="_blank" rel="noopener">Ver en Hugging Face</a>
+  </div>
+
+  <div id="progreso-modelo" class="progreso oculto">
+    <div class="barra"><div id="barra-modelo"></div></div>
+    <span id="texto-modelo"></span>
+  </div>
+
+  <p class="ayuda pie-modelo">
+    ¿Prefieres la terminal? <code>python descargar_modelo.py</code> hace lo mismo,
+    y también reanuda una descarga interrumpida.
+  </p>
+</section>
+
+<main class="rejilla">
+
+  <!-- ================= VOCES ================= -->
+  <section class="tarjeta">
+    <h2>1 · Voz de referencia</h2>
+    <p class="ayuda">
+      Sube o graba entre 5 y 15 segundos de voz limpia. Sin referencia, el modelo
+      usa su voz por defecto.
+    </p>
+
+    <div class="pestanas" role="tablist">
+      <button class="pestana activa" data-panel="p-biblioteca" role="tab">Biblioteca</button>
+      <button class="pestana" data-panel="p-grabar" role="tab">Grabar</button>
+      <button class="pestana" data-panel="p-subir" role="tab">Subir</button>
+    </div>
+
+    <div id="p-biblioteca" class="panel">
+      <div id="lista-voces" class="lista-voces"></div>
+    </div>
+
+    <div id="p-grabar" class="panel oculto">
+      <div class="grabadora">
+        <button id="btn-grabar" class="btn btn-grabar">● Grabar</button>
+        <span id="cronometro" class="cronometro">0.0 s</span>
+        <canvas id="vumetro" width="240" height="40"></canvas>
+      </div>
+      <audio id="previo-grabacion" controls class="oculto"></audio>
+      <div id="guardar-grabacion" class="oculto">
+        <input id="nombre-grabacion" type="text" placeholder="Nombre de la voz" maxlength="60">
+        <input id="trans-grabacion" type="text" placeholder="Transcripción del audio (opcional, mejora la clonación)" maxlength="300">
+        <button id="btn-guardar-grabacion" class="btn btn-primario">Guardar voz</button>
+      </div>
+    </div>
+
+    <div id="p-subir" class="panel oculto">
+      <label class="zona-archivo" id="zona-archivo">
+        <input id="archivo-voz" type="file" accept="audio/*,video/*" hidden>
+        <span id="texto-archivo">Arrastra un audio aquí o haz clic para elegirlo</span>
+        <small>wav · mp3 · m4a · ogg · flac · webm</small>
+      </label>
+      <input id="nombre-archivo-voz" type="text" placeholder="Nombre de la voz" maxlength="60">
+      <input id="trans-archivo-voz" type="text" placeholder="Transcripción del audio (opcional, mejora la clonación)" maxlength="300">
+      <button id="btn-subir-voz" class="btn btn-primario" disabled>Añadir a la biblioteca</button>
+    </div>
+  </section>
+
+  <!-- ================= TEXTO ================= -->
+  <section class="tarjeta">
+    <h2>2 · Texto a sintetizar</h2>
+    <textarea id="texto" rows="8" maxlength="20000"
+      placeholder="Escribe aquí lo que quieres que diga la voz…"></textarea>
+    <div class="fila-info">
+      <span id="contador">0 caracteres · 0 bloques · ≈0 s</span>
+      <button id="btn-ejemplo" class="btn-enlace">Insertar ejemplo</button>
+    </div>
+
+    <div class="campos">
+      <label>
+        <span>Idioma</span>
+        <select id="idioma"></select>
+      </label>
+      <label>
+        <span>Procesamiento</span>
+        <select id="dispositivo"></select>
+      </label>
+    </div>
+
+    <details class="avanzado">
+      <summary>Ajustes avanzados</summary>
+      <div class="campos campos-avanzados">
+        <label>
+          <span>Temperatura <b id="v-temp">0.80</b></span>
+          <input id="temp" type="range" min="0.1" max="1.5" step="0.05" value="0.8">
+          <small>Baja = estable · Alta = expresiva</small>
+        </label>
+        <label>
+          <span>Top-P <b id="v-top_p">0.95</b></span>
+          <input id="top_p" type="range" min="0.1" max="1" step="0.01" value="0.95">
+          <small>Diversidad del muestreo</small>
+        </label>
+        <label>
+          <span>Top-K</span>
+          <input id="top_k" type="number" min="0" max="200" value="40">
+          <small>0 = desactivado</small>
+        </label>
+        <label>
+          <span>Semilla</span>
+          <input id="semilla" type="number" min="-1" value="-1">
+          <small>-1 = aleatoria en cada intento</small>
+        </label>
+        <label>
+          <span>Caracteres por bloque</span>
+          <input id="chars_por_bloque" type="number" min="80" max="600" step="10" value="280">
+          <small>El texto largo se divide y se une al final</small>
+        </label>
+        <label>
+          <span>Pausa entre bloques (ms)</span>
+          <input id="pausa_ms" type="number" min="0" max="2000" step="25" value="150">
+          <small>Silencio insertado en las uniones</small>
+        </label>
+        <label>
+          <span>Máx. frames por bloque</span>
+          <input id="max_frames" type="number" min="120" max="6000" step="60" value="1200">
+          <small>12 frames = 1 segundo de audio</small>
+        </label>
+        <label>
+          <span>Hilos de CPU</span>
+          <input id="hilos" type="number" min="0" max="128" value="0">
+          <small>0 = automático</small>
+        </label>
+      </div>
+      <button id="btn-guardar-ajustes" class="btn btn-sec">Guardar como predeterminados</button>
+    </details>
+
+    <div class="acciones">
+      <button id="btn-generar" class="btn btn-primario btn-grande">Generar audio</button>
+      <button id="btn-cancelar" class="btn btn-peligro oculto">Cancelar</button>
+    </div>
+
+    <div id="progreso" class="progreso oculto">
+      <div class="barra"><div id="barra-relleno"></div></div>
+      <span id="texto-progreso"></span>
+    </div>
+
+    <details id="caja-consola" class="consola-caja oculto">
+      <summary>Registro de llama.cpp</summary>
+      <pre id="consola" class="consola"></pre>
+    </details>
+
+    <div id="resultado" class="resultado oculto">
+      <audio id="reproductor" controls></audio>
+      <div class="fila-resultado">
+        <span id="info-resultado"></span>
+        <a id="descargar" class="btn btn-sec" download>Descargar WAV</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= HISTORIAL ================= -->
+  <section class="tarjeta tarjeta-ancha">
+    <h2>3 · Audios generados</h2>
+    <div id="historial" class="historial"></div>
+  </section>
+
+</main>
+
+<script src="/static//static/clonador_app.js"></script>
+</body>
+</html>

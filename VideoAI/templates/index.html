@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VideoAI — Generador de Video con IA Local</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.0.3/src/duotone/style.css">
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --surface: #12121a;
+            --surface2: #1a1a28;
+            --border: rgba(255,255,255,0.08);
+            --text: #e8e8f0;
+            --muted: rgba(255,255,255,0.45);
+            --accent: #6c5ce7;
+            --accent2: #a29bfe;
+            --green: #00b894;
+            --red: #ff6b6b;
+            --orange: #fdcb6e;
+            --gradient: linear-gradient(135deg, #6c5ce7, #a29bfe, #00b894);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+        /* Header */
+        .header { padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .logo { font-size: 1.6rem; font-weight: 800; background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .gpu-badge { background: var(--surface2); padding: 8px 16px; border-radius: 20px; font-size: 0.8rem; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); }
+        .gpu-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Main Layout */
+        .main { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 70px); }
+
+        /* Sidebar */
+        .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+        .nav-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 15px 0 8px 10px; }
+        .nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 15px; border-radius: 10px; cursor: pointer; transition: 0.2s; color: var(--muted); font-size: 0.9rem; }
+        .nav-item:hover { background: rgba(108,92,231,0.1); color: var(--text); }
+        .nav-item.active { background: rgba(108,92,231,0.15); color: var(--accent2); border: 1px solid rgba(108,92,231,0.2); }
+        .nav-item i { font-size: 1.3rem; }
+
+        /* Content */
+        .content { padding: 30px; overflow-y: auto; }
+        .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 25px; margin-bottom: 20px; }
+        .panel-title { font-size: 1.2rem; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .panel-title i { color: var(--accent); }
+
+        /* Forms */
+        .form-group { margin-bottom: 18px; }
+        .form-group label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+        .form-control { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 15px; color: var(--text); font-size: 0.95rem; font-family: inherit; transition: 0.2s; }
+        .form-control:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 15px rgba(108,92,231,0.1); }
+        textarea.form-control { min-height: 100px; resize: vertical; }
+        select.form-control { appearance: none; cursor: pointer; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+
+        /* Buttons */
+        .btn { padding: 12px 24px; border: none; border-radius: 10px; font-family: inherit; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-primary { background: var(--gradient); color: white; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(108,92,231,0.3); }
+        .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+        .btn-danger { background: rgba(255,107,107,0.15); color: var(--red); border: 1px solid rgba(255,107,107,0.2); }
+
+        /* Upload zone */
+        .upload-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: 0.2s; }
+        .upload-zone:hover { border-color: var(--accent); background: rgba(108,92,231,0.05); }
+        .upload-zone i { font-size: 2.5rem; color: var(--accent); margin-bottom: 10px; display: block; }
+        .upload-zone input[type="file"] { display: none; }
+
+        /* Progress */
+        .progress-container { background: var(--bg); border-radius: 8px; height: 8px; overflow: hidden; margin: 10px 0; }
+        .progress-bar { height: 100%; background: var(--gradient); transition: width 0.5s ease; border-radius: 8px; }
+        .task-status { padding: 15px; background: var(--surface2); border-radius: 10px; margin-top: 15px; font-size: 0.9rem; display: none; }
+        .task-status.active { display: block; }
+
+        /* Video cards */
+        .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
+        .video-card { background: var(--surface2); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); transition: 0.2s; }
+        .video-card:hover { border-color: var(--accent); transform: translateY(-3px); }
+        .video-card video { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #000; }
+        .video-card-info { padding: 12px 15px; display: flex; justify-content: space-between; align-items: center; }
+        .video-card-name { font-size: 0.85rem; font-weight: 500; }
+        .video-card-size { font-size: 0.75rem; color: var(--muted); }
+        .video-card-actions { display: flex; gap: 8px; }
+        .video-card-actions button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; transition: 0.2s; }
+        .video-card-actions button:hover { color: var(--accent); }
+
+        /* Model cards */
+        .model-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .model-info h3 { font-size: 1rem; margin-bottom: 4px; }
+        .model-info p { font-size: 0.8rem; color: var(--muted); }
+        .model-badge { font-size: 0.75rem; padding: 4px 10px; border-radius: 12px; font-weight: 600; }
+        .badge-installed { background: rgba(0,184,148,0.15); color: var(--green); }
+        .badge-missing { background: rgba(255,107,107,0.15); color: var(--red); }
+
+        /* Section visibility */
+        .section { display: none; }
+        .section.active { display: block; }
+
+        /* Toast */
+        .toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--accent); border-radius: 12px; padding: 15px 20px; font-size: 0.9rem; z-index: 999; transform: translateY(100px); opacity: 0; transition: 0.3s; }
+        .toast.show { transform: translateY(0); opacity: 1; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">⚡ VideoAI</div>
+        <div class="gpu-badge">
+            <div class="gpu-dot" id="gpuDot"></div>
+            <span id="gpuName">Detectando GPU...</span>
+            <span style="color:var(--accent); font-weight:600;" id="gpuVram"></span>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="sidebar">
+            <div class="nav-title">Generación</div>
+            <div class="nav-item active" onclick="showSection('t2v')"><i class="ph-duotone ph-film-reel"></i> Text-to-Video</div>
+            <div class="nav-title">Edición</div>
+            <div class="nav-item" onclick="showSection('upscale')"><i class="ph-duotone ph-arrows-out"></i> Upscaling 4K</div>
+            <div class="nav-item" onclick="showSection('slowmo')"><i class="ph-duotone ph-clock-clockwise"></i> Cámara Lenta</div>
+            <div class="nav-item" onclick="showSection('rembg')"><i class="ph-duotone ph-scissors"></i> Quitar Fondo</div>
+            <div class="nav-title">Sistema</div>
+            <div class="nav-item" onclick="showSection('outputs')"><i class="ph-duotone ph-folder-open"></i> Mis Videos</div>
+            <div class="nav-item" onclick="showSection('models')"><i class="ph-duotone ph-brain"></i> Modelos IA</div>
+            <div style="flex:1;"></div>
+            <div class="nav-item" onclick="freeVRAM()" style="color:var(--orange);"><i class="ph-duotone ph-memory"></i> Liberar VRAM</div>
+        </div>
+
+        <div class="content">
+            <!-- TEXT TO VIDEO -->
+            <div class="section active" id="section-t2v">
+                <div class="panel">
+                    <div class="panel-title"><i class="ph-duotone ph-film-reel"></i> Generar Video desde Texto</div>
+                    <div class="form-group">
+                        <label>Prompt (describe tu video)</label>
+                        <textarea class="form-control" id="t2vPrompt" placeholder="A majestic eagle soaring over snow-capped mountains at golden hour, cinematic, 4K, smooth camera movement"></textarea>
+                    </div>
+                    <div class="grid-3">
+                        <div class="form-group">
+                            <label>Resolución</label>
+                            <select class="form-control" id="t2vResolution">
+                                <option value="854x480">854×480 (Rápido)</option>
+                                <option value="1280x720" selected>1280×720 (HD)</option>
+                                <option value="1920x1080">1920×1080 (Full HD)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Frames (duración)</label>
+                            <select class="form-control" id="t2vFrames">
+                                <option value="25">25 (~1 seg)</option>
+                                <option value="49" selected>49 (~2 seg)</option>
+                                <option value="97">97 (~4 seg)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Pasos de inferencia</label>
+                            <input type="number" class="form-control" id="t2vSteps" value="30" min="10" max="100">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:10px;">
+                        <button class="btn btn-primary" onclick="generateT2V()"><i class="ph-duotone ph-magic-wand"></i> Generar Video</button>
+                    </div>
+                    <div class="task-status" id="t2vStatus">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span id="t2vMessage">Procesando...</span>
+                            <span id="t2vPercent" style="color:var(--accent); font-weight:700;">0%</span>
+                        </div>
+                        <div class="progress-container"><div class="progress-bar" id="t2vProgress"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- UPSCALE -->
+            <div class="section" id="section-upscale">
+                <div class="panel">
+                    <div class="panel-title"><i class="ph-duotone ph-arrows-out"></i> Upscaling a 4K con IA</div>
+                    <div class="upload-zone" onclick="document.getElementById('upscaleFile').click()">
+                        <i class="ph-duotone ph-upload-simple"></i>
+                        <div>Arrastra o haz clic para subir un video</div>
+                        <div style="font-size:0.8rem;color:var(--muted);margin-top:5px;">MP4, MOV, AVI — Máximo 500MB</div>
+                        <input type="file" id="upscaleFile" accept="video/*">
+                    </div>
+                    <div class="grid-2" style="margin-top:15px;">
+                        <div class="form-group">
+                            <label>Factor de escala</label>
+                            <select class="form-control" id="upscaleScale">
+                                <option value="2">2x</option>
+                                <option value="4" selected>4x (Recomendado)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end;"><button class="btn btn-primary" onclick="startUpscale()"><i class="ph-duotone ph-arrows-out"></i> Escalar Video</button></div>
+                    <div class="task-status" id="upscaleStatus">
+                        <div style="display:flex; justify-content:space-between;"><span id="upscaleMessage">Procesando...</span><span id="upscalePercent" style="color:var(--accent); font-weight:700;">0%</span></div>
+                        <div class="progress-container"><div class="progress-bar" id="upscaleProgress"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SLOW MO -->
+            <div class="section" id="section-slowmo">
+                <div class="panel">
+                    <div class="panel-title"><i class="ph-duotone ph-clock-clockwise"></i> Cámara Lenta con IA</div>
+                    <div class="upload-zone" onclick="document.getElementById('slowmoFile').click()">
+                        <i class="ph-duotone ph-upload-simple"></i>
+                        <div>Sube el video que quieres en cámara lenta</div>
+                        <input type="file" id="slowmoFile" accept="video/*">
+                    </div>
+                    <div class="grid-2" style="margin-top:15px;">
+                        <div class="form-group">
+                            <label>Multiplicador de frames</label>
+                            <select class="form-control" id="slowmoMultiplier">
+                                <option value="2" selected>2x (30fps → 60fps)</option>
+                                <option value="4">4x (30fps → 120fps)</option>
+                                <option value="8">8x (30fps → 240fps)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end;"><button class="btn btn-primary" onclick="startSlowmo()"><i class="ph-duotone ph-clock-clockwise"></i> Crear Cámara Lenta</button></div>
+                    <div class="task-status" id="slowmoStatus">
+                        <div style="display:flex; justify-content:space-between;"><span id="slowmoMessage">Procesando...</span><span id="slowmoPercent" style="color:var(--accent); font-weight:700;">0%</span></div>
+                        <div class="progress-container"><div class="progress-bar" id="slowmoProgress"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- REMOVE BG -->
+            <div class="section" id="section-rembg">
+                <div class="panel">
+                    <div class="panel-title"><i class="ph-duotone ph-scissors"></i> Eliminar Fondo del Video</div>
+                    <div class="upload-zone" onclick="document.getElementById('rembgFile').click()">
+                        <i class="ph-duotone ph-upload-simple"></i>
+                        <div>Sube el video para quitar el fondo</div>
+                        <input type="file" id="rembgFile" accept="video/*">
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:15px;"><button class="btn btn-primary" onclick="startRemoveBg()"><i class="ph-duotone ph-scissors"></i> Quitar Fondo</button></div>
+                    <div class="task-status" id="rembgStatus">
+                        <div style="display:flex; justify-content:space-between;"><span id="rembgMessage">Procesando...</span><span id="rembgPercent" style="color:var(--accent); font-weight:700;">0%</span></div>
+                        <div class="progress-container"><div class="progress-bar" id="rembgProgress"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OUTPUTS -->
+            <div class="section" id="section-outputs">
+                <div class="panel">
+                    <div class="panel-title"><i class="ph-duotone ph-folder-open"></i> Mis Videos Generados</div>
+                    <div class="video-grid" id="outputsGrid">
+                        <div style="text-align:center; color:var(--muted); grid-column: 1/-1; padding:40px;">Cargando...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODELS -->
+            <div class="section" id="section-models">
+                <div class="panel">
+                    <div class="panel-title"><i class="ph-duotone ph-brain"></i> Modelos de IA Instalados</div>
+                    <div id="modelsList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+<script>
+// Navigation
+function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('section-' + id).classList.add('active');
+    event.currentTarget.classList.add('active');
+    if (id === 'outputs') loadOutputs();
+    if (id === 'models') loadModels();
+}
+
+// Toast
+function showToast(msg, duration = 3000) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), duration);
+}
+
+// Status
+async function loadStatus() {
+    try {
+        const r = await fetch('/api/status');
+        const d = await r.json();
+        document.getElementById('gpuName').textContent = d.gpu.name || 'Sin GPU';
+        document.getElementById('gpuVram').textContent = d.gpu.available ? `${d.gpu.vram_free}/${d.gpu.vram_total} GB` : '';
+        document.getElementById('gpuDot').style.background = d.gpu.available ? 'var(--green)' : 'var(--red)';
+    } catch(e) {}
+}
+loadStatus();
+setInterval(loadStatus, 10000);
+
+// Poll task
+function pollTask(taskId, prefix) {
+    const statusEl = document.getElementById(prefix + 'Status');
+    const msgEl = document.getElementById(prefix + 'Message');
+    const pctEl = document.getElementById(prefix + 'Percent');
+    const barEl = document.getElementById(prefix + 'Progress');
+    statusEl.classList.add('active');
+
+    const interval = setInterval(async () => {
+        try {
+            const r = await fetch(`/api/task/${taskId}`);
+            const d = await r.json();
+            msgEl.textContent = d.message;
+            pctEl.textContent = d.progress + '%';
+            barEl.style.width = d.progress + '%';
+
+            if (d.status === 'done') {
+                clearInterval(interval);
+                showToast('✅ ' + d.message);
+                loadStatus();
+                if (d.output_file) {
+                    msgEl.innerHTML = `${d.message} <a href="/api/outputs/${d.output_file}" target="_blank" style="color:var(--accent2);margin-left:10px;">⬇️ Descargar</a>`;
+                }
+            } else if (d.status === 'error') {
+                clearInterval(interval);
+                showToast('❌ Error: ' + d.message, 5000);
+                pctEl.style.color = 'var(--red)';
+                pctEl.textContent = 'Error';
+            }
+        } catch(e) { clearInterval(interval); }
+    }, 1000);
+}
+
+// Text to Video
+async function generateT2V() {
+    const prompt = document.getElementById('t2vPrompt').value.trim();
+    if (!prompt) { showToast('Escribe un prompt primero'); return; }
+    const [w, h] = document.getElementById('t2vResolution').value.split('x').map(Number);
+    const body = { prompt, width: w, height: h, num_frames: +document.getElementById('t2vFrames').value, steps: +document.getElementById('t2vSteps').value };
+    const r = await fetch('/api/generate/text-to-video', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (d.task_id) pollTask(d.task_id, 't2v');
+}
+
+// Upscale
+async function startUpscale() {
+    const file = document.getElementById('upscaleFile').files[0];
+    if (!file) { showToast('Selecciona un video primero'); return; }
+    const fd = new FormData();
+    fd.append('video', file);
+    fd.append('scale', document.getElementById('upscaleScale').value);
+    const r = await fetch('/api/upscale', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.task_id) pollTask(d.task_id, 'upscale');
+}
+
+// Slow Motion
+async function startSlowmo() {
+    const file = document.getElementById('slowmoFile').files[0];
+    if (!file) { showToast('Selecciona un video primero'); return; }
+    const fd = new FormData();
+    fd.append('video', file);
+    fd.append('multiplier', document.getElementById('slowmoMultiplier').value);
+    const r = await fetch('/api/interpolate', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.task_id) pollTask(d.task_id, 'slowmo');
+}
+
+// Remove Background
+async function startRemoveBg() {
+    const file = document.getElementById('rembgFile').files[0];
+    if (!file) { showToast('Selecciona un video primero'); return; }
+    const fd = new FormData();
+    fd.append('video', file);
+    const r = await fetch('/api/remove-background', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.task_id) pollTask(d.task_id, 'rembg');
+}
+
+// Outputs
+async function loadOutputs() {
+    const r = await fetch('/api/outputs');
+    const files = await r.json();
+    const grid = document.getElementById('outputsGrid');
+    if (!files.length) { grid.innerHTML = '<div style="text-align:center;color:var(--muted);grid-column:1/-1;padding:40px;">No hay videos generados aún.</div>'; return; }
+    grid.innerHTML = files.map(f => `
+        <div class="video-card">
+            <video src="/api/outputs/${f.name}" controls preload="metadata"></video>
+            <div class="video-card-info">
+                <div><div class="video-card-name">${f.name}</div><div class="video-card-size">${f.size_mb} MB · ${f.date}</div></div>
+                <div class="video-card-actions">
+                    <button onclick="window.open('/api/outputs/${f.name}')"><i class="ph-duotone ph-download-simple"></i></button>
+                    <button onclick="deleteOutput('${f.name}')"><i class="ph-duotone ph-trash"></i></button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function deleteOutput(name) {
+    await fetch(`/api/outputs/${name}`, { method: 'DELETE' });
+    loadOutputs();
+    showToast('Video eliminado');
+}
+
+// Models
+async function loadModels() {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const list = document.getElementById('modelsList');
+    list.innerHTML = Object.entries(d.models).map(([k, m]) => `
+        <div class="model-card" id="model-${k}" style="flex-direction:column; align-items:stretch;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div class="model-info">
+                    <h3>${m.name}</h3>
+                    <p>${m.description} · VRAM: ${m.vram} · Tamaño: ${m.size}</p>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    ${m.installed
+                        ? `<span class="model-badge badge-installed">✓ Instalado</span>
+                           <button class="btn btn-danger" onclick="deleteModel('${k}')" style="padding:8px 14px; font-size:0.8rem;">
+                               <i class="ph-duotone ph-trash"></i> Eliminar
+                           </button>`
+                        : m.downloading
+                            ? `<span class="model-badge" style="background:rgba(108,92,231,0.15);color:var(--accent2);">⏳ Descargando...</span>`
+                            : `<button class="btn btn-primary" onclick="downloadModel('${k}')" style="padding:8px 16px; font-size:0.85rem;">
+                                   <i class="ph-duotone ph-download-simple"></i> Descargar
+                               </button>`
+                    }
+                </div>
+            </div>
+            <div id="dl-status-${k}" style="display:none; margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
+                    <span id="dl-msg-${k}">Iniciando...</span>
+                    <span id="dl-pct-${k}" style="color:var(--accent);font-weight:700;">0%</span>
+                </div>
+                <div class="progress-container"><div class="progress-bar" id="dl-bar-${k}"></div></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function downloadModel(key) {
+    const statusEl = document.getElementById('dl-status-' + key);
+    const msgEl = document.getElementById('dl-msg-' + key);
+    const pctEl = document.getElementById('dl-pct-' + key);
+    const barEl = document.getElementById('dl-bar-' + key);
+    statusEl.style.display = 'block';
+    msgEl.textContent = 'Iniciando descarga...';
+
+    await fetch(`/api/models/${key}/download`, { method: 'POST' });
+
+    const interval = setInterval(async () => {
+        try {
+            const r = await fetch(`/api/models/${key}/download-status`);
+            const d = await r.json();
+            msgEl.textContent = d.message;
+            pctEl.textContent = d.progress + '%';
+            barEl.style.width = d.progress + '%';
+
+            if (!d.active) {
+                clearInterval(interval);
+                if (d.error) {
+                    showToast('❌ Error: ' + d.error, 5000);
+                    pctEl.style.color = 'var(--red)';
+                } else {
+                    showToast('✅ Modelo descargado correctamente');
+                }
+                setTimeout(() => loadModels(), 1500);
+            }
+        } catch(e) { clearInterval(interval); }
+    }, 2000);
+}
+
+async function deleteModel(key) {
+    if (!confirm('¿Eliminar este modelo? Tendrás que descargarlo de nuevo.')) return;
+    await fetch(`/api/models/${key}`, { method: 'DELETE' });
+    showToast('Modelo eliminado');
+    loadModels();
+}
+
+// Free VRAM
+async function freeVRAM() {
+    await fetch('/api/free-vram', { method: 'POST' });
+    showToast('VRAM liberada');
+    loadStatus();
+}
+</script>
+</body>
+</html>
