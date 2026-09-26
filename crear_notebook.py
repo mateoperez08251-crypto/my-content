@@ -1,0 +1,204 @@
+import json
+
+notebook = {
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# 🎬 Entrenador del Director IA (Unsloth + LLaMA 3)\n",
+        "Esta libreta está configurada con las versiones exactas para evitar errores de compatibilidad.\n",
+        "Solo necesitas correr las celdas una por una."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "from google.colab import drive\n",
+        "drive.mount('/content/drive')"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# 1. Instalar dependencias actualizadas\n",
+        "!pip install \"unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git\"\n",
+        "!pip install --no-deps trl peft accelerate bitsandbytes"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "from unsloth import FastLanguageModel\n",
+        "import torch\n",
+        "max_seq_length = 2048\n",
+        "dtype = None\n",
+        "load_in_4bit = True\n",
+        "\n",
+        "# 2. Cargar el modelo base LLaMA 3 8B Instruct\n",
+        "model, tokenizer = FastLanguageModel.from_pretrained(\n",
+        "    model_name = \"unsloth/llama-3-8b-Instruct-bnb-4bit\",\n",
+        "    max_seq_length = max_seq_length,\n",
+        "    dtype = dtype,\n",
+        "    load_in_4bit = load_in_4bit,\n",
+        ")"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# 3. Configurar LoRA (Los adaptadores que se entrenarán)\n",
+        "model = FastLanguageModel.get_peft_model(\n",
+        "    model,\n",
+        "    r = 16,\n",
+        "    target_modules = [\"q_proj\", \"k_proj\", \"v_proj\", \"o_proj\",\n",
+        "                      \"gate_proj\", \"up_proj\", \"down_proj\",],\n",
+        "    lora_alpha = 16,\n",
+        "    lora_dropout = 0, \n",
+        "    bias = \"none\",\n",
+        "    use_gradient_checkpointing = \"unsloth\",\n",
+        "    random_state = 3407,\n",
+        "    use_rslora = False,\n",
+        "    loftq_config = None,\n",
+        ")"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# 4. Formato de Prompt (Adaptado para Frutinovela sin campo input)\n",
+        "alpaca_prompt = \"\"\"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n",
+        "\n",
+        "### Instruction:\n",
+        "{}\n",
+        "\n",
+        "### Response:\n",
+        "{}```\"\"\"\n",
+        "\n",
+        "EOS_TOKEN = tokenizer.eos_token # Token de fin de secuencia\n",
+        "def formatting_prompts_func(examples):\n",
+        "    instructions = examples[\"instruction\"]\n",
+        "    outputs      = examples[\"output\"]\n",
+        "    texts = []\n",
+        "    for instruction, output in zip(instructions, outputs):\n",
+        "        text = alpaca_prompt.format(instruction, output) + EOS_TOKEN\n",
+        "        texts.append(text)\n",
+        "    return { \"text\" : texts, }"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# 5. Cargar Dataset (Asegúrate de que dataset_director.jsonl esté en Drive)\n",
+        "from datasets import load_dataset\n",
+        "dataset = load_dataset(\"json\", data_files=\"/content/drive/MyDrive/modelo_director_ia/dataset_director.jsonl\", split=\"train\")\n",
+        "dataset = dataset.map(formatting_prompts_func, batched = True,)\n",
+        "print(f\"\\nDataset cargado: {len(dataset)} ejemplos listos para entrenar.\")"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# 6. Configurar el Entrenador (SFTTrainer)\n",
+        "from trl import SFTTrainer\n",
+        "from transformers import TrainingArguments\n",
+        "from unsloth import is_bfloat16_supported\n",
+        "\n",
+        "trainer = SFTTrainer(\n",
+        "    model = model,\n",
+        "    processing_class = tokenizer,\n",
+        "    train_dataset = dataset,\n",
+        "    dataset_text_field = \"text\",\n",
+        "    max_seq_length = max_seq_length,\n",
+        "    dataset_num_proc = 2,\n",
+        "    packing = False,\n",
+        "    args = TrainingArguments(\n",
+        "        per_device_train_batch_size = 2,\n",
+        "        gradient_accumulation_steps = 4,\n",
+        "        warmup_steps = 5,\n",
+        "        max_steps = 60, # Ajusta los pasos según tu dataset\n",
+        "        learning_rate = 2e-4,\n",
+        "        fp16 = not is_bfloat16_supported(),\n",
+        "        bf16 = is_bfloat16_supported(),\n",
+        "        logging_steps = 1,\n",
+        "        optim = \"adamw_8bit\",\n",
+        "        weight_decay = 0.01,\n",
+        "        lr_scheduler_type = \"linear\",\n",
+        "        seed = 3407,\n",
+        "        output_dir = \"outputs\",\n",
+        "    ),\n",
+        ")"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# 7. 🚀 ¡INICIAR ENTRENAMIENTO!\n",
+        "trainer_stats = trainer.train()"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": None,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# 8. Guardar modelo en formato GGUF en Google Drive\n",
+        "if False: model.save_pretrained_gguf(\"model\", tokenizer, quantization_method = \"f16\")\n",
+        "if False: model.save_pretrained_gguf(\"model\", tokenizer, quantization_method = \"q4_k_m\")\n",
+        "if True: model.save_pretrained_gguf(\"/content/drive/MyDrive/modelo_director_ia/director_ia_model\", tokenizer, quantization_method = \"q8_0\")\n",
+        "print(\"\\n✅ ¡Entrenamiento finalizado y modelo GGUF guardado en Google Drive!\")"
+      ]
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "display_name": "Python 3",
+      "language": "python",
+      "name": "python3"
+    },
+    "language_info": {
+      "codemirror_mode": {
+        "name": "ipython",
+        "version": 3
+      },
+      "file_extension": ".py",
+      "mimetype": "text/x-python",
+      "name": "python",
+      "nbconvert_exporter": "python",
+      "pygments_lexer": "ipython3",
+      "version": "3.10.12"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 4
+}
+
+with open("entrenador_director_ia.ipynb", "w", encoding="utf-8") as f:
+    json.dump(notebook, f, ensure_ascii=False, indent=2)
+
+print("Libreta generada exitosamente en 'entrenador_director_ia.ipynb'")

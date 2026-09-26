@@ -294,7 +294,11 @@ async def generate_text_to_video(data: dict):
             tasks[task_id]["message"] = "Cargando HunyuanVideo en GPU..."
             tasks[task_id]["progress"] = 10
 
-            from diffusers import HunyuanVideoPipeline
+            try:
+                from diffusers import HunyuanVideoPipeline
+            except ImportError as e:
+                tasks[task_id] = {"status": "error", "progress": 0, "message": f"Falta dependencia: {e}. Instala con: pip install diffusers transformers accelerate", "output_file": ""}
+                return
             
             model_path = str(MODELS_DIR / "hunyuan")
             if not Path(model_path).exists() or not any(Path(model_path).iterdir()):
@@ -335,7 +339,11 @@ async def generate_text_to_video(data: dict):
             tasks[task_id]["progress"] = 85
 
             # Exportar a MP4
-            from diffusers.utils import export_to_video
+            try:
+                from diffusers.utils import export_to_video
+            except ImportError as e:
+                tasks[task_id] = {"status": "error", "progress": 0, "message": f"Falta dependencia utils: {e}", "output_file": ""}
+                return
             output_name = f"t2v_{task_id}.mp4"
             output_path = OUTPUTS_DIR / output_name
             export_to_video(output.frames[0], str(output_path), fps=24)
@@ -373,15 +381,22 @@ async def upscale_video(video: UploadFile = File(...), scale: int = Form(4)):
             tasks[task_id]["message"] = "Cargando Real-ESRGAN..."
             tasks[task_id]["progress"] = 10
 
-            from realesrgan import RealESRGANer
-            from basicsr.archs.rrdbnet_arch import RRDBNet
-            import cv2
+            try:
+                # pyrefly: ignore [missing-import]
+                from realesrgan import RealESRGANer
+                # pyrefly: ignore [missing-import]
+                from basicsr.archs.rrdbnet_arch import RRDBNet
+                import cv2
+            except ImportError as e:
+                tasks[task_id] = {"status": "error", "progress": 0, "message": f"Falta dependencia: {e}. Instala con: pip install realesrgan basicsr opencv-python", "output_file": ""}
+                return
 
             model_path = str(MODELS_DIR / "realesrgan" / "RealESRGAN_x4plus.pth")
             if not Path(model_path).exists():
                 tasks[task_id] = {"status": "error", "progress": 0, "message": "Modelo Real-ESRGAN no encontrado. Ejecuta download_models.bat.", "output_file": ""}
                 return
 
+            global current_model, current_model_name
             # Liberar si hay otro modelo
             if current_model_name not in ("", "realesrgan"):
                 liberar_vram()
@@ -391,6 +406,8 @@ async def upscale_video(video: UploadFile = File(...), scale: int = Form(4)):
                 scale=4, model_path=model_path, model=model,
                 tile=400, tile_pad=10, pre_pad=0, half=True, device="cuda",
             )
+            current_model = upsampler
+            current_model_name = "realesrgan"
 
             # Extraer frames
             tasks[task_id]["message"] = "Extrayendo frames del video..."
@@ -540,6 +557,7 @@ async def remove_background(video: UploadFile = File(...)):
     def _remove_bg():
         try:
             import cv2
+            # pyrefly: ignore [missing-import]
             from rembg import remove
 
             cap = cv2.VideoCapture(str(input_path))
@@ -640,3 +658,43 @@ if __name__ == "__main__":
     print(f"  GPU: {gpu_info().get('name', 'N/A')} ({gpu_info().get('vram_total', 0)} GB)")
     print(f"  URL: http://127.0.0.1:7860\n")
     uvicorn.run(app, host="127.0.0.1", port=7860, log_level="info")
+import threading
+import time
+
+# Esta es una estructura para el gestor de descargas nativo
+# Aadido segn la Fase 4 del plan, pero no integrado activamente a la UI an.
+def descargar_modelo_background(model_name, task_id, tasks_dict):
+    tasks_dict[task_id] = {
+        "status": "processing",
+        "progress": 0,
+        "message": f"Iniciando descarga del modelo {model_name}...",
+        "output_file": ""
+    }
+    
+    # Aqu ira la lgica real de requests.get() o wget
+    try:
+        # Simulacin de descarga por ahora
+        for i in range(1, 11):
+            time.sleep(1) # Simular tiempo de descarga
+            tasks_dict[task_id]["progress"] = i * 10
+            tasks_dict[task_id]["message"] = f"Descargando {model_name}... {i*10}%"
+            
+        tasks_dict[task_id]["status"] = "completed"
+        tasks_dict[task_id]["message"] = f"Modelo {model_name} descargado y listo para usar."
+    except Exception as e:
+        tasks_dict[task_id]["status"] = "error"
+        tasks_dict[task_id]["message"] = f"Error en descarga: {str(e)}"
+
+@app.post("/api/video/download_model")
+async def api_download_model(req: Request):
+    data = await req.json()
+    model_name = data.get("model_name", "")
+    
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {"status": "starting", "progress": 0, "message": "Preparando descarga..."}
+    
+    # Iniciar la descarga en un hilo en segundo plano
+    t = threading.Thread(target=descargar_modelo_background, args=(model_name, task_id, tasks))
+    t.start()
+    
+    return {"task_id": task_id}

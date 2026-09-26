@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eddie Pixal — MICRODRAMA ENGINE V4.2 FLOW SAFE + NOVELA CONTINUITY</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&display=swap');
+:root{
+  --bg:#07070c;--surface:#0d0d17;--card:#12121e;--card2:#181827;--border:#29293b;
+  --gold:#f6c945;--red:#ff4d5f;--teal:#19e6c4;--orange:#ff7a22;--purple:#b977ff;
+  --blue:#5aa5ff;--green:#45d483;--text:#e5e5f3;--muted:#7f7f9d;--white:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:
+    radial-gradient(circle at 15% -10%,rgba(185,119,255,.12),transparent 35%),
+    radial-gradient(circle at 85% 0%,rgba(255,77,95,.10),transparent 30%),
+    var(--bg);
+  color:var(--text);font-family:'DM Mono',monospace;font-size:12px;line-height:1.72;min-height:100vh
+}
+.wrap{max-width:1180px;margin:auto;padding:28px 18px 110px}
+header{padding:42px 0 30px;border-bottom:1px solid var(--border);margin-bottom:18px}
+.eyebrow{font-size:9px;letter-spacing:5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+h1{font-family:'Bebas Neue',sans-serif;font-size:clamp(45px,7.7vw,88px);line-height:.92;color:var(--white);letter-spacing:2px}
+h1 em{font-style:normal;color:var(--red)}
+h1 small{font-size:clamp(26px,3.8vw,44px);color:var(--gold)}
+.subtitle{margin-top:12px;color:var(--muted);font-size:10px;letter-spacing:1.7px;text-transform:uppercase;max-width:1040px}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:15px}
+.pill{border:1px solid;padding:3px 10px;font-size:8px;letter-spacing:1.5px;text-transform:uppercase}
+.pill.r{border-color:var(--red);color:var(--red)}.pill.g{border-color:var(--green);color:var(--green)}
+.pill.t{border-color:var(--teal);color:var(--teal)}.pill.y{border-color:var(--gold);color:var(--gold)}
+.pill.p{border-color:var(--purple);color:var(--purple)}.pill.b{border-color:var(--blue);color:var(--blue)}
+.card{background:var(--card);border:1px solid var(--border);padding:21px;margin:12px 0}
+.title{font-family:'Bebas Neue',sans-serif;font-size:21px;letter-spacing:2px;color:var(--gold);margin-bottom:8px}
+.title.red{color:var(--red)}.title.teal{color:var(--teal)}.title.purple{color:var(--purple)}
+.desc{font-size:10.5px;color:var(--muted);margin-bottom:13px}
+.notice{padding:11px 14px;background:var(--surface);border-left:3px solid var(--gold);color:#d7c781;margin:9px 0;font-size:10.5px}
+.notice.green{border-color:var(--green);color:#8adba8}.notice.red{border-color:var(--red);color:#f29aa4}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.field{margin-bottom:12px}.field label{display:block;font-size:9px;color:var(--muted);letter-spacing:1.25px;text-transform:uppercase;margin-bottom:5px}
+textarea,input,select{
+  width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);
+  font-family:'DM Mono',monospace;font-size:11px;padding:10px 12px;line-height:1.7;outline:none
+}
+textarea{resize:vertical}textarea:focus,input:focus,select:focus{border-color:var(--red)}
+.btnrow{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-top:6px}
+button{cursor:pointer}
+.btn{
+  background:var(--red);color:#fff;border:0;padding:16px 20px;font-family:'Bebas Neue',sans-serif;
+  font-size:17px;letter-spacing:3px;text-transform:uppercase
+}
+.btn:hover{filter:brightness(1.08)}
+.btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border);font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px}
+.features{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.feature{background:var(--surface);border:1px solid var(--border);padding:13px}
+.feature strong{display:block;color:var(--white);font-size:10px;margin-bottom:4px}.feature span{color:var(--muted);font-size:9px}
+.feature.hot{border-color:var(--red);background:rgba(255,77,95,.035)}.feature.hot strong{color:var(--red)}
+.outputWrap{position:relative}
+.outputWrap textarea{min-height:700px;background:#050509;padding:52px 14px 15px;font-size:10px;line-height:1.78}
+.actions{position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:2}
+.copybtn{background:var(--surface);color:var(--gold);border:1px solid var(--gold);font-family:'DM Mono',monospace;font-size:9px;padding:7px 11px}
+.copybtn.green{color:var(--green);border-color:var(--green)}.copybtn.blue{color:var(--blue);border-color:var(--blue)}
+.stats{font-size:9px;color:var(--muted);letter-spacing:1px;margin-top:7px}
+details{background:var(--surface);border:1px solid var(--border);padding:12px;margin-top:9px}
+summary{cursor:pointer;color:var(--teal);font-weight:500}
+.checks{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}
+.check{background:var(--surface);border:1px solid var(--border);padding:10px;color:var(--muted);font-size:9px}
+.check b{color:var(--green)}
+footer{margin-top:35px;border-top:1px solid var(--border);padding-top:15px;color:var(--muted);text-align:center;font-size:9px;letter-spacing:1.5px}
+@media(max-width:900px){.grid3,.features,.checks{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.grid2,.grid3,.features,.checks,.btnrow{grid-template-columns:1fr}.btn.secondary{width:100%}.actions{position:static;padding:8px 0}.outputWrap textarea{padding-top:14px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="eyebrow">Eddie Pixal — AI Fiction Production System</div>
+  <h1>MICRODRAMA <em>ENGINE</em> <small>V4.2 SAFE</small></h1>
+  <div class="subtitle">Solo lo esencial · Personajes ficticios originales · Flow Policy Safe · Escenas largas · Caminatas y llegadas · Initial Frame + Flow Prompt</div>
+  <div class="pills">
+    <span class="pill r">Ficción original Flow-safe</span><span class="pill y">Frame antes de Flow</span>
+    <span class="pill t">Clips 4/6/8s</span><span class="pill p">Escenas de novela completas</span>
+    <span class="pill g">Personaje + voz bloqueados</span><span class="pill b">Puentes de salida y llegada</span>
+    <span class="pill r">Sin nombres públicos en prompts</span><span class="pill y">1 música + 1 portada</span>
+  </div>
+</header>
+
+<section class="card">
+  <div class="title red">Qué cambia en V4.2 SAFE</div>
+  <div class="features">
+    <div class="feature hot"><strong>FLOW POLICY SAFE</strong><span>Los prompts usan personajes adultos ficticios, IDs neutros y ninguna referencia a personas conocidas.</span></div>
+    <div class="feature hot"><strong>ESCENA ANTES QUE CLIP</strong><span>Primero construye una escena de novela con objetivo, obstáculo, giro, reacción y consecuencia.</span></div>
+    <div class="feature hot"><strong>SALIDA · CAMINO · LLEGADA</strong><span>Los cambios de lugar incluyen puertas, pasillos, ascensores, calle o llegada cuando aportan drama.</span></div>
+    <div class="feature hot"><strong>FRAME + FLOW</strong><span>Por clip: fotos a seleccionar, prompt del frame inicial y prompt de Flow. Nada más.</span></div>
+    <div class="feature"><strong>DIÁLOGO MEDIDO</strong><span>Qwen calcula internamente palabras, pausas y duración antes de aprobar cada frase.</span></div>
+    <div class="feature"><strong>ACTUACIÓN HUMANA</strong><span>Los personajes caminan, esperan, abren puertas, usan objetos y reaccionan al espacio.</span></div>
+    <div class="feature"><strong>EXTEND / END FRAME</strong><span>La continuidad física usa el último frame guardado o Extender cuando la ruta lo permita.</span></div>
+    <div class="feature"><strong>MINI-DESENLACE</strong><span>Cada episodio paga parte del conflicto, muestra la consecuencia y luego abre el siguiente problema.</span></div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="title">Configuración de la serie</div>
+  <div class="desc">La IA puede planificar una temporada completa, pero la respuesta visible queda reducida a historia esencial, personajes maestros y el paquete Frame + Flow de cada clip.</div>
+
+  <div class="grid2">
+    <div class="field">
+      <label>Idea, premisa o historia</label>
+      <textarea id="idea" rows="10" placeholder="Ej: Una empleada descubre que su prometido mantiene una segunda vida y que la dueña de la empresa conoce el secreto. Quiero traición, ascenso social, pruebas ocultas y justicia inesperada."></textarea>
+    </div>
+    <div>
+      <div class="grid2">
+        <div class="field"><label>Mercado / país</label><select id="market"><option>Latinoamérica general</option><option>Colombia</option><option>México</option><option>Estados Unidos latino</option><option>España</option><option>Argentina</option><option>Venezuela</option><option>Perú</option><option>Ecuador</option><option>Otro / detectar</option></select></div>
+        <div class="field"><label>Idioma y acento</label><select id="language"><option>Español latino neutro</option><option>Español colombiano suave</option><option>Español mexicano natural</option><option>Español caribeño moderado</option><option>Español peninsular</option><option>Detectar automáticamente</option></select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Motor dramático</label><select id="genre"><option>Automático: elegir el más viral</option><option>Engaño de pareja y doble vida</option><option>Secreto familiar e herencia</option><option>Humillación laboral y justicia</option><option>Identidad oculta y cambio de poder</option><option>Falsa acusación y evidencia</option><option>Dinero, contrato o estafa emocional</option><option>Misterio cotidiano realista</option></select></div>
+        <div class="field"><label>Tono</label><select id="tone"><option>Novela premium realista</option><option>Crudo y cotidiano</option><option>Elegante y tenso</option><option>Emocional para Facebook</option><option>Juvenil sin caricatura</option><option>Oscuro pero no gráfico</option></select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Episodios completos por lote</label><select id="batch"><option>1 — recomendado</option><option>2</option><option>3</option></select></div>
+        <div class="field"><label>Duración de episodio</label><select id="episode_length"><option>Orgánica, decidida por el drama</option><option>Breve: 35–55 segundos</option><option>Media: 55–85 segundos</option><option>Profunda: 85–120 segundos</option></select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Intensidad del giro</label><select id="twist"><option>Alta pero creíble</option><option>Media y emocional</option><option>Muy alta tipo telenovela</option></select></div>
+        <div class="field"><label>Estética</label><select id="visual"><option>Live-action streaming latino premium</option><option>Telenovela moderna cinematográfica</option><option>Drama urbano hiperrealista</option><option>Lujo sobrio y conflicto social</option></select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Ruta Flow preferida</label><select id="flow_route"><option>Automática según compatibilidad actual</option><option>Veo 3.1 Lite — Start Frame / Extend</option><option>Veo 3.1 — Ingredients, 8 segundos</option><option>Gemini Omni Flash — Characters + Voice</option><option>Veo 3.1 — First + Last Frame</option></select></div>
+        <div class="field"><label>Portada</label><select id="cover"><option>1 portada principal</option></select></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notice green">El motor produce ficción original con personajes adultos creados para el proyecto. Los prompts finales no deben incluir nombres, semejanzas, voces ni comparaciones con personas conocidas; usarán IDs neutros y assets propios.</div>
+  <div class="notice">Para que se sienta como novela real, la IA debe permanecer más tiempo en cada locación, mostrar salidas y llegadas con propósito, y completar el mini-arco emocional antes de cambiar de lugar.</div>
+  <div class="btnrow">
+    <button class="btn" id="generate">Generar Mega Prompt V4.2 SAFE</button>
+    <button class="btn secondary" id="save">Guardar</button>
+    <button class="btn secondary" id="reset">Limpiar</button>
+  </div>
+  <div class="notice red" id="error" style="display:none">Escribe una idea o premisa antes de generar.</div>
+</section>
+
+<section class="card" id="result" style="display:none">
+  <div class="title teal">Mega Prompt limpio listo para Qwen / Claude / Gemini</div>
+  <div class="outputWrap">
+    <div class="actions">
+      <button class="copybtn" id="copy">COPIAR</button>
+      <button class="copybtn blue" id="download">DESCARGAR TXT</button>
+      <button class="copybtn green" id="selectall">SELECCIONAR</button>
+    </div>
+    <textarea id="output" readonly></textarea>
+  </div>
+  <div class="stats" id="stats"></div>
+</section>
+
+<section class="card">
+  <div class="title purple">Salida exacta de Qwen</div>
+  <div class="checks">
+    <div class="check"><b>1</b> Resumen breve de serie y episodio.</div>
+    <div class="check"><b>2</b> Un paquete maestro por personaje recurrente.</div>
+    <div class="check"><b>3</b> Apariencia y voz fijas, listas para repetir.</div>
+    <div class="check"><b>4</b> Por clip: fotos exactas que debes seleccionar.</div>
+    <div class="check"><b>5</b> Prompt completo del Initial Frame.</div>
+    <div class="check"><b>6</b> Prompt completo de Flow debajo.</div>
+    <div class="check"><b>7</b> Una música principal al terminar.</div>
+    <div class="check"><b>8</b> Una portada principal al terminar.</div>
+    <div class="check"><b>9</b> Sin alternativas, retries ni variantes.</div>
+    <div class="check"><b>10</b> Sin matrices o auditorías visibles.</div>
+    <div class="check"><b>11</b> Diálogo calculado internamente.</div>
+    <div class="check"><b>12</b> Continuidad compacta para el próximo capítulo.</div>
+  </div>
+  <details>
+    <summary>Principio de esta versión</summary>
+    <div class="desc" style="margin-top:10px">Qwen debe investigar, optimizar, calcular y auditar internamente. La respuesta visible no muestra ese proceso: entrega únicamente los recursos finales que realmente vas a copiar y utilizar.</div>
+  </details>
+</section>
+
+<textarea id="template" style="display:none">
+════════════════════════════════════════════════════════════════════
+EDDIE PIXAL MICRODRAMA ENGINE V4.2 SAFE
+INITIAL FRAME + FLOW PROMPT ONLY · MULTI-EPISODE · LIVE-ACTION REALISM
+════════════════════════════════════════════════════════════════════
+
+ACTÚA COMO:
+Showrunner de microtelenovelas verticales, guionista de series, director de actores, supervisor de continuidad, director de fotografía y especialista técnico en Google Flow/Veo.
+
+OBJETIVO:
+Convertir la idea del usuario en una serie de ficción original, hiperrealista, emocional y serializada. Debe sentirse interpretada por personas reales. Tu trabajo interno puede ser profundo, pero tu RESPUESTA VISIBLE debe ser limpia, directa y fácil de producir.
+
+CONFIGURACIÓN DEL PROYECTO
+IDEA BASE:
+{{IDEA}}
+
+Mercado: {{MARKET}}
+Idioma/acento: {{LANGUAGE}}
+Motor dramático: {{GENRE}}
+Tono: {{TONE}}
+Episodios completos en este lote: {{BATCH}}
+Duración orientativa por episodio: {{EPISODE_LENGTH}}
+Intensidad del giro: {{TWIST}}
+Estética: {{VISUAL}}
+Ruta Flow preferida: {{FLOW_ROUTE}}
+Portada: {{COVER}}
+
+════════════════════════════════════════════════════════════════════
+REGLA PRINCIPAL — PIENSA MUCHO, MUESTRA POCO
+════════════════════════════════════════════════════════════════════
+
+Debes realizar internamente, sin imprimirlo:
+1. Investigación técnica actual de Flow/Veo cuando tengas búsqueda.
+2. Evaluación y mejora de la premisa.
+3. Diseño causal de la temporada completa.
+4. Mapa de revelaciones y cliffhangers.
+5. Canon, continuidad, vestuario, utilería y locaciones.
+6. Cálculo matemático del diálogo para clips de 4, 6 u 8 segundos.
+7. Auditoría de actuación, cámara, manos, voz y continuidad.
+8. Revisión final de todos los prompts.
+
+NO muestres:
+- Compatibility Gate.
+- Virality Gate o puntuaciones.
+- Hook Bank o torneos de hooks.
+- Coverage Map, Event Inventory o matrices largas.
+- Escenas alternativas.
+- Variantes visuales.
+- Retry prompts.
+- Opciones A/B/C.
+- QA por clip.
+- Explicaciones extensas de por qué tomaste cada decisión.
+- Instrucciones genéricas para el usuario.
+
+Solo muestra la estructura final obligatoria definida más abajo.
+
+════════════════════════════════════════════════════════════════════
+FLOW POLICY-SAFE SANITIZER — OBLIGATORIO Y NO VISIBLE
+════════════════════════════════════════════════════════════════════
+
+Antes de entregar cualquier FOTO MAESTRA, INITIAL FRAME PROMPT o FLOW PROMPT, realiza una sanitización interna completa.
+
+REGLAS:
+- Todos los personajes visuales son ADULTOS y completamente ficticios, creados específicamente para este proyecto.
+- No uses en prompts visuales o de video nombres de personas reales, celebridades, figuras públicas, actores, cantantes, políticos, atletas, influencers ni personajes interpretados por actores reales.
+- No uses comparaciones como “looks like”, “resembles”, “inspired by”, “similar to”, “the face of”, “the voice of” o equivalentes.
+- No uses nombres de artistas, estudios, franquicias, series o películas como referencia de rostro, actuación o estilo humano.
+- No escribas en los prompts finales palabras relacionadas con fama, celebridad o figura pública, ni siquiera dentro de una negación.
+- Los nombres narrativos pueden aparecer en el resumen y el diálogo, pero los ASSET NAMES deben ser IDs neutros: @CHAR_F01, @CHAR_M01, @CHAR_A01, nunca el nombre completo de una persona.
+- Dentro de los prompts de Flow identifica a cada persona por su ID neutro y por su descripción física original, no por su nombre civil.
+- Si el nombre inventado coincide o podría confundirse con una persona conocida, conserva el nombre solo en la historia y usa exclusivamente el ID neutro dentro de los prompts.
+- Las fotos de referencia deben ser imágenes originales generadas para el proyecto o imágenes propias/autorizadas. No uses imágenes extraídas de internet de personas identificables.
+- Si la idea del usuario menciona a una persona real, transforma el papel en un personaje ficticio compuesto antes de producir imágenes o video.
+- No intentes eludir filtros. Reescribe el concepto de forma legítima como ficción original.
+
+SANITIZACIÓN FINAL INTERNA:
+Escanea cada prompt y elimina automáticamente cualquier nombre real, comparación de semejanza, referencia de voz real, franquicia o término que pueda convertir al personaje en una imitación identificable. No muestres este proceso.
+
+════════════════════════════════════════════════════════════════════
+REGLAS DE FICCIÓN, ORIGINALIDAD Y REALISMO
+════════════════════════════════════════════════════════════════════
+
+- Crear ficción original o dramatización ficticia.
+- No presentar acusaciones inventadas como hechos reales.
+- No usar la identidad, rostro o voz de personas reales.
+- Si la idea contiene personas reales, transformarlas en personajes ficticios compuestos.
+- Los prompts finales usan IDs neutros de producción y descripciones originales; no usan nombres completos como identificadores visuales.
+- No copiar tramas, escenas o diálogos reconocibles de películas, series o novelas existentes.
+- Mantener conflicto adulto y fuerte sin violencia gráfica ni sexualización explícita.
+- No garantizar viralidad; maximizar conflicto, claridad, retención y capacidad serial.
+- El primer episodio debe entenderse sin introducción externa.
+- Cada episodio debe entregar una revelación real y abrir una pregunta nueva.
+- Los giros deben estar preparados por pistas, decisiones o contradicciones anteriores.
+
+════════════════════════════════════════════════════════════════════
+MOTOR DE NOVELA INTERNO — ESCENA ANTES QUE CLIP — NO IMPRIMIR
+════════════════════════════════════════════════════════════════════
+
+Antes de crear prompts:
+- Lee toda la idea y diseña el final real de temporada.
+- Corrige huecos, coincidencias forzadas y decisiones ilógicas.
+- Define protagonistas, oposición, secreto, prueba visual, costo emocional y cambio de poder.
+- Decide el número orgánico de episodios.
+- Diseña toda la temporada, aunque solo produzcas {{BATCH}} episodio(s).
+- Construye primero ESCENAS COMPLETAS de novela; solo después divídelas en clips de 4, 6 u 8 segundos.
+
+CONTRATO DE CADA ESCENA:
+1. Locación, hora y motivo por el que los personajes están allí.
+2. Objetivo inmediato de cada personaje.
+3. Obstáculo o resistencia.
+4. Interacción física con el ambiente.
+5. Giro o nueva información.
+6. Reacción y procesamiento emocional.
+7. Consecuencia concreta.
+8. Salida, decisión o puente hacia la escena siguiente.
+
+REGLA DE RESIDENCIA EN LOCACIÓN:
+- No saltar de un lugar a otro por cada clip.
+- Una escena dramática principal debe permanecer normalmente entre 3 y 8 clips en la misma locación, según lo que necesite el conflicto.
+- Un episodio corto debe concentrarse normalmente en 2 o 3 locaciones principales, no en una cadena de lugares intercambiables.
+- Cambia de locación solo cuando cambia el objetivo, la información, el peligro o la relación entre personajes.
+- No cerrar una escena justo después de una revelación: mostrar al menos una reacción, una decisión o una consecuencia.
+
+CONTINUIDAD PUERTA A PUERTA:
+Cuando un personaje cambia de lugar y el desplazamiento tiene valor dramático, construir una secuencia causal:
+A. SALIDA: recoge un objeto, termina la conversación, cruza la habitación, abre la puerta o abandona el espacio.
+B. PUENTE: pasillo, escaleras, ascensor, recepción, acera, estacionamiento o vehículo. El personaje debe pensar, dudar, seguir a alguien, revisar el teléfono o reaccionar a una señal; nunca caminar como relleno vacío.
+C. LLEGADA: entra, espera, toca, abre, saluda, observa el nuevo lugar o interactúa con una persona/objeto antes de la confrontación.
+
+No es obligatorio mostrar el trayecto completo. Usa uno o dos clips de transición cuando den continuidad, tensión o emoción. Omite el traslado solo cuando un corte directo sea narrativamente claro y no se sienta como teletransportación.
+
+ESTRUCTURA DE EPISODIO TIPO NOVELA:
+- Cold open dentro de una acción o conflicto real.
+- Desarrollo con escenas que respiren.
+- Confrontación o descubrimiento.
+- Pago parcial: algo se resuelve o se confirma.
+- Desenlace corto: mostrar el costo emocional o práctico.
+- Nueva complicación o cliffhanger específico.
+
+Cada episodio debe entregar satisfacción narrativa antes del cliffhanger. No debe sentirse como un tráiler compuesto por golpes aislados.
+
+RETENCIÓN INTERNA:
+- Conflicto o anomalía visible en el primer frame.
+- Primera pregunta, acusación o prueba durante los primeros 6 segundos.
+- Cambio informativo o emocional cada 6–12 segundos, sin romper la escena.
+- Recompensa parcial dentro del episodio.
+- Cliffhanger específico después de la consecuencia, nunca una frase vacía.
+
+REGLA DE CLIP:
+- Cada clip tiene una acción principal, una reacción y un cambio visible.
+- La imagen demuestra el beat; no usa b-roll genérico.
+- Los personajes caminan, se sientan, abren puertas, usan llaves, teléfonos, bolsos, ascensores, mostradores, sillas y objetos solo cuando pertenecen a la escena.
+- Muestra una reacción humana antes de cortar.
+
+════════════════════════════════════════════════════════════════════
+PERSONAJES RECURRENTES — REGLA MAESTRA
+════════════════════════════════════════════════════════════════════
+
+Detecta antes de producir a toda persona que aparezca en más de un clip o episodio.
+Para cada una crea UN SOLO paquete maestro definitivo. No entregues variantes.
+
+La apariencia debe utilizar rasgos fuertes y estables:
+- edad aparente;
+- origen visual no estereotipado;
+- forma de rostro;
+- ojos, cejas, nariz, boca y mandíbula;
+- tono y textura natural de piel;
+- cabello y vello facial;
+- complexión y altura aproximada;
+- postura y gesto corporal;
+- vestuario exacto por etapa;
+- accesorios narrativamente necesarios.
+
+Evita detalles pequeños inestables como pecas precisas, lunares diminutos, estampados complejos o joyas innecesarias.
+
+Cada personaje hablante debe tener una VOICE LOCK fija:
+- género vocal;
+- edad vocal aparente;
+- acento;
+- registro;
+- tono;
+- textura;
+- velocidad natural;
+- volumen;
+- comportamiento bajo presión.
+
+La misma VOICE LOCK debe repetirse completa dentro de CADA FLOW PROMPT donde ese personaje hable.
+
+La identidad visual debe repetirse de forma clara dentro de cada Initial Frame Prompt y cada Flow Prompt donde aparezca, además del nombre de su foto/Character asset.
+
+════════════════════════════════════════════════════════════════════
+CÁLCULO INTERNO DEL DIÁLOGO — NO IMPRIMIR
+════════════════════════════════════════════════════════════════════
+
+Cada clip dura 4, 6 u 8 segundos. Nunca más de 8.
+Calcula internamente:
+- pausa inicial;
+- pausas internas;
+- tiempo para la reacción final;
+- segundos útiles de habla;
+- velocidad vocal;
+- palabras máximas;
+- margen de seguridad.
+
+Guía conservadora:
+- 4s: 3–6 palabras.
+- 6s: 6–10 palabras.
+- 8s: 9–14 palabras.
+
+Reduce palabras si existe llanto contenido, vacilación, nombre largo, acento fuerte, interrupción o dos hablantes.
+Si la frase no cabe naturalmente, divídela en otro clip antes de responder.
+No muestres tablas, fórmulas ni cálculos; entrega únicamente diálogo ya aprobado.
+
+════════════════════════════════════════════════════════════════════
+ACTUACIÓN Y CLIP VIVO — TOMADO COMO PRINCIPIO DE PRODUCCIÓN
+════════════════════════════════════════════════════════════════════
+
+Cada clip debe parecer un momento real, no stock ni una imagen animada.
+Dentro del prompt define:
+- qué quiere el personaje en ese instante;
+- qué intenta ocultar;
+- subtexto;
+- microgesto;
+- dirección de mirada;
+- respiración;
+- acción física concreta;
+- reacción involuntaria;
+- estado final.
+
+La actuación debe ser contenida, humana y específica.
+Evita gestos teatrales, llanto instantáneo, manos agitadas sin propósito, sonrisas fuera de contexto, mirada constante al lente y personajes congelados.
+
+Incluye sonido diegético propio del lugar: room tone, ropa, pasos, objetos, puerta, tráfico lejano, electrodomésticos u otros sonidos físicamente coherentes. La música se crea aparte y no se genera dentro de Flow.
+
+════════════════════════════════════════════════════════════════════
+CONTINUIDAD CINEMATOGRÁFICA DE NOVELA — NO IMPRIMIR
+════════════════════════════════════════════════════════════════════
+
+PLANIFICA POR SECUENCIAS:
+- SECUENCIA DE CONVERSACIÓN: planos continuos en la misma habitación, posiciones y eje de cámara estables. Los cambios de ángulo ocurren entre clips, no dentro de un clip.
+- SECUENCIA DE MOVIMIENTO: el personaje cruza un espacio con propósito; la cámara lo acompaña mediante un único movimiento simple.
+- SECUENCIA DE SALIDA: gesto final, objeto recogido, puerta, pasillo o vehículo.
+- SECUENCIA DE LLEGADA: exterior o acceso breve, entrada y primera interacción con el nuevo lugar.
+- SECUENCIA DE CONSECUENCIA: silencio, llamada, objeto dejado, personaje sentado o reacción posterior que cierra el mini-arco.
+
+RUTA DE CONTINUIDAD:
+- Para continuación física directa, preferir USE SAVED END FRAME como Initial Frame.
+- Para una acción larga de 8 segundos que debe seguir sin corte y si la interfaz/modelo lo permite, usar EXTEND PREVIOUS VEO CLIP.
+- Si Extender no es compatible, guardar el último frame y usarlo como primer frame del clip siguiente.
+- Para un nuevo ángulo dentro de la misma escena, generar un nuevo Initial Frame manteniendo locación, hora, vestuario, props, posiciones y eje espacial.
+- No mezclar una referencia de voz con un modo que no la admita. Seleccionar internamente una ruta compatible antes de escribir el prompt.
+
+GEOGRAFÍA DE ESCENA:
+- Mantener puertas, ventanas, muebles, pasillos y posiciones relativas.
+- No invertir izquierda/derecha sin un plano de transición.
+- No hacer aparecer a un personaje dentro de un lugar sin haber entrado o sin que el corte temporal sea evidente.
+- No cambiar de día, ropa o iluminación sin transición narrativa.
+
+════════════════════════════════════════════════════════════════════
+FRAME-FIRST — REGLA ABSOLUTA
+════════════════════════════════════════════════════════════════════
+
+Para cada clip, primero debes indicar las FOTOS/ASSETS DE PERSONAJES que el usuario debe seleccionar para construir el Initial Frame.
+Después entregas el INITIAL FRAME PROMPT.
+Debajo entregas el FLOW PROMPT.
+No añadas ninguna sección adicional dentro del clip.
+
+Si el clip continúa exactamente el anterior:
+- Indica como fuente principal el último frame guardado del clip anterior.
+- También indica las fotos de personajes que deben permanecer seleccionadas si la interfaz lo permite.
+- El Initial Frame Prompt debe reconstruir el estado exacto en caso de que el frame guardado necesite regenerarse.
+
+Cada Initial Frame Prompt debe:
+- estar en inglés;
+- ser completamente copiable;
+- crear una imagen vertical 9:16;
+- parecer live-action fotorrealista;
+- identificar a todos los personajes visibles;
+- repetir su apariencia crítica y ropa exacta;
+- precisar posiciones, distancia, manos, mirada y emoción;
+- definir locación, mobiliario y props;
+- definir encuadre, lente, altura, perspectiva y luz;
+- representar el instante inmediatamente anterior a la acción del video;
+- prohibir texto, logos, personas adicionales, anatomía defectuosa, piel plástica, fisheye e identidad cambiante;
+- quedar preparado para animarse, no como portada promocional.
+
+Cada Flow Prompt debe:
+- estar en inglés, salvo el diálogo exacto en español;
+- ser completamente copiable y autónomo;
+- indicar duración 4/6/8s y 9:16;
+- indicar la RUTA DE GENERACIÓN compatible elegida: Start Frame, Ingredients, First + Last Frame o Extend;
+- indicar el Initial Frame asset exacto o el clip que se extenderá;
+- nombrar únicamente IDs neutros de las fotos/Characters seleccionados;
+- repetir apariencia y ropa crítica de todos los visibles;
+- repetir VOICE LOCK completa de cada hablante;
+- declarar que todos los visibles son personajes adultos originales creados para el proyecto, sin añadir referencias externas;
+- tener una sola toma continua;
+- contener una acción principal, interacción con el entorno y una reacción;
+- especificar objetivo, obstáculo, táctica y subtexto de actuación;
+- indicar labios visibles y sincronizados cuando alguien habla;
+- definir cámara estable y como máximo un movimiento simple físicamente posible;
+- si es un clip de salida, trayecto o llegada, describir el recorrido físico completo dentro del mismo espacio sin teletransporte;
+- si continúa una acción, comenzar exactamente desde el último frame aprobado o usar Extend cuando sea compatible;
+- mantener iluminación, locación y utilería;
+- incluir ambiente y sonido diegético;
+- especificar el estado exacto del último frame para enlazar el próximo clip;
+- prohibir cortes internos, teletransportes, saltos de locación, personas duplicadas, cambios de identidad, ropa, voz, edad o arquitectura, texto, subtítulos, logos, música y efectos de IA.
+
+SANITIZADOR DE PROMPT FINAL:
+El texto final copiable no puede contener nombres de personas conocidas, comparaciones de semejanza, nombres de actores, celebridades, figuras públicas, franquicias o voces reales. Debe usar IDs neutros y descripciones originales. No incluyas una explicación de esta regla dentro del prompt final.
+
+PROHIBIDO EN PROMPTS:
+- “same as previous”; 
+- “same character as above”;
+- “see character bible”;
+- “same clothes” sin describirlas;
+- “etc.”;
+- placeholders;
+- referencias incompletas a otro prompt;
+- nombres reales o conocidos usados como referencia visual o vocal;
+- “looks like”, “resembles”, “inspired by” o equivalentes.
+
+════════════════════════════════════════════════════════════════════
+ESTRUCTURA VISIBLE OBLIGATORIA — NO AGREGAR MÁS BLOQUES
+════════════════════════════════════════════════════════════════════
+
+BLOQUE 1 — SERIE Y EPISODIO
+Mostrar únicamente:
+- Título de la serie.
+- Premisa final optimizada, máximo 100 palabras.
+- Total de episodios planificados.
+- Mapa de temporada: una sola línea por episodio con revelación y cliffhanger.
+- Episodio(s) producido(s) en este lote: título y sinopsis breve.
+No mostrar análisis, puntuaciones ni alternativas.
+
+BLOQUE 2 — PERSONAJES MAESTROS
+Para cada personaje recurrente, en este orden:
+
+PERSONAJE [CHAR_ID] — [NOMBRE]
+ROL:
+FOTO/CHARACTER ASSET ID NEUTRO:
+APARIENCIA BLOQUEADA:
+VESTUARIO DE ESTE LOTE:
+VOICE LOCK:
+
+PROMPT ÚNICO PARA CREAR LA FOTO MAESTRA DEL PERSONAJE:
+```text
+[Un solo prompt completo en inglés que comience describiendo un personaje adulto completamente original creado para este proyecto. No usar nombres civiles, semejanzas ni referencias externas. Retrato de referencia limpio y cuerpo suficientemente visible para fijar rostro, complexión, cabello, ropa y postura. Fondo neutro simple, luz uniforme, sin otros personajes, sin texto.]
+```
+
+No crear foto frontal, perfil, cuerpo, expresión y ropa por separado. Solo UNA imagen maestra completa por personaje, salvo que el usuario solicite expresamente varias referencias.
+
+BLOQUE 3 — PRODUCCIÓN DEL EPISODIO
+Antes de los clips, mostrar únicamente:
+- Duración final estimada.
+- Número de clips.
+- Una sinopsis de 3–5 líneas que indique el mini-desenlace y el cliffhanger.
+
+Después, para CADA clip, utilizar EXACTAMENTE este formato y nada más:
+
+────────────────────────────────────────────────────────
+EPISODIO [E#] · ESCENA [S#] · CLIP [C#] · [4/6/8] SEGUNDOS
+────────────────────────────────────────────────────────
+
+FOTOS / ASSETS A SELECCIONAR PARA EL FRAME:
+- [@CHAR_F01 — foto/Character asset original]
+- [@CHAR_M01 — foto/Character asset original, si aplica]
+- FRAME SOURCE: [NEW INITIAL FRAME / USE SAVED END FRAME FROM E#_S#_C# / EXTEND PREVIOUS VEO CLIP E#_S#_C#]
+
+INITIAL FRAME PROMPT:
+```text
+[Prompt completo en inglés]
+```
+
+FLOW PROMPT:
+```text
+[Prompt completo en inglés con diálogo exacto en español, IDs neutros, apariencia, ropa y Voice Lock repetidas. Debe indicar si es conversación, salida, puente, llegada, confrontación o consecuencia; integrar acción física con el ambiente; mantener geografía; terminar en un frame utilizable para continuar.]
+```
+
+No colocar después del Flow Prompt:
+- explicación;
+- QA;
+- retry;
+- variante;
+- negative prompt separado;
+- pasos de interfaz;
+- end-frame card;
+- copy;
+- notas.
+Todo lo necesario, incluidos negativos y estado final, debe quedar dentro de los dos prompts.
+
+BLOQUE 4 — MÚSICA ÚNICA
+Entregar UN SOLO prompt musical completo en inglés:
+- instrumental;
+- sin voces;
+- duración exacta del episodio;
+- arco emocional sincronizado;
+- instrumentos, tempo, silencios y mezcla bajo diálogo;
+- sin épica genérica.
+No entregar opciones.
+
+BLOQUE 5 — PORTADA ÚNICA
+Entregar:
+- Texto de portada de 2–4 palabras.
+- UN SOLO prompt completo en inglés para crear la portada más fuerte del episodio.
+- Personajes exactos, apariencia, ropa, objeto o prueba central, emoción, composición vertical, luz y fondo.
+- Máximo tres focos visuales.
+- Sin collage barato, sin aspecto IA, sin spoiler que destruya el episodio.
+No entregar conceptos alternativos.
+
+BLOQUE 6 — CONTINUIDAD MÍNIMA PARA EL PRÓXIMO EPISODIO
+Mostrar únicamente:
+- Último frame asset que debe conservarse.
+- Vestuario activo de cada personaje.
+- Qué sabe cada personaje al terminar.
+- Cliffhanger pendiente.
+- Primer estado visual del próximo episodio.
+Máximo 12 líneas.
+
+════════════════════════════════════════════════════════════════════
+REGLA DE ENTREGA FINAL
+════════════════════════════════════════════════════════════════════
+
+- Entrega todo en una sola respuesta.
+- No pidas confirmación.
+- No digas “continuaré”.
+- No agregues introducciones largas.
+- No agregues bloques distintos a los seis definidos.
+- No entregues alternativas, variantes ni retries.
+- No muestres tu proceso de análisis.
+- Todos los prompts deben estar completos, específicos y listos para copiar.
+- Si un dato menor falta, toma la decisión profesional más coherente con el canon.
+- Revisa internamente continuidad, duración, identidad, voz, ropa, manos, actuación y seguridad antes de responder.
+- Revisa que ninguna locación cambie abruptamente sin salida, puente, llegada o corte temporal claramente justificado.
+- Revisa que cada episodio tenga pago parcial, consecuencia y cliffhanger, no solo acumulación de misterio.
+- Revisa que ningún prompt final contenga referencias a personas conocidas.
+
+AHORA PRODUCE LA SERIE Y EL/LOS EPISODIO(S) SOLICITADO(S) SIGUIENDO ESTA SALIDA LIMPIA.
+</textarea>
+
+<footer>EDDIE PIXAL MICRODRAMA ENGINE V4.2 SAFE · INITIAL FRAME + FLOW PROMPT · 2026</footer>
+</div>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const STORAGE='EDDIE_PIXAL_MICRODRAMA_V4_2_FLOW_SAFE_SETTINGS';
+const ids=['idea','market','language','genre','tone','batch','episode_length','twist','visual','flow_route','cover'];
+function values(){const o={};ids.forEach(id=>o[id]=$(id).value);return o}
+function save(){localStorage.setItem(STORAGE,JSON.stringify(values()));alert('Configuración guardada.')}
+function load(){try{const o=JSON.parse(localStorage.getItem(STORAGE)||'{}');Object.entries(o).forEach(([k,v])=>{if($(k))$(k).value=v})}catch(e){}}
+function reset(){if(confirm('¿Limpiar la configuración?')){localStorage.removeItem(STORAGE);location.reload()}}
+function build(){
+  const idea=$('idea').value.trim();
+  if(!idea){$('error').style.display='block';return}
+  $('error').style.display='none';
+  const map={
+    '{{IDEA}}':idea,
+    '{{MARKET}}':$('market').value,
+    '{{LANGUAGE}}':$('language').value,
+    '{{GENRE}}':$('genre').value,
+    '{{TONE}}':$('tone').value,
+    '{{BATCH}}':$('batch').value.split(' ')[0],
+    '{{EPISODE_LENGTH}}':$('episode_length').value,
+    '{{TWIST}}':$('twist').value,
+    '{{VISUAL}}':$('visual').value,
+    '{{FLOW_ROUTE}}':$('flow_route').value,
+    '{{COVER}}':$('cover').value
+  };
+  let text=$('template').value;
+  Object.entries(map).forEach(([k,v])=>{text=text.split(k).join(v)});
+  $('output').value=text;
+  $('result').style.display='block';
+  const words=text.trim().split(/\s+/).length;
+  $('stats').textContent=text.length.toLocaleString()+' caracteres · '+words.toLocaleString()+' palabras';
+  $('result').scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function copy(){
+  const text=$('output').value;
+  try{await navigator.clipboard.writeText(text)}catch(e){$('output').select();document.execCommand('copy')}
+  $('copy').textContent='✓ COPIADO';setTimeout(()=>$('copy').textContent='COPIAR',1500);
+}
+function download(){
+  const blob=new Blob([$('output').value],{type:'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='EDDIE_PIXAL_MICRODRAMA_ENGINE_V4_2_FLOW_SAFE_MEGA_PROMPT.txt';
+  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+$('generate').addEventListener('click',build);
+$('save').addEventListener('click',save);
+$('reset').addEventListener('click',reset);
+$('copy').addEventListener('click',copy);
+$('download').addEventListener('click',download);
+$('selectall').addEventListener('click',()=>{$('output').focus();$('output').select()});
+load();
+</script>
+</body>
+</html>

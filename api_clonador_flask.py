@@ -264,13 +264,30 @@ def duracion_wav(ruta: Path) -> float:
         return 0.0
 
 
-def unir_wavs(partes: list[Path], destino: Path, pausa_ms: int = 150) -> None:
-    """Concatena WAVs del mismo formato intercalando un breve silencio."""
+def unir_wavs(partes: list[Path], destino: Path, pausa_ms: int = 150, bloques: list[str] = None) -> None:
+    """Concatena WAVs del mismo formato intercalando un breve silencio y genera subtitulos .srt."""
     partes = [p for p in partes if p.exists() and p.stat().st_size > 44]
     if not partes:
         raise RuntimeError("El modelo no generó ningún audio.")
+    
+    srt_lines = []
+    current_time = 0.0
+
+    def format_srt_time(seconds: float) -> str:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        ms = int((seconds % 1) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
     if len(partes) == 1:
         shutil.copyfile(partes[0], destino)
+        if bloques and len(bloques) == 1:
+            with wave.open(str(partes[0]), "rb") as w:
+                dur = w.getnframes() / w.getframerate()
+            srt_lines.append(f"1\n00:00:00,000 --> {format_srt_time(dur)}\n{bloques[0]}\n")
+            with open(destino.with_suffix('.srt'), 'w', encoding='utf-8') as f:
+                f.write("\n".join(srt_lines))
         return
 
     with wave.open(str(partes[0]), "rb") as w0:
@@ -284,8 +301,23 @@ def unir_wavs(partes: list[Path], destino: Path, pausa_ms: int = 150) -> None:
         for i, parte in enumerate(partes):
             with wave.open(str(parte), "rb") as w:
                 salida.writeframes(w.readframes(w.getnframes()))
+                
+                # Calcular subtítulo
+                if bloques and i < len(bloques):
+                    dur = w.getnframes() / w.getframerate()
+                    start_srt = format_srt_time(current_time)
+                    end_srt = format_srt_time(current_time + dur)
+                    srt_lines.append(f"{i+1}\n{start_srt} --> {end_srt}\n{bloques[i]}\n")
+                    current_time += dur
+
             if i < len(partes) - 1 and silencio:
                 salida.writeframes(silencio)
+                current_time += (pausa_ms / 1000.0)
+
+    # Escribir el archivo .srt
+    if srt_lines:
+        with open(destino.with_suffix('.srt'), 'w', encoding='utf-8') as f:
+            f.write("\n".join(srt_lines))
 
 
 # ---------------------------------------------------------------------------
@@ -445,9 +477,11 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
             tarea.emitir("cancelada")
             return
 
-        unir_wavs(partes, destino, int(cfg["pausa_ms"]))
+        unir_wavs(partes, destino, int(cfg["pausa_ms"]), bloques)
         tarea.estado = "terminada"
         tarea.emitir("fin", archivo=destino.name,
+                     tiempo=round(time.time() - inicio, 2), 
+                     srt=destino.with_suffix('.srt').name,
                      duracion=round(duracion_wav(destino), 2),
                      segundos=round(time.time() - inicio, 1))
     except Exception as exc:  # noqa: BLE001 — el mensaje se muestra íntegro en la web
@@ -466,9 +500,9 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
 clonador_bp = Blueprint("clonador_bp", __name__)
 
 
-@clonador_bp.route("/", methods=["GET"])
-def raiz() -> FileResponse:
-    return send_file(DIR_ESTATICO / "index.html")
+@clonador_bp.route("/clonador", methods=["GET"])
+def raiz():
+    return render_template("clonador_voz.html")
 
 
 @clonador_bp.route("/api/estado", methods=["GET"])
@@ -501,7 +535,7 @@ def obtener_config() -> dict[str, Any]:
 
 @clonador_bp.route("/api/config", methods=["POST"])
 def actualizar_config():
-    datos = request.get_json() -> dict[str, Any]:
+    datos = request.get_json()
     cfg = cargar_config()
     for clave, valor in datos.items():
         if clave in CONFIG_POR_DEFECTO:
@@ -554,7 +588,7 @@ def catalogo_modelos() -> dict[str, Any]:
 
 @clonador_bp.route("/api/modelo/descargar", methods=["POST"])
 def iniciar_descarga():
-    datos = request.get_json() -> dict[str, Any]:
+    datos = request.get_json()
     if DESCARGA.activa:
         return jsonify({"error": "Ya hay una descarga en curso."}), 409
 
@@ -590,7 +624,7 @@ def cancelar_descarga() -> dict[str, bool]:
 
 
 @clonador_bp.route("/api/modelo/progreso", methods=["GET"])
-def progreso_descarga() -> StreamingResponse:
+def progreso_descarga():
     def flujo():
         while True:
             yield f"data: {json.dumps(DESCARGA.instantanea())}\n\n"
@@ -611,8 +645,6 @@ def crear_voz() -> dict[str, Any]:
     audio = request.files.get('audio')
     nombre = request.form.get('nombre', '')
     transcripcion = request.form.get('transcripcion', '')
- str = Form(...),
-                    transcripcion: str = Form("")) -> dict[str, Any]:
     id_voz = uuid.uuid4().hex[:12]
     carpeta = DIR_VOCES / id_voz
     carpeta.mkdir(parents=True)
@@ -638,7 +670,7 @@ def crear_voz() -> dict[str, Any]:
     return meta_voz(carpeta) or {}
 
 
-@clonador_bp.route("/api/voces/{id_voz}", methods=["DELETE"])
+@clonador_bp.route("/api/voces/<id_voz>", methods=["DELETE"])
 def borrar_voz(id_voz: str) -> dict[str, bool]:
     carpeta = DIR_VOCES / Path(id_voz).name
     if not carpeta.is_dir():
@@ -647,22 +679,27 @@ def borrar_voz(id_voz: str) -> dict[str, bool]:
     return {"ok": True}
 
 
-@clonador_bp.route("/api/voces/{id_voz}/audio", methods=["GET"])
-def audio_voz(id_voz: str) -> FileResponse:
+@clonador_bp.route("/api/voces/<id_voz>/audio", methods=["GET"])
+def audio_voz(id_voz: str):
     ruta = DIR_VOCES / Path(id_voz).name / "referencia.wav"
     if not ruta.is_file():
         return jsonify({"error": "Audio no encontrado"}), 404
-    return send_file(ruta, media_type="audio/wav")
+    return send_file(ruta, mimetype="audio/wav")
 
 
 @clonador_bp.route("/api/generar", methods=["POST"])
 def generar():
-    datos = request.get_json() -> dict[str, Any]:
+    datos = request.get_json()
     cfg = cargar_config()
     for clave in ("idioma", "top_k", "top_p", "temp", "semilla", "max_frames",
                   "chars_por_bloque", "pausa_ms", "capas_gpu", "hilos"):
         if datos.get(clave) not in (None, ""):
             cfg[clave] = datos[clave]
+
+    # ESTABILIZADOR DE VOZ: Si la semilla es -1, generamos una única aleatoria para que todos los bloques (chunks) tengan la misma voz y no cambie.
+    if int(cfg.get("semilla", -1)) < 0:
+        import random
+        cfg["semilla"] = random.randint(1, 9999999)
 
     binario, modelo, mmproj = rutas_efectivas(cfg)
     for ruta, etiqueta in ((binario, "binario llama-tts"), (modelo, "modelo"),
@@ -675,6 +712,32 @@ def generar():
     texto = str(datos.get("texto", "")).strip()
     if not texto:
         return jsonify({"error": "Escribe el texto que quieres sintetizar."}), 400
+
+    # ----- OPCION 2: INTERCEPTOR DE EMOCIONES LLAMA 3 -----
+    import re
+    matches = re.findall(r'[\[\(](.*?)[\]\)]', texto)
+    if matches:
+        try:
+            from llama_cpp import Llama
+            models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "video_ai")
+            gguf_path = os.path.join(models_dir, "llama-3-8b-instruct.Q8_0.gguf")
+            if os.path.exists(gguf_path):
+                texto_limpio = re.sub(r'[\[\(].*?[\]\)]', '', texto).strip()
+                emociones_str = ", ".join(matches)
+                llm = Llama(model_path=gguf_path, n_ctx=1024, n_gpu_layers=-1, verbose=False)
+                sys_prompt = f"Eres un actor de voz experto. Toma el siguiente texto y reescríbelo para que se note claramente que estás: {emociones_str}. Usa puntuación exagerada, puntos suspensivos, pausas, y expresiones si es necesario para forzar a la IA de voz a sonar con esa emoción. Responde SOLO con el texto actuado, sin explicaciones ni comillas ni tu propio nombre."
+                output = llm.create_chat_completion(
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": texto_limpio}
+                    ],
+                    max_tokens=300
+                )
+                texto = output["choices"][0]["message"]["content"].strip()
+                print(f"[Emociones aplicadas] Llama3 reescribio el texto: {texto}")
+        except Exception as e:
+            print(f"[Emociones] Error procesando Llama3: {e}")
+    # --------------------------------------------------------
 
     ref: Path | None = None
     if datos.get("voz"):
@@ -703,8 +766,8 @@ def generar():
             "dispositivo": dispositivo or "CPU", "archivo": destino.name}
 
 
-@clonador_bp.route("/api/tarea/{id_tarea}/eventos", methods=["GET"])
-def eventos(id_tarea: str) -> StreamingResponse:
+@clonador_bp.route("/api/tarea/<id_tarea>/eventos", methods=["GET"])
+def eventos(id_tarea: str):
     tarea = TAREAS.get(id_tarea)
     if not tarea:
         return jsonify({"error": "Tarea no encontrada"}), 404
@@ -725,7 +788,7 @@ def eventos(id_tarea: str) -> StreamingResponse:
     return Response(stream_with_context(flujo()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@clonador_bp.route("/api/tarea/{id_tarea}/cancelar", methods=["POST"])
+@clonador_bp.route("/api/tarea/<id_tarea>/cancelar", methods=["POST"])
 def cancelar(id_tarea: str) -> dict[str, bool]:
     tarea = TAREAS.get(id_tarea)
     if not tarea:
@@ -748,15 +811,33 @@ def listar_salidas() -> list[dict[str, Any]]:
     } for a in archivos[:80]]
 
 
-@clonador_bp.route("/api/salidas/{archivo}", methods=["GET"])
-def obtener_salida(archivo: str) -> FileResponse:
+@clonador_bp.route("/api/salidas/<archivo>", methods=["GET"])
+def obtener_salida(archivo: str):
     ruta = DIR_SALIDAS / Path(archivo).name
     if not ruta.is_file():
-        return jsonify({"error": "Audio no encontrado"}), 404
-    return send_file(ruta, media_type="audio/wav", filename=ruta.name)
+        return jsonify({"error": "Archivo no encontrado"}), 404
+    return send_file(ruta, download_name=ruta.name, as_attachment=True)
 
 
-@clonador_bp.route("/api/salidas/{archivo}", methods=["DELETE"])
+@clonador_bp.route("/api/salidas/<archivo>/abrir", methods=["POST"])
+def abrir_salida(archivo: str):
+    import subprocess
+    ruta = DIR_SALIDAS / Path(archivo).name
+    if not ruta.is_file():
+        return jsonify({"error": "Archivo no encontrado"}), 404
+    try:
+        if os.name == 'nt':
+            subprocess.run(['explorer', '/select,', str(ruta)])
+        elif sys.platform == 'darwin':
+            subprocess.run(['open', '-R', str(ruta)])
+        else:
+            subprocess.run(['xdg-open', str(DIR_SALIDAS)])
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@clonador_bp.route("/api/salidas/<archivo>", methods=["DELETE"])
 def borrar_salida(archivo: str) -> dict[str, bool]:
     ruta = DIR_SALIDAS / Path(archivo).name
     ruta.unlink(missing_ok=True)

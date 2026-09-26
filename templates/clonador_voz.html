@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clonador de voz local · Qwen3-TTS</title>
-<link rel="stylesheet" href="/static//static/clonador_style.css">
+<link rel="stylesheet" href="/static/clonador_style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
 </head>
 <body>
@@ -85,6 +85,7 @@
     <div id="p-grabar" class="panel oculto">
       <div class="grabadora">
         <button id="btn-grabar" class="btn btn-grabar">● Grabar</button>
+        <button id="btn-pausar-grabar" class="btn btn-secundario oculto" style="margin-left: 8px;">⏸ Pausar</button>
         <span id="cronometro" class="cronometro">0.0 s</span>
         <canvas id="vumetro" width="240" height="40"></canvas>
       </div>
@@ -208,6 +209,6 @@
 
 </main>
 
-<script src="/static//static/clonador_app.js"></script>
+<script src="/static/clonador_app.js"></script>
 </body>
 </html>

@@ -1,0 +1,746 @@
+// Logica para el Estudio Creador IA
+
+function openEstudioIA() {
+    // 1. Mostrar el overlay
+    let overlay = document.getElementById('estudio-fullscreen-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'estudio-fullscreen-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100vw';
+        overlay.style.height = '100vh';
+        overlay.style.zIndex = '999999';
+        overlay.style.background = '#0d0d12';
+        document.body.appendChild(overlay);
+
+        fetch('/api/ia/ui_template?t=' + new Date().getTime())
+            .then(response => {
+                if(!response.ok) throw new Error("Error HTTP: " + response.status);
+                return response.text();
+            })
+            .then(html => {
+                overlay.innerHTML = html;
+                initEstudioEventHandlers(); // Iniciar botones
+                cargarModelos(); // Cargar modelos disponibles para llenar el dropdown
+            })
+            .catch(error => {
+                console.error("Error al cargar Estudio IA:", error);
+                overlay.innerHTML = "<div style='color:red; padding:20px;'>Error</div>";
+            });
+    } else {
+        overlay.style.display = 'block';
+    }
+}
+
+window.cerrarEstudioIA = function() {
+    const overlay = document.getElementById('estudio-fullscreen-overlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+}
+
+window.switchEstudioView = function(viewId) {
+    document.querySelectorAll('.estudio-view').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.view-tab').forEach(el => el.classList.remove('active'));
+    
+    const targetView = document.getElementById('view-' + viewId);
+    if (targetView) targetView.classList.add('active');
+    
+    // Marcar la pestaña correcta como activa
+    document.querySelectorAll('.view-tab').forEach(tab => {
+        if (tab.textContent.toLowerCase().includes(viewId === 'generacion' ? 'generador' : 'editor')) {
+            tab.classList.add('active');
+        }
+    });
+}
+
+function initEstudioEventHandlers() {
+    const btnProcessGen = document.getElementById('btn-process-gen');
+    if (btnProcessGen) {
+        btnProcessGen.addEventListener('click', () => {
+            const promptValue = document.getElementById('prompt-input-gen').value.trim();
+            if(!promptValue) {
+                mostrarToast("Falta el Prompt", "Por favor ingresa un Prompt de Video antes de generar.", true);
+                return;
+            }
+            btnProcessGen.innerText = "Procesando...";
+            const upscale = document.getElementById('toggle-upscale-gen')?.classList.contains('active');
+            const fps60 = document.getElementById('toggle-60fps-gen')?.classList.contains('active');
+            const lipsync = document.getElementById('toggle-lipsync-gen')?.classList.contains('active');
+            const resolution = document.getElementById('select-resolution-gen')?.value || '1080p';
+            const duration = document.getElementById('select-duration-gen')?.value || '10';
+            const modelId = document.getElementById('select-active-model')?.value || '';
+            
+            if (!modelId) {
+                mostrarToast("Modelo Requerido", "Por favor, selecciona un modelo en el apartado 'Modelo Activo' antes de generar.", true);
+                btnProcessGen.innerText = "Generar Video Ahora";
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('model_id', modelId);
+            formData.append('prompt', promptValue);
+            formData.append('resolution', resolution);
+            formData.append('duration', duration);
+            formData.append('upscale', upscale);
+            formData.append('fps60', fps60);
+            formData.append('lipsync', lipsync);
+
+            const baseImageInput = document.getElementById('base-image-input');
+            if (baseImageInput && baseImageInput.files.length > 0) {
+                formData.append('base_image', baseImageInput.files[0]);
+            }
+
+            if (lipsync) {
+                const audioFile = document.getElementById('audio-file').files[0];
+                if (!audioFile) {
+                    mostrarToast("Falta Audio", "Para activar Lip-Sync debes seleccionar un archivo de audio (MP3/WAV).", true);
+                    btnProcessGen.innerText = "Generar Video Ahora";
+                    return;
+                }
+                formData.append('audio', audioFile);
+            }
+            
+            // Generación en segundo plano (No bloqueante)
+            btnProcessGen.innerHTML = `<i class="ph-bold ph-spinner ph-spin"></i> Generando Video (Procesando IA)...`;
+            btnProcessGen.disabled = true;
+            btnProcessGen.style.boxShadow = "0 0 20px var(--accent-primary)";
+            btnProcessGen.style.opacity = "0.8";
+            mostrarToast("Generación Iniciada", "La IA está procesando tu video. Esto tomará varios minutos, no cierres la aplicación.", false);
+
+            fetch('/api/ia/generar_video', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                btnProcessGen.innerHTML = "Generar Video Ahora";
+                btnProcessGen.disabled = false;
+                btnProcessGen.style.boxShadow = "none";
+                btnProcessGen.style.opacity = "1";
+                if(data.success) {
+                    mostrarToast("¡Video Completado!", "Tu video se ha generado con éxito y está en la biblioteca.", false);
+                    cargarHistorial();
+                    // Opcional: window.switchEstudioView('edicion'); // No forzar cambio si el usuario está en otra cosa
+                } else {
+                    mostrarToast("Error", data.error, true);
+                }
+            })
+            .catch(error => {
+                btnProcessGen.innerHTML = "Generar Video Ahora";
+                btnProcessGen.disabled = false;
+                btnProcessGen.style.boxShadow = "none";
+                btnProcessGen.style.opacity = "1";
+                console.error("Error en la petición:", error);
+                mostrarToast("Error de conexión", "No se pudo comunicar con el backend local.", true);
+            });
+        });
+    }
+
+    const btnProcess = document.querySelector('.btn-process:not(#btn-process-gen)');
+    if (btnProcess) {
+        btnProcess.addEventListener('click', () => {
+            const promptValue = document.getElementById('prompt-input').value.trim();
+            if(!promptValue) {
+                mostrarToast("Falta el Prompt", "Por favor ingresa un Prompt de Video.", true);
+                return;
+            }
+            btnProcess.innerText = "Procesando...";
+            const upscale = document.getElementById('toggle-upscale')?.classList.contains('active');
+            const fps60 = document.getElementById('toggle-60fps')?.classList.contains('active');
+            const lipsync = document.getElementById('toggle-lipsync')?.classList.contains('active');
+            
+            // Simulación de llamada a la IA
+            fetch('/api/ia/generar_video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    prompt: promptValue,
+                    upscale: upscale,
+                    fps60: fps60,
+                    lipsync: lipsync
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                btnProcess.innerText = "Procesar Video";
+                if(data.success) {
+                    mostrarToast("Procesamiento Exitoso", data.mensaje);
+                    cargarHistorial(); // Refrescar historial por si acaso
+                } else {
+                    mostrarToast("Error", data.error, true);
+                }
+            })
+            .catch(error => {
+                btnProcess.innerText = "Procesar Video";
+                console.error("Error en la petición:", error);
+                mostrarToast("Error de conexión", "Fallo al procesar el video.", true);
+            });
+        });
+    }
+
+    const btnGestor = document.getElementById('btn-abrir-gestor-modelos');
+    if (btnGestor) {
+        btnGestor.addEventListener('click', () => {
+            const modal = document.getElementById('modalGestorModelos');
+            if(modal) {
+                modal.style.display = 'flex';
+                cargarModelos();
+            }
+        });
+    }
+
+    // Listener para subir assets a la biblioteca (vista Edición)
+    const fileInput = document.getElementById('asset-file-input');
+    if (fileInput) {
+        fileInput.addEventListener('change', (e) => {
+            if(e.target.files && e.target.files.length > 0) {
+                const file = e.target.files[0];
+                subirAsset(file);
+                e.target.value = ''; // Reset para permitir subir el mismo archivo
+            }
+        });
+    }
+
+    // Toggles interactivity
+    document.querySelectorAll('.toggle-switch').forEach(toggle => {
+        toggle.addEventListener('click', function() {
+            this.classList.toggle('active');
+        });
+    });
+
+    // Custom Video Player Logic
+    const vidEl = document.getElementById('preview-media-vid');
+    const btnPlayPause = document.getElementById('btn-play-pause');
+    const progressFill = document.getElementById('preview-progress-fill');
+    const progressBar = document.getElementById('preview-progress-bar');
+    const timeLabel = document.getElementById('preview-time-label');
+
+    if (vidEl && btnPlayPause) {
+        // Toggle play/pause
+        btnPlayPause.addEventListener('click', () => {
+            if (vidEl.paused) {
+                vidEl.play().catch(e => console.error(e));
+            } else {
+                vidEl.pause();
+            }
+        });
+
+        // Update icon on play/pause
+        vidEl.addEventListener('play', () => {
+            btnPlayPause.classList.remove('ph-play');
+            btnPlayPause.classList.add('ph-pause');
+        });
+        vidEl.addEventListener('pause', () => {
+            btnPlayPause.classList.remove('ph-pause');
+            btnPlayPause.classList.add('ph-play');
+        });
+
+        // Update progress bar & time
+        vidEl.addEventListener('timeupdate', () => {
+            if (!vidEl.duration) return;
+            const percent = (vidEl.currentTime / vidEl.duration) * 100;
+            if(progressFill) progressFill.style.width = percent + '%';
+            
+            const formatTime = (time) => {
+                const min = Math.floor(time / 60).toString().padStart(2, '0');
+                const sec = Math.floor(time % 60).toString().padStart(2, '0');
+                return `${min}:${sec}`;
+            };
+            if(timeLabel) {
+                timeLabel.innerText = `SHORTS/REELS | ${formatTime(vidEl.currentTime)} / ${formatTime(vidEl.duration)}`;
+            }
+        });
+
+        // Click on timeline to seek
+        if (progressBar) {
+            progressBar.addEventListener('click', (e) => {
+                if (!vidEl.duration) return;
+                const rect = progressBar.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const newTime = (clickX / rect.width) * vidEl.duration;
+                vidEl.currentTime = newTime;
+            });
+        }
+    }
+
+    const btnClearPreview = document.getElementById('btn-clear-preview');
+    if (btnClearPreview) {
+        btnClearPreview.addEventListener('click', () => {
+            if (vidEl) {
+                vidEl.pause();
+                vidEl.src = '';
+                vidEl.style.display = 'none';
+            }
+            const imgEl = document.getElementById('preview-media-img');
+            if (imgEl) {
+                imgEl.src = '';
+                imgEl.style.display = 'none';
+            }
+            const placeholder = document.getElementById('preview-placeholder');
+            if (placeholder) placeholder.style.display = 'flex';
+            
+            btnClearPreview.style.display = 'none';
+            if (timeLabel) timeLabel.innerText = "SHORTS/REELS | 00:00 / 00:00";
+            if (progressFill) progressFill.style.width = '0%';
+        });
+    }
+
+    const btnFullscreen = document.getElementById('btn-fullscreen');
+    if (btnFullscreen) {
+        btnFullscreen.addEventListener('click', () => {
+            const previewContainer = document.getElementById('main-preview-container');
+            if (!previewContainer) return;
+            
+            if (!document.fullscreenElement) {
+                if (previewContainer.requestFullscreen) {
+                    previewContainer.requestFullscreen();
+                } else if (previewContainer.webkitRequestFullscreen) {
+                    previewContainer.webkitRequestFullscreen();
+                } else if (previewContainer.msRequestFullscreen) {
+                    previewContainer.msRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        });
+    }
+
+    cargarHistorial();
+}
+
+function subirAsset(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    fetch('/api/ia/upload_asset', {
+        method: 'POST',
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(data.success) {
+            cargarHistorial();
+        } else {
+            mostrarToast("Error", "Error al subir: " + data.error, true);
+        }
+    })
+    .catch(err => console.error("Error subiendo asset:", err));
+}
+
+window.currentAssetTab = 'video';
+window.assetHistoryItems = [];
+
+window.switchAssetTab = function(type, el) {
+    window.currentAssetTab = type;
+    const tabs = document.querySelectorAll('.asset-tabs .asset-tab');
+    tabs.forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    renderizarHistorial(window.assetHistoryItems);
+};
+
+function cargarHistorial() {
+    fetch('/api/ia/assets_library')
+        .then(res => res.json())
+        .then(data => {
+            if(data.success && data.items) {
+                window.assetHistoryItems = data.items;
+                renderizarHistorial(data.items);
+            }
+        })
+        .catch(err => console.error("Error cargando historial:", err));
+}
+
+function renderizarHistorial(items) {
+    const container = document.getElementById('asset-grid-container');
+    if(!container) return;
+    
+    container.innerHTML = '';
+    
+    const filteredItems = items.filter(item => item.type === window.currentAssetTab);
+    
+    if (filteredItems.length === 0) {
+        container.innerHTML = '<div style="color:#94a3b8; font-size: 0.8rem; padding: 10px;">No hay recursos. Sube uno o genera un video.</div>';
+        return;
+    }
+    
+    filteredItems.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'asset-item';
+        
+        // Auto-cargar eliminado, el usuario debe hacer click manualmente.
+        
+        if (item.type === 'video') {
+            div.innerHTML = `
+                <video src="${item.url}" style="width:100%; height:100%; object-fit:cover;"></video>
+                <div class="asset-time">VID</div>
+            `;
+            // Play video on hover
+            const vid = div.querySelector('video');
+            div.addEventListener('mouseenter', () => { vid.play().catch(e=>{}); });
+            div.addEventListener('mouseleave', () => { vid.pause(); });
+        } else {
+            div.innerHTML = `
+                <img src="${item.url}" alt="${item.name}" style="width:100%; height:100%; object-fit:cover;">
+                <div class="asset-time">IMG</div>
+            `;
+        }
+        
+        div.style.cursor = 'pointer';
+        div.addEventListener('click', () => {
+            const imgEl = document.getElementById('preview-media-img');
+            const vidEl = document.getElementById('preview-media-vid');
+            const btnClear = document.getElementById('btn-clear-preview');
+            const placeholder = document.getElementById('preview-placeholder');
+            const btnDescargar = document.getElementById('btn-descargar-estudio');
+            const downloadIcon = document.getElementById('download-icon');
+            const downloadText = document.getElementById('download-text');
+            
+            if (placeholder) placeholder.style.display = 'none';
+            
+            // Habilitar boton de descarga
+            if(btnDescargar) {
+                btnDescargar.style.opacity = '1';
+                btnDescargar.style.cursor = 'pointer';
+                btnDescargar.disabled = false;
+                window.estudioCurrentFile = item.name;
+                
+                if (downloadIcon) {
+                    downloadIcon.className = 'ph-fill ph-check-circle';
+                    downloadIcon.style.color = '#2dcc70';
+                }
+                if (downloadText) downloadText.innerText = item.name + ' seleccionado.';
+            }
+            
+            if(imgEl && vidEl) {
+                if (item.type === 'video') {
+                    imgEl.style.display = 'none';
+                    vidEl.style.display = 'block';
+                    vidEl.src = item.url;
+                    if (btnClear) btnClear.style.display = 'flex';
+                    vidEl.play().catch(e => console.error(e));
+                } else {
+                    vidEl.style.display = 'none';
+                    vidEl.pause();
+                    imgEl.style.display = 'block';
+                    imgEl.src = item.url;
+                    if (btnClear) btnClear.style.display = 'flex';
+                }
+            }
+        });
+        
+        container.appendChild(div);
+    });
+}
+
+window.descargarVideoActualEstudio = function() {
+    if(window.estudioCurrentFile) {
+        fetch('/api/salidas/' + encodeURIComponent(window.estudioCurrentFile) + '/abrir')
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                mostrarToast("Carpeta Abierta", "Se abrió la carpeta con tu archivo generado.", false);
+            } else {
+                mostrarToast("Error", data.error || "No se pudo abrir la ubicación.", true);
+            }
+        })
+        .catch(err => {
+            console.error("Error abriendo ubicación:", err);
+            mostrarToast("Error", "Error de conexión al abrir la ubicación.", true);
+        });
+    }
+};
+
+function cargarModelos() {
+    fetch('/api/ia/modelos?t=' + Date.now())
+        .then(response => response.json())
+        .then(data => {
+            if(data.success && data.modelos) {
+                renderizarModelos(data.modelos);
+                
+                // Hacer polling automático si hay alguna descarga activa
+                const hayDescargas = data.modelos.some(m => m.downloading);
+                if (hayDescargas) {
+                    if (window.pollingDescargas) clearTimeout(window.pollingDescargas);
+                    window.pollingDescargas = setTimeout(cargarModelos, 1000);
+                }
+            } else {
+                document.getElementById('modelos-lista-container').innerHTML = `<div style="color:red; padding: 20px;">Error al cargar modelos.</div>`;
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            document.getElementById('modelos-lista-container').innerHTML = `<div style="color:red; padding: 20px;">Fallo de conexión.</div>`;
+        });
+}
+
+function renderizarModelos(modelos) {
+    const container = document.getElementById('modelos-lista-container');
+    container.innerHTML = ''; // Limpiar
+
+    const selectActivo = document.getElementById('select-active-model');
+    let selectVal = "";
+    if (selectActivo) {
+        selectVal = selectActivo.value;
+        selectActivo.innerHTML = "";
+    }
+    let modelosInstalados = 0;
+    
+    // Create OptGroups for the select
+    let groupT2V, groupI2V, groupT2I;
+    if (selectActivo) {
+        groupT2V = document.createElement('optgroup');
+        groupT2V.label = "Texto a Video";
+        groupI2V = document.createElement('optgroup');
+        groupI2V.label = "Imagen a Video";
+        groupT2I = document.createElement('optgroup');
+        groupT2I.label = "Generación de Imágenes";
+    }
+
+    modelos.forEach(m => {
+        if (selectActivo && m.installed && m.type !== "other") {
+            modelosInstalados++;
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            opt.textContent = `${m.name} (${m.description})`;
+            
+            if (m.type === "t2v") {
+                groupT2V.appendChild(opt);
+            } else if (m.type === "i2v") {
+                groupI2V.appendChild(opt);
+            } else if (m.type === "t2i") {
+                groupT2I.appendChild(opt);
+            } else if (m.type === "both") {
+                const optClone = opt.cloneNode(true);
+                groupT2V.appendChild(opt);
+                groupI2V.appendChild(optClone);
+            }
+        }
+
+        const item = document.createElement('div');
+        item.style.cssText = "background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px; display: flex; justify-content: space-between; align-items: center;";
+        
+        let botonHtml = '';
+        if (m.installed) {
+            botonHtml = `
+                <div style="display: flex; gap: 5px;">
+                    <button class="btn-estudio" style="background: rgba(45, 204, 112, 0.1); border-color: rgba(45, 204, 112, 0.3); color: #2dcc70; pointer-events: none; padding: 8px 12px; font-size: 0.8rem;">
+                        <i class="ph-bold ph-check"></i> Instalado
+                    </button>
+                    <button class="btn-estudio" style="background: rgba(255, 77, 95, 0.1); border:none; color: #ff4d5f; padding: 8px 12px; font-size: 0.8rem; cursor: pointer; border-radius: 6px;" onclick="accionModelo('${m.id}', 'delete')" title="Borrar modelo">
+                        <i class="ph-bold ph-trash"></i>
+                    </button>
+                </div>
+            `;
+        } else if (m.downloading) {
+            const icon = m.paused ? "ph-play" : "ph-pause";
+            const actionPause = m.paused ? "resume" : "pause";
+            const text = m.paused ? "Pausado" : "Descargando";
+            const color = m.paused ? "#94a3b8" : "#ffc107";
+            botonHtml = `
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-estudio" style="background: rgba(255,255,255,0.1); border:none; color: ${color}; padding: 6px 10px; font-size: 0.8rem; cursor: pointer; border-radius: 6px;" onclick="accionModelo('${m.id}', '${actionPause}')">
+                            <i class="ph-bold ${icon}"></i>
+                        </button>
+                        <button class="btn-estudio" style="background: rgba(255, 77, 95, 0.1); border:none; color: #ff4d5f; padding: 6px 10px; font-size: 0.8rem; cursor: pointer; border-radius: 6px;" onclick="accionModelo('${m.id}', 'cancel')">
+                            <i class="ph-bold ph-x"></i>
+                        </button>
+                    </div>
+                    <div style="font-size: 0.75rem; color: ${color}; display: flex; align-items: center; gap: 5px; font-weight: bold;">
+                        ${!m.paused ? '<i class="ph-duotone ph-spinner ph-spin"></i>' : ''} ${text} ${m.progress}%
+                    </div>
+                    <div style="width: 140px; height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-top: 2px;">
+                        <div style="width: ${m.progress}%; height: 100%; background: ${color}; transition: width 0.3s;"></div>
+                    </div>
+                    ${!m.paused ? `
+                    <div style="font-size: 0.65rem; color: #94a3b8; display: flex; justify-content: space-between; width: 140px; margin-top: 2px;">
+                        <span>${m.downloaded_mb} / ${m.total_mb} MB</span>
+                        <span>${m.speed_mbps} MB/s</span>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        } else {
+            botonHtml = `<button class="btn-estudio" style="background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; color: #000; padding: 8px 12px; font-size: 0.8rem;" onclick="iniciarDescarga('${m.id}')"><i class="ph-bold ph-download-simple"></i> Descargar</button>`;
+        }
+        
+        item.innerHTML = `
+            <div style="flex: 1;">
+                <h4 style="margin: 0; color: #fff; font-size: 0.9rem;">${m.name} <span style="font-size: 0.7rem; color: #94a3b8; margin-left: 8px;">(${m.size_gb} GB)</span></h4>
+                <p style="margin: 5px 0 0 0; color: #94a3b8; font-size: 0.75rem; line-height: 1.4;">${m.description}</p>
+            </div>
+            <div style="margin-left: 15px;">
+                ${botonHtml}
+            </div>
+        `;
+        container.appendChild(item);
+    });
+
+    if (selectActivo) {
+        if (modelosInstalados === 0) {
+            const opt = document.createElement('option');
+            opt.value = "";
+            opt.textContent = "Ningún modelo instalado";
+            selectActivo.appendChild(opt);
+        } else {
+            if (groupT2V.children.length > 0) selectActivo.appendChild(groupT2V);
+            if (groupI2V.children.length > 0) selectActivo.appendChild(groupI2V);
+            if (groupT2I.children.length > 0) selectActivo.appendChild(groupT2I);
+        }
+        
+        // Restore value if it still exists in the new options
+        if (selectVal) {
+            const hasOption = Array.from(selectActivo.options).some(o => o.value === selectVal);
+            if (hasOption) {
+                selectActivo.value = selectVal;
+            }
+        }
+    }
+}
+
+function iniciarDescarga(modelId) {
+    fetch('/api/ia/descargar_modelo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({id: modelId})
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(data.success) {
+            // Recargar la lista para mostrar "Descargando..." y activar polling
+            cargarModelos();
+            mostrarToast("Descarga Iniciada", data.mensaje);
+        } else {
+            mostrarToast("Error", data.error, true);
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        mostrarToast("Error", "Fallo de conexión al descargar.", true);
+    });
+}
+
+window.accionModelo = function(modelId, action) {
+    fetch('/api/ia/modelo_accion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({id: modelId, action: action})
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(data.success) {
+            cargarModelos();
+        }
+    });
+}
+
+// Escuchar cambios de pestañas para cerrar el Estudio IA
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.sidebar .nav-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            if (item.id !== 'btn-nav-estudio') {
+                const moduloEstudio = document.getElementById('moduleEstudioIA');
+                if (moduloEstudio) moduloEstudio.style.display = 'none';
+                
+                const projectsSec = document.querySelector('.projects-section');
+                if (projectsSec) projectsSec.style.display = 'block';
+                
+                const bottomProcess = document.getElementById('bottomProcessPanel');
+                if (bottomProcess) bottomProcess.style.display = 'flex';
+            }
+        });
+    });
+});
+
+// ---- TOAST NOTIFICATIONS ----
+window.mostrarToast = function(titulo, mensaje, isError = false) {
+    const container = document.getElementById('estudio-toast-container');
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `estudio-toast ${isError ? 'estudio-toast-error' : ''}`;
+    
+    const iconClass = isError ? 'ph-warning-circle' : 'ph-check-circle';
+    const iconColor = isError ? '#ff4d5f' : '#a855f7';
+    
+    toast.innerHTML = `
+        <div class="estudio-toast-icon" style="color: ${iconColor};">
+            <i class="ph-fill ${iconClass}"></i>
+        </div>
+        <div class="estudio-toast-content">
+            <div class="estudio-toast-title">${titulo}</div>
+            <div class="estudio-toast-msg">${mensaje}</div>
+        </div>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Animate in
+    setTimeout(() => {
+        toast.classList.add('show');
+    }, 10);
+    
+    // Remove after 4 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300); // Wait for transition
+    }, 4000);
+}
+
+window.generarPromptMagico = function() {
+    const inputArea = document.getElementById('prompt-input-gen');
+    let ideaBasica = inputArea.value.trim();
+    
+    // Obtener todos los estilos activos
+    const activeChips = document.querySelectorAll('.style-chip.active');
+    let estilosSeleccionados = [];
+    activeChips.forEach(chip => {
+        // Remover el emoji del texto (ej. "🍓 Frutinovelas" -> "Frutinovelas")
+        estilosSeleccionados.push(chip.innerText.replace(/[\u1000-\uFFFF]/g, '').trim());
+    });
+
+    if (estilosSeleccionados.length > 0) {
+        ideaBasica += ` (Estilos: ${estilosSeleccionados.join(', ')})`;
+    }
+
+    if (!ideaBasica.trim()) {
+        mostrarToast("Falta tu idea", "Escribe una idea básica primero para que la IA la convierta en un prompt espectacular.", true);
+        return;
+    }
+    
+    mostrarToast("Director IA", "Generando un prompt detallado profesional...", false);
+    
+    fetch('/api/ia/generar_prompt', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt: ideaBasica })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            inputArea.value = data.prompt;
+            inputArea.scrollTop = 0; // Evitar que se baje y desaparezca el inicio
+            mostrarToast("¡Listo!", "Tu prompt ha sido mejorado por el Director IA.", false);
+        } else {
+            mostrarToast("Error", data.error || "Ocurrió un error al generar el prompt", true);
+        }
+    })
+    .catch(err => {
+        console.error("Error generating prompt:", err);
+        mostrarToast("Error de conexión", "No se pudo conectar con el Director IA local.", true);
+    });
+};
+
+
+window.toggleStyle = function(btn) {
+    btn.classList.toggle('active');
+};

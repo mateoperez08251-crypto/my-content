@@ -41,6 +41,19 @@ Sistema local capaz de generar y editar videos profesionales usando IA, sin depe
 | **AnimateDiff + SDXL** | T2V | ~12GB | ⭐⭐⭐½ | Muy versátil: acepta LoRAs y ControlNets. Ideal para estilos artísticos. |
 | **Open-Sora 1.2** (HPC-AI) | T2V | ~16GB | ⭐⭐⭐⭐ | Réplica open-source de Sora. Videos largos (hasta 16 segundos). |
 
+#### 🖥️ Optimización Especial: Equipos con 12GB VRAM y 16GB RAM (Ej. TITAN Xp)
+
+Para computadoras con **12GB de VRAM** (como la NVIDIA TITAN Xp) y **16GB de RAM de sistema** (como un Xeon E5-2673 v3), modelos pesados como HunyuanVideo o Wan2.1-14B causarán errores de falta de memoria (Out of Memory) porque sobrepasan tanto la tarjeta de video como la RAM principal. 
+
+Para que tu amigo pueda probar el sistema sin que su PC explote, estos son los **mejores modelos que encajan perfectamente en esas especificaciones**:
+
+| Modelo | Tipo | VRAM | Calidad | Notas |
+|---|---|---|---|---|
+| **Wan2.1-1.3B** (Alibaba) | T2V + I2V | ~8-10GB | ⭐⭐⭐⭐½ | La versión "ligera" del monstruoso Wan2.1. Da un resultado visual excelente y cabe perfecto en los 12GB de la TITAN Xp sin usar RAM extra. |
+| **CogVideoX-2B** (ZhipuAI) | T2V + I2V | ~10-12GB | ⭐⭐⭐⭐ | Excelente movimiento coherente. La versión de 2 billones de parámetros funcionará al límite, pero bien. |
+| **LTX-Video** (Lightricks) | T2V + I2V | ~9-11GB | ⭐⭐⭐⭐ | Muy rápido. Es tu mejor opción para que tu amigo haga pruebas rápidas y genere videos sin esperar horas. |
+| **Stable Video Diffusion (SVD)** | I2V | ~8GB | ⭐⭐⭐⭐ | Perfecto para tomar una foto estática y animarla. Súper eficiente con los 12GB de memoria de la TITAN Xp. |
+
 ---
 
 ### ✂️ Edición y Postprocesamiento con IA
@@ -130,6 +143,15 @@ La RTX A5000 tiene VRAM de sobra, pero hay que ser inteligente:
 
 ---
 
+### 📦 Gestor de Descargas Integrado (UI)
+**Requisito indispensable:** Para evitar que el sistema sea complejo de instalar (y pensando en la PC de tu amigo o futuros usuarios), el programa debe incluir un **Centro de Descargas Visual**.
+- Existirá una pestaña o modal en la interfaz principal con una **lista de todos los modelos disponibles** (HunyuanVideo, Wan2.1, LTX-Video, Upscalers, etc.).
+- Cada modelo tendrá un botón de **"Descargar"** junto a su peso (Ej: `[Descargar 10.5 GB]`).
+- La descarga se hará **manualmente por el usuario** desde la misma interfaz del programa (sin usar archivos `.bat` externos ni comandos de terminal).
+- El backend usará el sistema de descargas resumibles (con validación SHA-256) previamente diseñado en `LEEME.md` para garantizar que no se corrompan los archivos grandes.
+
+---
+
 ## 4. Fases de Implementación
 
 ### Fase 1 — Fundación (1-2 semanas)
@@ -154,9 +176,18 @@ La RTX A5000 tiene VRAM de sobra, pero hay que ser inteligente:
 
 ### Fase 4 — Integración con ContentAppPro (1-2 semanas)
 - [ ] Crear módulo/panel dentro de la app principal
+- [ ] Desarrollar Gestor de Descargas Nativo (para bajar modelos desde la UI sin salir del programa ni usar .bat)
 - [ ] Conectar con el sistema de subida a TikTok/YouTube/Facebook
 - [ ] Agregar presets (estilos predefinidos de video)
+- [ ] Implementar el sistema de Aleatoriedad de Prompts (usando `generate_prompt_variation.py` y `styles_pool.json`) para evitar que la IA repita escenas.
 - [ ] Optimizar UX: barra de progreso, preview, historial
+
+### Fase 5 — Postproducción Automática y Expansión (La pieza final)
+- [ ] Conectar el "Clonador de Voz" existente directamente al pipeline de Video (Narrador + Avatar).
+- [ ] Integrar Auto-Subtitulado Dinámico (estilo TikTok/Reels) nativo para los videos generados con IA.
+- [ ] Generación/Inyección de Efectos de Sonido (SFX) y Música de fondo con IA.
+- [ ] Añadir soporte para "LoRAs" (Para poder generar a una persona específica o producto de marca consistente).
+- [ ] Generación automática de Guiones (usando un LLM) para crear un video completo de 0 a 100 solo con un click.
 
 ---
 

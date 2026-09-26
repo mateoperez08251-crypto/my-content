@@ -5,6 +5,7 @@ import subprocess
 import sys
 import os
 import json
+from modulo_ia import ia_bp
 import datetime
 import time
 import ctypes
@@ -76,17 +77,153 @@ def init_firebase_async():
         except Exception as e:
             print(">>> ERROR CONECTANDO FIREBASE:", e)
 
-# Iniciar firebase en un hilo para no bloquear el arranque
 import threading
 threading.Thread(target=init_firebase_async, daemon=True).start()
 
+import uuid
+import socket
+import platform
+
+is_blocked = False
+
+def get_hwid():
+    mac = uuid.getnode()
+    host = socket.gethostname()
+    return f"{host}-{mac}"
+
+def check_killswitch():
+    global is_blocked
+    if firebase_db:
+        try:
+            hwid = get_hwid()
+            doc = firebase_db.collection("blocked_users").document(hwid).get()
+            if doc.exists:
+                is_blocked = True
+        except Exception:
+            pass
+
+def log_telemetry(action, details=""):
+    if firebase_db and not getattr(sys, 'frozen', False) == False: # Optional checking
+        try:
+            hwid = get_hwid()
+            doc_ref = firebase_db.collection("app_telemetry").document()
+            doc_ref.set({
+                "hwid": hwid,
+                "hostname": socket.gethostname(),
+                "os": platform.system() + " " + platform.release(),
+                "timestamp": firestore.SERVER_TIMESTAMP,
+                "action": action,
+                "details": details
+            })
+        except Exception:
+            pass
+
+def log_error_telemetry(error_msg, details=""):
+    if firebase_db:
+        try:
+            hwid = get_hwid()
+            doc_ref = firebase_db.collection("app_errors").document()
+            doc_ref.set({
+                "hwid": hwid,
+                "hostname": socket.gethostname(),
+                "timestamp": firestore.SERVER_TIMESTAMP,
+                "error": error_msg,
+                "details": details
+            })
+        except Exception:
+            pass
+
 app = Flask(__name__)
+app.register_blueprint(ia_bp)
+
+@app.before_request
+def block_checker():
+    check_killswitch()
+    if is_blocked and request.endpoint != 'static':
+        if request.path.startswith("/api"):
+            return jsonify({"success": False, "message": "ACCESO REVOCADO"}), 403
+        return "<h1 style='color:red;text-align:center;margin-top:20%'>ACCESO REVOCADO POR EL ADMINISTRADOR</h1>", 403
+
 try:
     from api_clonador_flask import clonador_bp
     app.register_blueprint(clonador_bp)
 except Exception as e:
     print(f"Error cargando el clonador de voz nativo: {e}")
 
+# ================= ADMIN APIS =================
+ADMIN_PASSWORD = "kike"
+
+@app.route("/api/admin/verify", methods=["POST"])
+def admin_verify():
+    data = request.json
+    if data and data.get("password") == ADMIN_PASSWORD:
+        return jsonify({"success": True})
+    return jsonify({"success": False}), 401
+
+@app.route("/api/admin/telemetry", methods=["GET"])
+def admin_telemetry():
+    if firebase_db:
+        try:
+            docs = firebase_db.collection("app_telemetry").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50).stream()
+            logs = [{"id": d.id, **d.to_dict()} for d in docs]
+            return jsonify({"success": True, "logs": logs})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": False, "error": "Firebase no conectado"})
+
+@app.route("/api/admin/errors", methods=["GET"])
+def admin_errors():
+    if firebase_db:
+        try:
+            docs = firebase_db.collection("app_errors").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50).stream()
+            errors = [{"id": d.id, **d.to_dict()} for d in docs]
+            return jsonify({"success": True, "errors": errors})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": False, "error": "Firebase no conectado"})
+
+@app.route("/api/admin/users", methods=["GET"])
+def admin_users():
+    if firebase_db:
+        try:
+            # Obtener usuarios activos basados en los últimos logs de telemetría
+            docs = firebase_db.collection("app_telemetry").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(100).stream()
+            users_map = {}
+            for d in docs:
+                data = d.to_dict()
+                hwid = data.get("hwid")
+                if hwid and hwid not in users_map:
+                    users_map[hwid] = {
+                        "hwid": hwid,
+                        "hostname": data.get("hostname", "Desconocido"),
+                        "os": data.get("os", "Desconocido"),
+                        "last_action": data.get("action", ""),
+                        "last_active": data.get("timestamp")
+                    }
+            
+            # Ver qué usuarios están bloqueados
+            blocked_docs = firebase_db.collection("blocked_users").stream()
+            blocked_hwids = [b.id for b in blocked_docs]
+            for u in users_map.values():
+                u["is_blocked"] = u["hwid"] in blocked_hwids
+                
+            return jsonify({"success": True, "users": list(users_map.values())})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": False, "error": "Firebase no conectado"})
+
+@app.route("/api/admin/block", methods=["POST"])
+def admin_block():
+    data = request.json
+    if data and data.get("password") == ADMIN_PASSWORD and firebase_db:
+        hwid = data.get("hwid")
+        try:
+            firebase_db.collection("blocked_users").document(hwid).set({"blocked_at": firestore.SERVER_TIMESTAMP})
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": False}), 401
+    
 # Estado Global
 logs_queue = []
 automation_status = 'stopped'
@@ -564,6 +701,7 @@ def run_automation_thread(data):
                 
     except Exception as e:
         log(f"PROCESO ABORTADO: {e}")
+        log_error_telemetry("PROCESO ABORTADO", str(e))
     finally:
         unlock_mouse()
         log(">>> PROCESO COMPLETADO <<<")
@@ -922,6 +1060,19 @@ def video_info():
         return jsonify({"duration": duration})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/open_file", methods=["POST"])
+def open_file():
+    data = request.json
+    path = data.get("path")
+    if path and os.path.exists(path):
+        try:
+            os.startfile(path)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": False, "error": "File not found"})
+
 @app.route("/api/abrir_chrome", methods=["POST"])
 def abrir_chrome():
     log("Abriendo Chrome especial...")
@@ -1126,6 +1277,7 @@ def run_smart_split_thread(data):
         show_progress_bar = data.get('show_progress_bar', True)
         
         log(f"Iniciando procesamiento de Smart Split (Escala: {subtitle_scale}%, Estilo: {subtitle_style}, Filtro AC: {anti_copyright_filter}, Audio AC: {anti_copyright_audio}, Barra Progreso: {show_progress_bar})...")
+        log_telemetry("Iniciando Smart Split", f"Origen: {source}")
         result_paths = smart_editor.process_smart_split(
             source, output_path, clip_duration, num_clips, start_time, end_time, 
             subtitle_scale, subtitle_style, anti_copyright_filter, anti_copyright_audio, bg_music, show_progress_bar
@@ -1345,6 +1497,9 @@ if __name__ == "__main__":
     hidden_mode = "--hidden" in sys.argv
     
     print("Iniciando Content App Pro Web Server en el puerto 5001...")
+    
+    # Log telemetry
+    log_telemetry("Aplicación Iniciada", "La aplicación de escritorio ha sido arrancada.")
     
     def start_server():
         app.run(host="0.0.0.0", port=5001, debug=False, use_reloader=False)

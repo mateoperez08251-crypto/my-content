@@ -58,3 +58,9 @@ Clonar-voz/salidas/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Modelos Pesados y Descargas Incompletas
+modelo/*.gguf
+models/
+*.part
+*.parte

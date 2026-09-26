@@ -1,0 +1,68 @@
+{
+  "personajes": [
+    "manzana",
+    "fresa",
+    "plátano",
+    "perro",
+    "gato",
+    "aguacate",
+    "paloma",
+    "cebolla",
+    "papa",
+    "zanahoria",
+    "tomate",
+    "conejo",
+    "sandía",
+    "uva",
+    "durazno"
+  ],
+  "acciones": [
+    "llorando",
+    "discuten",
+    "descubren una traición",
+    "se enamoran",
+    "vuelan",
+    "se enfrentan",
+    "gritan",
+    "bailan",
+    "cocinan",
+    "luchan",
+    "celebran"
+  ],
+  "escenarios": [
+    "bajo la lluvia",
+    "en una mansión lujosa",
+    "en un cementerio",
+    "en una cocina vintage",
+    "en una pista de baile",
+    "en un estudio de TV",
+    "en una playa al atardecer",
+    "en una selva luminosa",
+    "en una sala de juicio",
+    "en una fiesta de cumpleaños"
+  ],
+  "estilos_visuales": [
+    "Disney‑Pixar 3D",
+    "Unreal Engine cyber‑noir",
+    "Pixel‑art retro",
+    "Low‑poly pastel",
+    "Cinematic noir",
+    "Hyper‑realistic CGI",
+    "Anime‑shōnen",
+    "Vaporwave aesthetic",
+    "Film‑grain 35mm",
+    "Silhouette matte painting"
+  ],
+  "cámaras": [
+    "crash‑zoom",
+    "slow‑push",
+    "over‑the‑shoulder",
+    "bird‑eye",
+    "dolly‑in",
+    "tracking shot",
+    "low angle hero",
+    "close‑up",
+    "tilt‑up",
+    "pan left"
+  ]
+}

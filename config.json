@@ -1,0 +1,16 @@
+{
+  "binario": "",
+  "modelo": "",
+  "mmproj": "",
+  "dispositivo": "auto",
+  "capas_gpu": 99,
+  "hilos": 0,
+  "idioma": "es",
+  "top_k": 40,
+  "top_p": 1,
+  "temp": 0.5,
+  "semilla": -1,
+  "max_frames": 1200,
+  "chars_por_bloque": 280,
+  "pausa_ms": 150
+}

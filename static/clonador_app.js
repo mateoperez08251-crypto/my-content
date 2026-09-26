@@ -189,13 +189,39 @@ async function cargarVoces() {
     });
   });
 
+  if (!window.reproductorBiblioteca) {
+    window.reproductorBiblioteca = new Audio();
+    window.reproductorBiblioteca.onended = () => {
+      document.querySelectorAll(".escuchar").forEach(btn => btn.textContent = "▶");
+    };
+  }
+
   cont.querySelectorAll(".escuchar").forEach((b) => {
-    b.addEventListener("click", () => new Audio(`/api/voces/${b.dataset.id}/audio`).play());
+    b.addEventListener("click", () => {
+      const url = `/api/voces/${b.dataset.id}/audio`;
+      if (window.reproductorBiblioteca.src.endsWith(url)) {
+        if (window.reproductorBiblioteca.paused) {
+          window.reproductorBiblioteca.play();
+          b.textContent = "⏸";
+        } else {
+          window.reproductorBiblioteca.pause();
+          b.textContent = "▶";
+        }
+      } else {
+        window.reproductorBiblioteca.src = url;
+        window.reproductorBiblioteca.play();
+        document.querySelectorAll(".escuchar").forEach(btn => btn.textContent = "▶");
+        b.textContent = "⏸";
+      }
+    });
   });
 
   cont.querySelectorAll(".borrar").forEach((b) => {
     b.addEventListener("click", async () => {
       if (!confirm("¿Eliminar esta voz de la biblioteca?")) return;
+      if (window.reproductorBiblioteca && window.reproductorBiblioteca.src.endsWith(`/api/voces/${b.dataset.id}/audio`)) {
+          window.reproductorBiblioteca.pause();
+      }
       await api(`/api/voces/${b.dataset.id}`, { method: "DELETE" });
       if (estado.vozSeleccionada === b.dataset.id) estado.vozSeleccionada = null;
       cargarVoces();
@@ -216,11 +242,13 @@ async function subirVoz(archivo, nombre, transcripcion) {
 
 /* ======================= Grabación ======================= */
 let grabador = null, trozos = [], tempo = null, animacion = null, contextoAudio = null;
+let segundosGrabados = 0, inicioGrabacion = 0;
 
 async function alternarGrabacion() {
   const boton = $("btn-grabar");
+  const botonPausa = $("btn-pausar-grabar");
 
-  if (grabador && grabador.state === "recording") {
+  if (grabador && (grabador.state === "recording" || grabador.state === "paused")) {
     grabador.stop();
     return;
   }
@@ -249,22 +277,47 @@ async function alternarGrabacion() {
     previo.src = URL.createObjectURL(estado.audioGrabado);
     previo.classList.remove("oculto");
     $("guardar-grabacion").classList.remove("oculto");
+    
     boton.textContent = "● Grabar";
     boton.classList.remove("grabando");
+    botonPausa.classList.add("oculto");
+    botonPausa.textContent = "⏸ Pausar";
   };
 
   grabador.start();
   boton.textContent = "■ Detener";
   boton.classList.add("grabando");
+  botonPausa.classList.remove("oculto");
+  botonPausa.textContent = "⏸ Pausar";
   $("previo-grabacion").classList.add("oculto");
   $("guardar-grabacion").classList.add("oculto");
 
-  const inicio = Date.now();
+  segundosGrabados = 0;
+  inicioGrabacion = Date.now();
+  
   tempo = setInterval(() => {
-    $("cronometro").textContent = ((Date.now() - inicio) / 1000).toFixed(1) + " s";
+    if (grabador.state === "recording") {
+      const tiempoActual = segundosGrabados + (Date.now() - inicioGrabacion) / 1000;
+      $("cronometro").textContent = tiempoActual.toFixed(1) + " s";
+    }
   }, 100);
 
   dibujarVumetro(flujo);
+}
+
+function pausarReanudarGrabacion() {
+  const botonPausa = $("btn-pausar-grabar");
+  if (!grabador) return;
+  
+  if (grabador.state === "recording") {
+    grabador.pause();
+    botonPausa.textContent = "▶ Reanudar";
+    segundosGrabados += (Date.now() - inicioGrabacion) / 1000;
+  } else if (grabador.state === "paused") {
+    grabador.resume();
+    botonPausa.textContent = "⏸ Pausar";
+    inicioGrabacion = Date.now();
+  }
 }
 
 function dibujarVumetro(flujo) {
@@ -376,8 +429,13 @@ async function generar() {
         `✓ Listo en ${dato.segundos} s · ${dato.duracion} s de audio`;
       const url = `/api/salidas/${dato.archivo}`;
       $("reproductor").src = url;
-      $("descargar").href = url;
-      $("descargar").setAttribute("download", dato.archivo);
+      $("descargar").href = "#";
+      $("descargar").onclick = async (e) => {
+          e.preventDefault();
+          await api(`/api/salidas/${dato.archivo}/abrir`, { method: "POST" });
+      };
+      $("descargar").title = "Abrir ubicación de archivo";
+      $("descargar").innerHTML = "📁 Abrir ubicación";
       $("info-resultado").textContent =
         `${dato.archivo} · ${dato.duracion} s · generado en ${dato.segundos} s`;
       $("resultado").classList.remove("oculto");
@@ -431,17 +489,23 @@ async function cargarHistorial() {
     return;
   }
 
-  cont.innerHTML = salidas.map((s) => `
+    cont.innerHTML = salidas.map((s) => `
     <div class="item-historial">
       <audio controls preload="none" src="/api/salidas/${s.archivo}"></audio>
       <div class="item-cabecera">
         <span>${s.fecha.replace("T", " ")} · ${s.duracion} s</span>
         <span>
-          <a class="icono-btn" href="/api/salidas/${s.archivo}" download title="Descargar">⭳</a>
+          <button class="icono-btn abrir-carpeta" data-archivo="${s.archivo}" title="Abrir ubicación de archivo">📁</button>
           <button class="icono-btn borrar" data-archivo="${s.archivo}" title="Eliminar">✕</button>
         </span>
       </div>
     </div>`).join("");
+
+  cont.querySelectorAll(".abrir-carpeta").forEach((b) => {
+    b.addEventListener("click", async () => {
+      await api(`/api/salidas/${b.dataset.archivo}/abrir`, { method: "POST" });
+    });
+  });
 
   cont.querySelectorAll(".borrar").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -483,6 +547,7 @@ function conectarEventos() {
 
   // Grabación
   $("btn-grabar").addEventListener("click", alternarGrabacion);
+  $("btn-pausar-grabar").addEventListener("click", pausarReanudarGrabacion);
   $("btn-guardar-grabacion").addEventListener("click", async () => {
     const nombre = $("nombre-grabacion").value.trim();
     if (!nombre) { alert("Ponle un nombre a la voz."); return; }
