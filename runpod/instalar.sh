@@ -42,15 +42,26 @@ CUDA_DRIVER="$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\
 CUDA_DRIVER="${CUDA_DRIVER:-0}"
 
 paso "[2/5] Entorno de Python en $VENV"
-PY="$(command -v python3.11 || command -v python3.12 || command -v python3.10 || command -v python3)"
+# El Python que YA tiene torch (la plantilla lo trae en uno concreto; si se elige otro,
+# habría que volver a bajar torch)
+PY=""
+for c in python3 python3.12 python3.11 python3.10 python; do
+    p="$(command -v "$c" 2>/dev/null)" || continue
+    if "$p" -c "import torch" 2>/dev/null; then PY="$p"; break; fi
+done
+[ -n "$PY" ] || PY="$(command -v python3 || true)"
 [ -n "$PY" ] || falla "No hay Python 3 en el pod."
+echo "Python: $PY"
 if [ -x "$VPY" ] && ! "$VPY" -c "import sys" 2>/dev/null; then
     echo "[!] Entorno roto: se recrea."; rm -rf "$VENV"
 fi
 if [ ! -x "$VPY" ]; then
     # --system-site-packages: reutiliza el torch de la plantilla
     "$PY" -m venv --system-site-packages "$VENV" 2>/dev/null || {
-        "$PY" -m pip install -q virtualenv && "$PY" -m virtualenv -q --system-site-packages "$VENV"; }
+        # Ubuntu 24.04 bloquea pip en el sistema (PEP 668): --break-system-packages
+        { "$PY" -m pip install -q --break-system-packages virtualenv 2>/dev/null \
+            || "$PY" -m pip install -q virtualenv; } \
+            && "$PY" -m virtualenv -q --system-site-packages "$VENV"; }
 fi
 
 DESCARGA_PID=""
