@@ -1,16 +1,21 @@
-moviepy
+# moviepy 2.x obligatorio: editor.py y smart_editor.py usan la API nueva (subclipped/with_*).
+moviepy>=2.0,<3
 yt-dlp
 playwright
 requests
+urllib3>=1.26
 pillow
+numpy
 imageio-ffmpeg
-pynput
 pyautogui
-send2trash
-flask
+flask>=2.2
 pyperclip
 demucs
 faster-whisper
 mediapipe
 opencv-python
 pystray
+pywebview>=4.0
+firebase-admin
+google-api-python-client
+google-auth-oauthlib

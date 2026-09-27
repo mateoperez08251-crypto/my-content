@@ -1,65 +1,81 @@
 # pyrefly: ignore [missing-import]
-from flask import Flask, render_template, request, jsonify, send_from_directory
-import threading
-import subprocess
-import sys
 import os
-import json
-from modulo_ia import ia_bp
+import sys
+
+# ---------------------------------------------------------------------------
+# Enrutador para el ejecutable único: el .exe se relanza a sí mismo como
+# editor / subidor / Smart Split. Va ANTES de importar Flask y el resto para
+# que los subprocesos arranquen rápido y con poca memoria.
+# ---------------------------------------------------------------------------
+if len(sys.argv) > 1 and sys.argv[1] in ("--run-editor", "--run-subidor", "--run-smart"):
+    os.environ["PYTHONUTF8"] = "1"
+    _modo = sys.argv[1]
+    if _modo == "--run-editor":
+        import editor
+        sys.exit(editor.main(sys.argv[2:]))
+    if _modo == "--run-subidor":
+        import api_subidor
+        sys.exit(api_subidor.main(sys.argv[2:]))
+    import smart_editor
+    sys.exit(smart_editor.main(sys.argv[2:]))
+
+import collections
 import datetime
+import faulthandler
+import json
+import platform
+import queue
+import socket
+import subprocess
+import threading
 import time
-import ctypes
-import pyautogui
-from pynput import mouse, keyboard
-import tkinter as tk
-from tkinter import filedialog
-from send2trash import send2trash
-import requests
+import traceback
+import uuid
 import smtplib
 from email.mime.text import MIMEText
 
-# Enrutador para archivo ejecutable único
-if len(sys.argv) > 1:
-    if sys.argv[1] == "--run-editor":
-        import editor
-        if len(sys.argv) > 2 and sys.argv[2] == "--preview":
-            editor.generar_frame_preview(*sys.argv[3:])
-        else:
-            editor.editar_video(*sys.argv[2:])
-        sys.exit(0)
-    elif sys.argv[1] == "--run-subidor":
-        import api_subidor
-        import json
-        if len(sys.argv) > 2 and sys.argv[2] == "--config":
-            try:
-                with open(sys.argv[3], "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                api_subidor.upload_video_api(
-                    cfg.get("video", ""),
-                    cfg.get("title", ""),
-                    cfg.get("tiktok", True),
-                    cfg.get("facebook", False),
-                    cfg.get("youtube", False)
-                )
-            except Exception as e:
-                print(f"ERROR: {e}")
-        else:
-            api_subidor.upload_video_api(sys.argv[2], sys.argv[3])
-        sys.exit(0)
+import requests
+from flask import Flask, render_template, request, jsonify, send_from_directory
 
+import paths
+import winproc
+from app_secrets import get_secret
+from modulo_ia import ia_bp
 
 os.environ["PYTHONUTF8"] = "1"
-if getattr(sys, 'frozen', False):
-    BASE_DIR = sys._MEIPASS
-    EXEC_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    EXEC_DIR = BASE_DIR
-import firebase_admin
-from firebase_admin import credentials, firestore
+BASE_DIR = paths.RES_DIR      # código y recursos (solo lectura)
+EXEC_DIR = paths.DATA_DIR     # datos persistentes (videos, temp, descargas...)
+TEMP_DIR = paths.TEMP_DIR
+FROZEN = paths.FROZEN
 
-FIREBASE_KEY_PATH = os.path.join(BASE_DIR, "firebase-key.json")
+# ---------------------------------------------------------------------------
+# Registro de crasheos: errores nativos (faulthandler) y excepciones no
+# capturadas en cualquier hilo quedan en logs/ para poder diagnosticarlos.
+# ---------------------------------------------------------------------------
+_crash_log = open(os.path.join(paths.LOGS_DIR, "crash.log"), "a", encoding="utf-8", buffering=1)
+faulthandler.enable(file=_crash_log)
+
+
+def _registrar_excepcion(tipo, valor, tb, hilo="main"):
+    _crash_log.write(f"\n[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] Excepción en hilo {hilo}:\n")
+    _crash_log.write("".join(traceback.format_exception(tipo, valor, tb)))
+
+
+sys.excepthook = lambda t, v, tb: _registrar_excepcion(t, v, tb)
+threading.excepthook = lambda a: _registrar_excepcion(
+    a.exc_type, a.exc_value, a.exc_traceback, getattr(a.thread, "name", "?"))
+
+# ---------------------------------------------------------------------------
+# Firebase (opcional)
+# ---------------------------------------------------------------------------
+import firebase_admin  # noqa: E402
+from firebase_admin import credentials, firestore  # noqa: E402
+
+FIREBASE_KEY_PATH = paths.res_path("firebase-key.json")
+if not os.path.exists(FIREBASE_KEY_PATH):
+    FIREBASE_KEY_PATH = paths.data_path("firebase-key.json")
 firebase_db = None
+
 
 def init_firebase_async():
     global firebase_db
@@ -72,77 +88,81 @@ def init_firebase_async():
                 firebase_db = firestore.client(database_id="contentvideos-2d335")
             except TypeError:
                 print("El SDK de Firebase es antiguo y no soporta database_id, actualizalo o usa (default)")
-                firebase_db = firestore.client() # Fallback to default
+                firebase_db = firestore.client()
             print(">>> FIREBASE CONECTADO CORRECTAMENTE <<<")
         except Exception as e:
             print(">>> ERROR CONECTANDO FIREBASE:", e)
 
-import threading
-threading.Thread(target=init_firebase_async, daemon=True).start()
-
-import uuid
-import socket
-import platform
 
 is_blocked = False
+KILLSWITCH_INTERVALO = 600  # segundos
+
 
 def get_hwid():
-    mac = uuid.getnode()
-    host = socket.gethostname()
-    return f"{host}-{mac}"
+    return f"{socket.gethostname()}-{uuid.getnode()}"
+
 
 def check_killswitch():
     global is_blocked
     if firebase_db:
         try:
-            hwid = get_hwid()
-            doc = firebase_db.collection("blocked_users").document(hwid).get()
-            if doc.exists:
+            if firebase_db.collection("blocked_users").document(get_hwid()).get().exists:
                 is_blocked = True
         except Exception:
             pass
 
+
+def _hilo_killswitch():
+    """Antes se consultaba Firestore en CADA petición HTTP. Ahora cada 10 minutos."""
+    for _ in range(30):  # esperar a que Firebase conecte (máx. 30 s)
+        if firebase_db:
+            break
+        time.sleep(1)
+    while True:
+        check_killswitch()
+        time.sleep(KILLSWITCH_INTERVALO)
+
+
 def log_telemetry(action, details=""):
-    if firebase_db and not getattr(sys, 'frozen', False) == False: # Optional checking
+    if firebase_db and FROZEN:
         try:
-            hwid = get_hwid()
-            doc_ref = firebase_db.collection("app_telemetry").document()
-            doc_ref.set({
-                "hwid": hwid,
+            firebase_db.collection("app_telemetry").document().set({
+                "hwid": get_hwid(),
                 "hostname": socket.gethostname(),
                 "os": platform.system() + " " + platform.release(),
                 "timestamp": firestore.SERVER_TIMESTAMP,
                 "action": action,
-                "details": details
+                "details": details,
             })
         except Exception:
             pass
+
 
 def log_error_telemetry(error_msg, details=""):
     if firebase_db:
         try:
-            hwid = get_hwid()
-            doc_ref = firebase_db.collection("app_errors").document()
-            doc_ref.set({
-                "hwid": hwid,
+            firebase_db.collection("app_errors").document().set({
+                "hwid": get_hwid(),
                 "hostname": socket.gethostname(),
                 "timestamp": firestore.SERVER_TIMESTAMP,
                 "error": error_msg,
-                "details": details
+                "details": details,
             })
         except Exception:
             pass
 
-app = Flask(__name__)
+
+app = Flask(__name__, template_folder=paths.res_path("templates"), static_folder=paths.res_path("static"))
 app.register_blueprint(ia_bp)
+
 
 @app.before_request
 def block_checker():
-    check_killswitch()
     if is_blocked and request.endpoint != 'static':
         if request.path.startswith("/api"):
             return jsonify({"success": False, "message": "ACCESO REVOCADO"}), 403
         return "<h1 style='color:red;text-align:center;margin-top:20%'>ACCESO REVOCADO POR EL ADMINISTRADOR</h1>", 403
+
 
 try:
     from api_clonador_flask import clonador_bp
@@ -151,102 +171,189 @@ except Exception as e:
     print(f"Error cargando el clonador de voz nativo: {e}")
 
 # ================= ADMIN APIS =================
-ADMIN_PASSWORD = "kike"
+# La contraseña ya no está en el código: secrets.json -> "admin_password"
+# o variable CONTENTAPP_ADMIN_PASSWORD. Sin configurar, el panel queda desactivado.
+
+
+def _admin_password():
+    return get_secret("admin_password", env="CONTENTAPP_ADMIN_PASSWORD")
+
+
+def _admin_ok(password):
+    esperado = _admin_password()
+    if not esperado or not password:
+        return False
+    import hmac
+    return hmac.compare_digest(str(password), str(esperado))
+
+
+def _admin_request_ok():
+    data = request.get_json(silent=True) or {}
+    return _admin_ok(request.headers.get("X-Admin-Password") or data.get("password"))
+
 
 @app.route("/api/admin/verify", methods=["POST"])
 def admin_verify():
-    data = request.json
-    if data and data.get("password") == ADMIN_PASSWORD:
+    if not _admin_password():
+        return jsonify({"success": False, "error": "Panel desactivado: configura admin_password en secrets.json"}), 401
+    if _admin_request_ok():
         return jsonify({"success": True})
     return jsonify({"success": False}), 401
 
+
+def _admin_query(coleccion, limite):
+    docs = firebase_db.collection(coleccion).order_by(
+        "timestamp", direction=firestore.Query.DESCENDING).limit(limite).stream()
+    return [{"id": d.id, **d.to_dict()} for d in docs]
+
+
 @app.route("/api/admin/telemetry", methods=["GET"])
 def admin_telemetry():
-    if firebase_db:
-        try:
-            docs = firebase_db.collection("app_telemetry").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50).stream()
-            logs = [{"id": d.id, **d.to_dict()} for d in docs]
-            return jsonify({"success": True, "logs": logs})
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e)})
-    return jsonify({"success": False, "error": "Firebase no conectado"})
+    if not _admin_request_ok():
+        return jsonify({"success": False}), 401
+    if not firebase_db:
+        return jsonify({"success": False, "error": "Firebase no conectado"})
+    try:
+        return jsonify({"success": True, "logs": _admin_query("app_telemetry", 50)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 
 @app.route("/api/admin/errors", methods=["GET"])
 def admin_errors():
-    if firebase_db:
-        try:
-            docs = firebase_db.collection("app_errors").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50).stream()
-            errors = [{"id": d.id, **d.to_dict()} for d in docs]
-            return jsonify({"success": True, "errors": errors})
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e)})
-    return jsonify({"success": False, "error": "Firebase no conectado"})
+    if not _admin_request_ok():
+        return jsonify({"success": False}), 401
+    if not firebase_db:
+        return jsonify({"success": False, "error": "Firebase no conectado"})
+    try:
+        return jsonify({"success": True, "errors": _admin_query("app_errors", 50)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 
 @app.route("/api/admin/users", methods=["GET"])
 def admin_users():
-    if firebase_db:
-        try:
-            # Obtener usuarios activos basados en los últimos logs de telemetría
-            docs = firebase_db.collection("app_telemetry").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(100).stream()
-            users_map = {}
-            for d in docs:
-                data = d.to_dict()
-                hwid = data.get("hwid")
-                if hwid and hwid not in users_map:
-                    users_map[hwid] = {
-                        "hwid": hwid,
-                        "hostname": data.get("hostname", "Desconocido"),
-                        "os": data.get("os", "Desconocido"),
-                        "last_action": data.get("action", ""),
-                        "last_active": data.get("timestamp")
-                    }
-            
-            # Ver qué usuarios están bloqueados
-            blocked_docs = firebase_db.collection("blocked_users").stream()
-            blocked_hwids = [b.id for b in blocked_docs]
-            for u in users_map.values():
-                u["is_blocked"] = u["hwid"] in blocked_hwids
-                
-            return jsonify({"success": True, "users": list(users_map.values())})
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e)})
-    return jsonify({"success": False, "error": "Firebase no conectado"})
+    if not _admin_request_ok():
+        return jsonify({"success": False}), 401
+    if not firebase_db:
+        return jsonify({"success": False, "error": "Firebase no conectado"})
+    try:
+        users_map = {}
+        for data in _admin_query("app_telemetry", 100):
+            hwid = data.get("hwid")
+            if hwid and hwid not in users_map:
+                users_map[hwid] = {
+                    "hwid": hwid,
+                    "hostname": data.get("hostname", "Desconocido"),
+                    "os": data.get("os", "Desconocido"),
+                    "last_action": data.get("action", ""),
+                    "last_active": data.get("timestamp"),
+                }
+        blocked = {b.id for b in firebase_db.collection("blocked_users").stream()}
+        for u in users_map.values():
+            u["is_blocked"] = u["hwid"] in blocked
+        return jsonify({"success": True, "users": list(users_map.values())})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 
 @app.route("/api/admin/block", methods=["POST"])
 def admin_block():
-    data = request.json
-    if data and data.get("password") == ADMIN_PASSWORD and firebase_db:
-        hwid = data.get("hwid")
+    data = request.get_json(silent=True) or {}
+    if _admin_request_ok() and firebase_db and data.get("hwid"):
         try:
-            firebase_db.collection("blocked_users").document(hwid).set({"blocked_at": firestore.SERVER_TIMESTAMP})
+            firebase_db.collection("blocked_users").document(data["hwid"]).set(
+                {"blocked_at": firestore.SERVER_TIMESTAMP})
             return jsonify({"success": True})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
     return jsonify({"success": False}), 401
-    
-# Estado Global
-logs_queue = []
+
+
+# ---------------------------------------------------------------------------
+# Estado global (protegido por locks)
+# ---------------------------------------------------------------------------
+_estado_lock = threading.Lock()
 automation_status = 'stopped'
 cancel_requested = False
 current_subprocess = None
-mouse_listener = None
 keyboard_listener = None
-mouse_blocked = False
+
+# Logs: cola acotada (no crece sin límite si la ventana está oculta).
+_logs_lock = threading.Lock()
+logs_queue = collections.deque(maxlen=5000)
+# Envío al dashboard central en un hilo aparte: log() nunca bloquea.
+_dashboard_queue = queue.Queue(maxsize=2000)
 
 monitor_running = False
-MONITOR_FILE = "monitor_history.json"
+MONITOR_FILE = paths.data_path("monitor_history.json")
+paths.migrar_desde_recursos("monitor_history.json")
+
+
+def _intentar_iniciar_trabajo():
+    """Marca el sistema como ocupado de forma atómica. False si ya hay un trabajo."""
+    global automation_status, cancel_requested
+    with _estado_lock:
+        if automation_status == 'running':
+            return False
+        automation_status = 'running'
+        cancel_requested = False
+        return True
+
+
+def _terminar_trabajo():
+    global automation_status, current_subprocess
+    with _estado_lock:
+        automation_status = 'stopped'
+        proc, current_subprocess = current_subprocess, None
+    winproc.matar_arbol(proc)
+
+
+def log(msg):
+    msg = str(msg)
+    try:
+        print(msg)
+    except Exception:
+        pass
+    with _logs_lock:
+        logs_queue.append(msg)
+    try:
+        _dashboard_queue.put_nowait(msg)
+    except queue.Full:
+        pass
+
+
+def _hilo_dashboard():
+    sesion = requests.Session()
+    caido_hasta = 0.0
+    while True:
+        msg = _dashboard_queue.get()
+        if time.time() < caido_hasta:
+            continue  # dashboard apagado: descartar sin esperar
+        try:
+            sesion.post("http://127.0.0.1:5000/api/log",
+                        json={"pc_name": "LocalWeb", "message": msg}, timeout=1)
+        except Exception:
+            caido_hasta = time.time() + 60
+
 
 def load_monitor_history():
     if os.path.exists(MONITOR_FILE):
         try:
-            with open(MONITOR_FILE, "r") as f: return json.load(f)
-        except: return {}
+            with open(MONITOR_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
     return {}
+
 
 def save_monitor_history(hist):
     try:
-        with open(MONITOR_FILE, "w") as f: json.dump(hist, f)
-    except: pass
+        with open(MONITOR_FILE, "w", encoding="utf-8") as f:
+            json.dump(hist, f)
+    except OSError:
+        pass
+
 
 def send_email_alert(remitente, password, destinatario, subject, body):
     try:
@@ -254,91 +361,18 @@ def send_email_alert(remitente, password, destinatario, subject, body):
         msg['Subject'] = subject
         msg['From'] = remitente
         msg['To'] = destinatario
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(remitente, password)
-        server.sendmail(remitente, destinatario, msg.as_string())
-        server.quit()
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as server:
+            server.login(remitente, password)
+            server.sendmail(remitente, destinatario, msg.as_string())
         return True
     except Exception as e:
         log(f"Error enviando correo: {e}")
         return False
 
-def channel_monitor_thread(data):
-    global monitor_running, automation_status
-    import yt_downloader
-    
-    channels_str = data.get('monitor_channels', '')
-    channels = [c.strip() for c in channels_str.split(',') if c.strip()]
-    if not channels:
-        log("No hay canales configurados para el monitor.")
-        monitor_running = False
-        return
-        
-    email_sender = data.get('monitor_email', '').strip()
-    email_pass = data.get('monitor_password', '').strip()
-    auto_download = (data.get('monitor_auto_download') == 'on')
-    
-    log(f">>> MONITOR INICIADO PARA {len(channels)} CANALES <<<")
-    
-    while monitor_running:
-        history = load_monitor_history()
-        for ch in channels:
-            if not monitor_running: break
-            log(f"[Monitor] Revisando {ch}...")
-            latest = yt_downloader.get_latest_video_from_channel(ch)
-            if latest and latest.get('id'):
-                vid_id = latest['id']
-                vid_url = latest['url']
-                if not vid_url:
-                    vid_url = f"https://www.youtube.com/watch?v={vid_id}"
-                vid_title = latest.get('title', 'Video Desconocido')
-                
-                if history.get(ch) != vid_id:
-                    log(f"¡NUEVO VIDEO DETECTADO en {ch}! -> {vid_title}")
-                    show_notification("¡Nuevo Video Detectado!", f"Se detectó: {vid_title}")
-                    
-                    if email_sender and email_pass:
-                        body = f"<h3>Nuevo video detectado por Content App Pro:</h3><p><b>{vid_title}</b></p><p><a href='{vid_url}'>{vid_url}</a></p>"
-                        send_email_alert(email_sender, email_pass, email_sender, f"Nuevo Video Detectado: {vid_title}", body)
-                        
-                    history[ch] = vid_id
-                    save_monitor_history(history)
-                    
-                    if auto_download:
-                        if automation_status != 'running':
-                            log(f"Iniciando descarga y procesamiento automático de {vid_url}...")
-                            download_data = dict(data)
-                            download_data['video_path'] = vid_url
-                            threading.Thread(target=run_automation_thread, args=(download_data,), daemon=True).start()
-                        else:
-                            log("No se pudo iniciar auto-descarga porque ya hay una automatización en curso.")
-                            
-        # Esperar 30 mins pero chequear si se detuvo
-        for _ in range(30 * 60):
-            if not monitor_running: break
-            time.sleep(1)
-            
-    log(">>> MONITOR DETENIDO <<<")
-
-def log(msg):
-    print(msg)
-    logs_queue.append(msg)
-    try:
-        # También enviar al dashboard central si está activo
-        requests.post("http://127.0.0.1:5000/api/log", json={"pc_name": "LocalWeb", "message": msg}, timeout=1)
-    except Exception:
-        pass
-
-def toggle_mouse_lock(key):
-    pass
-
-def lock_mouse():
-    pass
-
-def unlock_mouse():
-    pass
 
 def show_notification(title, message):
+    if not winproc.ES_WINDOWS:
+        return
     try:
         safe_title = str(title).replace("'", "''")
         safe_message = str(message).replace("'", "''")
@@ -352,62 +386,174 @@ def show_notification(title, message):
         $notify.Visible = $true
         $notify.ShowBalloonTip(5000)
         """
-        subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", ps_script], creationflags=0x08000000)
+        subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", ps_script],
+                         **winproc.popen_kwargs())
     except Exception as e:
         log(f"Error al enviar notificación: {e}")
 
-def focus_chrome_window():
-    try:
-        EnumWindows = ctypes.windll.user32.EnumWindows
-        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
-        GetWindowText = ctypes.windll.user32.GetWindowTextW
-        GetWindowTextLength = ctypes.windll.user32.GetWindowTextLengthW
-        IsWindowVisible = ctypes.windll.user32.IsWindowVisible
 
-        hwnds = []
-        def foreach_window(hwnd, lParam):
-            if IsWindowVisible(hwnd):
-                length = GetWindowTextLength(hwnd)
-                if length > 0:
-                    buff = ctypes.create_unicode_buffer(length + 1)
-                    GetWindowText(hwnd, buff, length + 1)
-                    title = buff.value
-                    if "Chrome" in title:
-                        hwnds.append((hwnd, title))
-            return True
-        
-        EnumWindows(EnumWindowsProc(foreach_window), 0)
-        
-        if hwnds:
-            target_hwnd = None
-            for hwnd, title in hwnds:
-                if "tiktok" in title.lower():
-                    target_hwnd = hwnd
-                    break
-            if not target_hwnd:
-                target_hwnd = hwnds[0][0]
-                
-            log(">>> Poniendo ventana de Chrome al frente...")
-            pyautogui.press('alt')
-            ctypes.windll.user32.ShowWindow(target_hwnd, 3)
-            ctypes.windll.user32.SetForegroundWindow(target_hwnd)
-    except Exception as e:
-        log(f"No se pudo forzar Chrome al frente: {e}")
+def channel_monitor_thread(data):
+    global monitor_running
+    import yt_downloader
+
+    channels = [c.strip() for c in data.get('monitor_channels', '').split(',') if c.strip()]
+    if not channels:
+        log("No hay canales configurados para el monitor.")
+        monitor_running = False
+        return
+
+    email_sender = data.get('monitor_email', '').strip()
+    email_pass = data.get('monitor_password', '').strip()
+    auto_download = (data.get('monitor_auto_download') == 'on')
+    log(f">>> MONITOR INICIADO PARA {len(channels)} CANALES <<<")
+
+    while monitor_running:
+        history = load_monitor_history()
+        for ch in channels:
+            if not monitor_running:
+                break
+            log(f"[Monitor] Revisando {ch}...")
+            try:
+                latest = yt_downloader.get_latest_video_from_channel(ch)
+            except Exception as e:
+                log(f"[Monitor] Error revisando {ch}: {e}")
+                continue
+            if not (latest and latest.get('id')):
+                continue
+            vid_id = latest['id']
+            vid_url = latest.get('url') or f"https://www.youtube.com/watch?v={vid_id}"
+            vid_title = latest.get('title', 'Video Desconocido')
+            if history.get(ch) == vid_id:
+                continue
+
+            log(f"¡NUEVO VIDEO DETECTADO en {ch}! -> {vid_title}")
+            show_notification("¡Nuevo Video Detectado!", f"Se detectó: {vid_title}")
+            if email_sender and email_pass:
+                import html as _html
+                body = (f"<h3>Nuevo video detectado por Content App Pro:</h3><p><b>{_html.escape(vid_title)}</b></p>"
+                        f"<p><a href='{_html.escape(vid_url)}'>{_html.escape(vid_url)}</a></p>")
+                send_email_alert(email_sender, email_pass, email_sender, f"Nuevo Video Detectado: {vid_title}", body)
+            history[ch] = vid_id
+            save_monitor_history(history)
+
+            if auto_download:
+                download_data = dict(data)
+                download_data['video_path'] = vid_url
+                if _intentar_iniciar_trabajo():
+                    log(f"Iniciando descarga y procesamiento automático de {vid_url}...")
+                    threading.Thread(target=run_automation_thread, args=(download_data,), daemon=True).start()
+                else:
+                    log("No se pudo iniciar auto-descarga porque ya hay una automatización en curso.")
+
+        for _ in range(30 * 60):
+            if not monitor_running:
+                break
+            time.sleep(1)
+
+    log(">>> MONITOR DETENIDO <<<")
+
+
+# ---------------------------------------------------------------------------
+# Subprocesos (editor, subidor, Smart Split)
+# ---------------------------------------------------------------------------
+def _cmd_script(script, flag_frozen, *args):
+    """Comando para lanzar un módulo como subproceso, en desarrollo o en el .exe."""
+    if FROZEN:
+        return [sys.executable, flag_frozen, *args]
+    return [sys.executable, os.path.join(BASE_DIR, script), *args]
+
+
+def _escribir_config(prefijo, datos):
+    ruta = os.path.join(TEMP_DIR, f"{prefijo}_{uuid.uuid4().hex}.json")
+    with open(ruta, 'w', encoding='utf-8') as cf:
+        json.dump(datos, cf, ensure_ascii=False)
+    return ruta
+
+
+_RE_TQDM = __import__("re").compile(r"^(frame_index|chunk|t):\s*(\d+)%")
+
+
+def _es_ruido_progreso(lin):
+    """Las barras de moviepy generan cientos de líneas: solo se deja cada 25 %."""
+    m = _RE_TQDM.match(lin)
+    return bool(m) and int(m.group(2)) % 25 != 0
+
+
+def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None):
+    """Lanza un subproceso cancelable, reenvía su salida y devuelve el código de salida."""
+    global current_subprocess
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding='utf-8', errors='replace', cwd=BASE_DIR, env=env,
+                                **winproc.popen_kwargs())
+        winproc.adjuntar_a_job(proc)
+        with _estado_lock:
+            current_subprocess = proc
+            cancelado = cancel_requested
+        if cancelado:
+            winproc.matar_arbol(proc)
+        for line in proc.stdout:
+            lin = line.strip()
+            if not lin or _es_ruido_progreso(lin):
+                continue
+            if al_leer_linea is None or not al_leer_linea(lin):
+                log(lin)
+        return proc.wait()
+    finally:
+        with _estado_lock:
+            if current_subprocess is not None and current_subprocess.poll() is not None:
+                current_subprocess = None
+        if config_path:
+            try:
+                os.remove(config_path)
+            except OSError:
+                pass
+
+
+def _subir(video, titulo, tiktok, facebook, youtube):
+    """Único punto de subida para los tres flujos (Colab, local y Smart Split)."""
+    if not (tiktok or facebook or youtube):
+        return 0
+    cfg = _escribir_config("config_subidor", {
+        "video": video, "title": titulo,
+        "tiktok": bool(tiktok), "facebook": bool(facebook), "youtube": bool(youtube),
+    })
+    return _ejecutar_subproceso(_cmd_script("api_subidor.py", "--run-subidor", "--config", cfg),
+                                config_path=cfg)
+
+
+def _log_destinos(parte, tiktok, youtube, facebook):
+    if tiktok:
+        log(f"--- SUBIENDO {parte} A TIKTOK ---")
+    if youtube:
+        log(f"--- SUBIENDO {parte} A YOUTUBE ---")
+    if facebook:
+        log(f"--- SUBIENDO {parte} A FACEBOOK ---")
+    if not (tiktok or youtube or facebook):
+        log(f"--- OMITIENDO SUBIDA {parte} ---")
+
+
+def _cancelado():
+    with _estado_lock:
+        return cancel_requested
+
 
 def run_automation_thread(data):
-    global automation_status, cancel_requested, current_subprocess, keyboard_listener
-    
-    automation_status = 'running'
-    cancel_requested = False
-    
+    """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     video = data.get('video_path', '').strip()
     wm = data.get('watermark_path', '').strip()
-    try: duracion = int(data.get('clip_length', 60))
-    except (ValueError, TypeError): duracion = 60
-    
-    try: num_partes = int(data.get('num_parts', 1))
-    except (ValueError, TypeError): num_partes = 1
-    
+    try:
+        duracion = int(data.get('clip_length', 60))
+    except (ValueError, TypeError):
+        duracion = 60
+    try:
+        num_partes = int(data.get('num_parts', 1))
+    except (ValueError, TypeError):
+        num_partes = 1
+
     titulo_base = data.get('title', '')
     hashtags = data.get('hashtags', '')
     texto_arriba = data.get('text_top', '')
@@ -415,657 +561,503 @@ def run_automation_thread(data):
     fs_top = str(data.get('fontsize_top', '25'))
     fs_bot = str(data.get('fontsize_bottom', '25'))
     bg_image = data.get('bg_image_path', '').strip()
-    perfil_seleccionado = data.get('profile', 'Default')
     smart_cut = (data.get('smart_cut') == 'on')
     usar_colab = (data.get('usar_colab') == 'on')
     subir_tiktok = (data.get('subir_tiktok') == 'on')
     subir_youtube = (data.get('subir_youtube') == 'on')
     subir_facebook = (data.get('subir_facebook') == 'on')
     solo_descargar = (data.get('solo_descargar') == 'on')
-    
     if solo_descargar:
-        subir_tiktok = False
-        subir_youtube = False
-        subir_facebook = False
-        usar_colab = False
-    
-    try: minuto_inicio_val = float(data.get('start_minute', 0))
-    except (ValueError, TypeError): minuto_inicio_val = 0.0
+        subir_tiktok = subir_youtube = subir_facebook = usar_colab = False
 
-    schedule_interval_str = data.get('schedule_interval', 'Inmediato')
-    interval_hours = 0
-    if schedule_interval_str != "Inmediato":
-        try: interval_hours = int(schedule_interval_str.split()[0])
-        except (ValueError, TypeError, IndexError): interval_hours = 0
-
-    videos_generados = []
-    es_youtube = video.startswith("http")
-    
     try:
-        # Mouse blocking logic was removed here because TikTok API upload doesn't require UI interaction.
-        pass
+        minuto_inicio_val = float(data.get('start_minute', 0))
+    except (ValueError, TypeError):
+        minuto_inicio_val = 0.0
 
+    interval_hours = 0
+    schedule_interval_str = data.get('schedule_interval', 'Inmediato')
+    if schedule_interval_str != "Inmediato":
+        try:
+            interval_hours = int(schedule_interval_str.split()[0])
+        except (ValueError, TypeError, IndexError):
+            interval_hours = 0
 
-        if es_youtube:
+    def descripcion(parte_num):
+        base = titulo_base.strip()
+        if num_partes > 1:
+            return f"{base} (Parte {parte_num}) {hashtags.strip()}"
+        return f"{base} {hashtags.strip()}"
+
+    try:
+        if video.startswith("http"):
             import yt_downloader
-            log(f"Descargando video desde URL...")
-            
-            # Obtener calidad o 'best' si no se especifica
+            log("Descargando video desde URL...")
             calidad = data.get('video_quality', '1440')
-            custom_dir = data.get('custom_output_dir', '')
-            output_folder = custom_dir if custom_dir else os.path.join(EXEC_DIR, "videos_descargados")
-            
+            output_folder = data.get('custom_output_dir', '') or paths.data_path("videos_descargados")
             video = yt_downloader.download_video(video, output_dir=output_folder, quality=calidad)
             if not video:
-                unlock_mouse()
                 return
-                
             log(f"Video descargado: {video}")
             titulo_base = os.path.splitext(os.path.basename(video))[0]
-            
             if solo_descargar:
                 log(">>> MODO SOLO DESCARGAR ACTIVO. Proceso finalizado. <<<")
                 show_notification("Descarga Completada", "El video se descargó correctamente.")
-                automation_status = 'idle'
-                unlock_mouse()
                 return
-                
-        else:
-            if not os.path.exists(video):
-                log("El archivo de video local no existe.")
-                return
+        elif not os.path.exists(video):
+            log("El archivo de video local no existe.")
+            return
 
         if usar_colab:
             canal_ntfy = data.get('colab_id', '').strip() or "tiktok_bot_yorgenis_pro"
             log(f">>> MODO NUBE ACTIVADO (Ntfy: {canal_ntfy})")
-            
             resp = requests.get(f"https://ntfy.sh/{canal_ntfy}/json?poll=1", timeout=10)
-            lineas = resp.text.strip().split('\n')
             colab_url = None
-
-            for line in reversed(lineas):
-                if not line.strip(): continue
+            for line in reversed(resp.text.strip().split('\n')):
+                if not line.strip():
+                    continue
                 try:
                     d = json.loads(line)
                     if d.get("event") == "message" and "trycloudflare.com" in d.get("message", ""):
                         colab_url = d["message"]
                         break
-                except (json.JSONDecodeError, KeyError): pass
-            
-            if not colab_url: raise Exception("No se encontró URL en ntfy. ¿Cuaderno encendido?")
+                except (json.JSONDecodeError, KeyError):
+                    pass
+            if not colab_url:
+                raise Exception("No se encontró URL en ntfy. ¿Cuaderno encendido?")
             log(f"Conectado: {colab_url}")
-            
-            archivos = {'video': open(video, 'rb')}
-            if wm: archivos['watermark'] = open(wm, 'rb')
-            if bg_image: archivos['bg_image'] = open(bg_image, 'rb')
-                
+
             req_data = {
-                'duracion_clip': str(duracion),
-                'num_partes': str(num_partes),
-                'texto_arriba': texto_arriba,
-                'texto_abajo': texto_abajo,
-                'minuto_inicio': str(minuto_inicio_val),
-                'fs_top': fs_top,
-                'fs_bot': fs_bot
+                'duracion_clip': str(duracion), 'num_partes': str(num_partes),
+                'texto_arriba': texto_arriba, 'texto_abajo': texto_abajo,
+                'minuto_inicio': str(minuto_inicio_val), 'fs_top': fs_top, 'fs_bot': fs_bot,
             }
-            
             log("Enviando a Colab...")
+            archivos = {}
             try:
-                r = requests.post(f"{colab_url}/procesar", files=archivos, data=req_data, timeout=120)
+                archivos['video'] = open(video, 'rb')
+                if wm:
+                    archivos['watermark'] = open(wm, 'rb')
+                if bg_image:
+                    archivos['bg_image'] = open(bg_image, 'rb')
+                r = requests.post(f"{colab_url}/procesar", files=archivos, data=req_data, timeout=(15, 600))
             except Exception as upload_err:
-                for k, v in archivos.items(): v.close()
                 raise Exception(f"Error enviando a Colab: {upload_err}")
-            for k, v in archivos.items(): v.close()
-                
-            if r.status_code != 200: raise Exception(f"Error Colab: {r.status_code}")
+            finally:
+                for f in archivos.values():
+                    f.close()
+            if r.status_code != 200:
+                raise Exception(f"Error Colab: {r.status_code}")
             req_id = r.json().get("req_id")
-            
+
             log("Procesando en la nube...")
+            zip_path = os.path.join(TEMP_DIR, f"resultados_colab_{uuid.uuid4().hex}.zip")
             while True:
-                if cancel_requested: raise Exception("Cancelado.")
+                if _cancelado():
+                    raise Exception("Cancelado.")
                 try:
                     status_r = requests.get(f"{colab_url}/status/{req_id}", timeout=30)
                     if status_r.status_code == 200:
                         s_data = status_r.json()
                         if s_data.get("status") == "done":
                             log("¡Edición terminada! Descargando ZIP...")
-                            d_url = s_data.get("url")
-                            zip_r = requests.get(f"{colab_url}{d_url}", timeout=1200)
-                            zip_path = os.path.join(EXEC_DIR, "resultados_colab.zip")
-                            with open(zip_path, 'wb') as f: f.write(zip_r.content)
+                            with requests.get(f"{colab_url}{s_data.get('url')}", stream=True,
+                                              timeout=(15, 1200)) as zip_r, open(zip_path, 'wb') as f:
+                                for bloque in zip_r.iter_content(1024 * 1024):
+                                    f.write(bloque)
                             break
-                        elif s_data.get("status") == "error":
+                        if s_data.get("status") == "error":
                             raise Exception("Error interno en Colab.")
-                except Exception as poll_err:
-                    if "Cancelado" in str(poll_err) or "Error interno" in str(poll_err):
-                        raise
+                except requests.RequestException:
+                    pass
                 time.sleep(10)
-                
+
             import zipfile
-            extract_dir = os.path.join(EXEC_DIR, "temp")
+            extract_dir = os.path.join(TEMP_DIR, f"colab_{uuid.uuid4().hex}")
             os.makedirs(extract_dir, exist_ok=True)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
-            
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
+
             for i in range(num_partes):
-                video_editado = os.path.join(EXEC_DIR, "temp", f"parte_{i+1}.mp4")
-                if not os.path.exists(video_editado): continue
-                
-                parte_num = i + 1
-                if subir_tiktok:
-                    log(f"--- SUBIENDO PARTE {parte_num} A TIKTOK ---")
-                if subir_youtube:
-                    log(f"--- SUBIENDO PARTE {parte_num} A YOUTUBE ---")
-                if subir_facebook:
-                    log(f"--- SUBIENDO PARTE {parte_num} A FACEBOOK ---")
-                    
-                if not subir_tiktok and not subir_youtube and not subir_facebook:
-                    log(f"--- OMITIENDO SUBIDA PARTE {parte_num} ---")
-                    videos_generados.append(video_editado)
+                video_editado = os.path.join(extract_dir, f"parte_{i + 1}.mp4")
+                if not os.path.exists(video_editado):
                     continue
-
-                if subir_tiktok:
-                    desc_completa = f"{titulo_base.strip()} (Parte {parte_num}) {hashtags.strip()}" if num_partes > 1 else f"{titulo_base.strip()} {hashtags.strip()}"
-                    schedule_str = "None"
-                    if interval_hours > 0 and parte_num > 1:
-                        schedule_date = datetime.datetime.now() + datetime.timedelta(hours=interval_hours * (parte_num - 1))
-                        schedule_str = schedule_date.strftime("%Y-%m-%d %H:%M")
-                        
-                    subidor_cmd = [sys.executable, "api_subidor.py", video_editado, desc_completa]
-                    if getattr(sys, 'frozen', False):
-                        subidor_cmd[1] = "--run-subidor"
-                    current_subprocess = subprocess.Popen(subidor_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', cwd=BASE_DIR)
-                    for line in current_subprocess.stdout:
-                        lin = line.strip()
-                        if lin: log(lin)
-                    current_subprocess.wait()
-                    if cancel_requested: raise Exception("Cancelado.")
-                videos_generados.append(video_editado)
-                
-            if os.path.exists(zip_path): os.remove(zip_path)
-
-        else:
-            log("\n>>> MODO LOCAL <<<")
-            siguiente_subida = None
-            last_end = minuto_inicio_val * 60.0
-            
-            for i in range(num_partes):
-                inicio = last_end
                 parte_num = i + 1
-                fin = inicio + duracion
-                
-                skip_editing = (
-                    not texto_arriba and not texto_abajo and not wm and not bg_image and 
-                    not smart_cut and num_partes == 1 and minuto_inicio_val == 0
-                )
-                
-                if skip_editing:
-                    log(f"--- MODO DIRECTO: Usando video original sin editar ---")
-                    video_editado = video
-                    last_end = fin
+                _log_destinos(f"PARTE {parte_num}", subir_tiktok, subir_youtube, subir_facebook)
+                _subir(video_editado, descripcion(parte_num), subir_tiktok, subir_facebook, subir_youtube)
+                if _cancelado():
+                    raise Exception("Cancelado.")
+            return
+
+        # ------------------------- MODO LOCAL -------------------------
+        log("\n>>> MODO LOCAL <<<")
+        siguiente_subida = None
+        last_end = minuto_inicio_val * 60.0
+        salida_dir = paths.data_path("videos_procesados")
+
+        for i in range(num_partes):
+            inicio = last_end
+            parte_num = i + 1
+            fin = inicio + duracion
+
+            skip_editing = (not texto_arriba and not texto_abajo and not wm and not bg_image
+                            and not smart_cut and num_partes == 1 and minuto_inicio_val == 0)
+            if skip_editing:
+                log("--- MODO DIRECTO: Usando video original sin editar ---")
+                video_editado = video
+                last_end = fin
+            else:
+                log(f"--- EDITANDO PARTE {parte_num} ---")
+                cfg = _escribir_config("config_editor", {
+                    "video": video, "inicio": str(inicio), "fin": str(fin), "wm": wm,
+                    "smart": "1" if smart_cut else "0", "texto_arriba": texto_arriba,
+                    "texto_abajo": texto_abajo, "parte_num": str(parte_num),
+                    "fs_top": fs_top, "fs_bot": fs_bot, "bg_image": bg_image,
+                    "salida_dir": salida_dir,
+                })
+                resultado = {"video": "", "fin": None}
+
+                def leer_editor(lin):
+                    if lin.startswith("OUTPUT_FILE:"):
+                        resultado["video"] = lin.split("OUTPUT_FILE:", 1)[1].strip()
+                        return True
+                    if lin.startswith("SMART_END:"):
+                        try:
+                            resultado["fin"] = float(lin.split(":", 1)[1])
+                        except ValueError:
+                            pass
+                        return True
+                    return False
+
+                codigo = _ejecutar_subproceso(_cmd_script("editor.py", "--run-editor", "--config", cfg),
+                                              leer_editor, config_path=cfg)
+                if _cancelado():
+                    raise Exception("Cancelado (Editor).")
+                if codigo == 2:
+                    log("Fin del video alcanzado.")
+                    break
+                if codigo != 0:
+                    raise Exception(f"Fallo en el editor (código {codigo}). Revisa el log de arriba.")
+                if resultado["fin"] is not None:
+                    last_end = resultado["fin"]
                 else:
-                    log(f"--- EDITANDO PARTE {parte_num} ---")
-                    smart = "1" if smart_cut else "0"
-                
-                    import tempfile
-                    import json
-                    import uuid
-                    editor_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_editor_{uuid.uuid4().hex}.json")
-                    os.makedirs(os.path.dirname(editor_cfg_path), exist_ok=True)
-                    with open(editor_cfg_path, 'w', encoding='utf-8') as cf:
-                        json.dump({
-                            "video": video, "inicio": str(inicio), "fin": str(fin), "wm": wm,
-                            "smart": smart, "texto_arriba": texto_arriba, "texto_abajo": texto_abajo,
-                            "parte_num": str(parte_num), "fs_top": fs_top, "fs_bot": fs_bot, "bg_image": bg_image
-                        }, cf)
-                    editor_cmd = [sys.executable, "editor.py", "--config", editor_cfg_path]
-                    if getattr(sys, 'frozen', False):
-                        editor_cmd[1] = "--run-editor"
-                
-                    current_subprocess = subprocess.Popen(editor_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', cwd=BASE_DIR)
-                    video_editado = ""
-                    for line in current_subprocess.stdout:
-                        lin = line.strip()
-                        if lin:
-                            if lin.endswith(".mp4") and ("Parte_" in lin or "editado_" in lin):
-                                video_editado = lin
-                            elif lin.startswith("SMART_END:"):
-                                last_end = float(lin.split(":")[1])
-                            else:
-                                log(lin)
-                
-                    current_subprocess.wait()
-                    if cancel_requested: raise Exception("Cancelado (Editor).")
-                    
-                    if current_subprocess.returncode == 2:
-                        log("Fin del video alcanzado.")
-                        break
-                    elif current_subprocess.returncode != 0:
-                        raise Exception("Fallo en editor.py")
-                    
-                    if not video_editado: continue
-                
-                videos_generados.append(video_editado)
-                
-                if subir_tiktok and siguiente_subida is not None and interval_hours > 0:
-                    ahora = datetime.datetime.now()
-                    if ahora < siguiente_subida:
-                        espera = (siguiente_subida - ahora).total_seconds()
-                        log(f"Esperando {int(espera//60)} min para la programada...")
-                        while datetime.datetime.now() < siguiente_subida:
-                            if cancel_requested: raise Exception("Cancelado (Espera).")
-                            time.sleep(5)
-                
-                if subir_tiktok:
-                    log(f"--- SUBIENDO PARTE {parte_num} A TIKTOK ---")
-                if subir_youtube:
-                    log(f"--- SUBIENDO PARTE {parte_num} A YOUTUBE ---")
-                if subir_facebook:
-                    log(f"--- SUBIENDO PARTE {parte_num} A FACEBOOK ---")
-                    
-                if not subir_tiktok and not subir_youtube and not subir_facebook:
-                    log(f"--- OMITIENDO SUBIDA PARTE {parte_num} ---")
-                
-                if subir_tiktok or subir_facebook or subir_youtube:
-                    desc_completa = f"{titulo_base.strip()} (Parte {parte_num}) {hashtags.strip()}" if num_partes > 1 else f"{titulo_base.strip()} {hashtags.strip()}"
-                    schedule_str = "None"
-                    
-                    import tempfile
-                    import json
-                    import uuid
-                    subidor_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_subidor_{uuid.uuid4().hex}.json")
-                    os.makedirs(os.path.dirname(subidor_cfg_path), exist_ok=True)
-                    with open(subidor_cfg_path, 'w', encoding='utf-8') as cf:
-                        json.dump({
-                            "video": video_editado,
-                            "title": desc_completa,
-                            "tiktok": subir_tiktok,
-                            "facebook": subir_facebook,
-                            "youtube": subir_youtube
-                        }, cf)
-                    subidor_cmd = [sys.executable, "api_subidor.py", "--config", subidor_cfg_path]
-                    if getattr(sys, 'frozen', False):
-                        subidor_cmd[1] = "--run-subidor"
-                
-                    current_subprocess = subprocess.Popen(subidor_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', cwd=BASE_DIR)
-                    for line in current_subprocess.stdout:
-                        lin = line.strip()
-                        if lin: log(lin)
-                    current_subprocess.wait()
-                    if cancel_requested: raise Exception("Cancelado (Subidor).")
-                    
-                if subir_tiktok and interval_hours > 0:
-                    siguiente_subida = datetime.datetime.now() + datetime.timedelta(hours=interval_hours)
-                        
-            # Eliminado redirect a google forms
-                
+                    last_end = fin
+                video_editado = resultado["video"]
+                if not video_editado or not os.path.exists(video_editado):
+                    raise Exception(f"El editor no devolvió el archivo de la parte {parte_num}.")
+
+            if subir_tiktok and siguiente_subida is not None and interval_hours > 0:
+                ahora = datetime.datetime.now()
+                if ahora < siguiente_subida:
+                    log(f"Esperando {int((siguiente_subida - ahora).total_seconds() // 60)} min para la programada...")
+                    while datetime.datetime.now() < siguiente_subida:
+                        if _cancelado():
+                            raise Exception("Cancelado (Espera).")
+                        time.sleep(5)
+
+            _log_destinos(f"PARTE {parte_num}", subir_tiktok, subir_youtube, subir_facebook)
+            _subir(video_editado, descripcion(parte_num), subir_tiktok, subir_facebook, subir_youtube)
+            if _cancelado():
+                raise Exception("Cancelado (Subidor).")
+
+            if subir_tiktok and interval_hours > 0:
+                siguiente_subida = datetime.datetime.now() + datetime.timedelta(hours=interval_hours)
+
     except Exception as e:
         log(f"PROCESO ABORTADO: {e}")
         log_error_telemetry("PROCESO ABORTADO", str(e))
     finally:
-        unlock_mouse()
         log(">>> PROCESO COMPLETADO <<<")
-        if keyboard_listener:
-            keyboard_listener.stop()
-            keyboard_listener = None
-        automation_status = 'stopped'
-        if current_subprocess and current_subprocess.poll() is None:
-            try:
-                current_subprocess.terminate()
-            except:
-                pass
-        current_subprocess = None
+        _terminar_trabajo()
 
-
-voice_process = None
 
 @app.route("/api/system-specs", methods=["GET"])
 def get_system_specs():
-    import ctypes
-    class MEMORYSTATUSEX(ctypes.Structure):
-        _fields_ = [
-            ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-            ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-        ]
-    try:
-        stat = MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-        ram_gb = stat.ullTotalPhys / (1024**3)
-    except:
-        ram_gb = 8
-
+    mem = winproc.estado_memoria()
+    ram_gb = mem["ram_total_gb"]
     cpu_cores = os.cpu_count() or 4
+    gpu_name = "Desconocida"
+    if winproc.ES_WINDOWS:
+        try:
+            output = subprocess.check_output(
+                ['powershell', '-Command', '(Get-CimInstance Win32_VideoController).Name'],
+                text=True, timeout=20, **winproc.popen_kwargs())
+            gpus = [line.strip() for line in output.split('\n') if line.strip()]
+            gpu_name = gpus[0] if gpus else "Desconocida"
+        except Exception:
+            pass
 
-    try:
-        import subprocess
-        output = subprocess.check_output(['powershell', '-Command', '(Get-CimInstance Win32_VideoController).Name'], text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        gpus = [line.strip() for line in output.split('\n') if line.strip()]
-        gpu_name = gpus[0] if gpus else "Desconocida"
-    except:
-        gpu_name = "Desconocida"
-
-    # Determinar el estado
     if ram_gb >= 15 and cpu_cores >= 8:
-        status = "sobrado"
-        message = "¡Mi loco, vas sobrado! Tu PC es una bestia para Inteligencia Artificial."
+        status, message = "sobrado", "¡Mi loco, vas sobrado! Tu PC es una bestia para Inteligencia Artificial."
     elif ram_gb >= 7.5 and cpu_cores >= 4:
-        status = "aceptable"
-        message = "¡Manito, vas bien! Tu PC cumple para correr las IA locales sin problemas."
+        status, message = "aceptable", "¡Manito, vas bien! Tu PC cumple para correr las IA locales sin problemas."
     else:
-        status = "forzado"
-        message = "¡Ay mi loco, vas forzado! Te faltan recursos. Tu PC podría trabarse usando IA local."
+        status, message = "forzado", "¡Ay mi loco, vas forzado! Te faltan recursos. Tu PC podría trabarse usando IA local."
 
     return jsonify({
         "ram_gb": round(ram_gb, 1),
+        "ram_libre_gb": round(mem["ram_libre_gb"], 1),
+        "commit_libre_gb": round(mem["commit_libre_gb"], 1),
         "cpu_cores": cpu_cores,
         "gpu_name": gpu_name,
         "status": status,
-        "message": message
+        "message": message,
     })
 
-@app.route("/api/start-voice-cloner", methods=["POST"])
-def start_voice_cloner():
-    global voice_process
-    # Buscar la carpeta Clonar-voz en múltiples ubicaciones posibles
-    possible_paths = [
-        os.path.join(EXEC_DIR, "Clonar-voz"),                          # Junto al .exe
-        os.path.join(os.path.dirname(EXEC_DIR), "Clonar-voz"),         # Un nivel arriba del .exe
-        os.path.join(BASE_DIR, "Clonar-voz"),                          # Junto al script fuente
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Clonar-voz"),  # Directorio del archivo .py
-    ]
-    cloner_dir = None
-    for p in possible_paths:
-        if os.path.exists(p):
-            cloner_dir = p
-            break
-    if cloner_dir is None:
-        return jsonify({"success": False, "error": f"No se encontró la carpeta 'Clonar-voz'. Buscada en: {EXEC_DIR}"})
-        
-    # Verificar requisitos del sistema
-    import ctypes
-    class MEMORYSTATUSEX(ctypes.Structure):
-        _fields_ = [
-            ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-            ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-        ]
-    try:
-        stat = MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-        ram_gb = stat.ullTotalPhys / (1024**3)
-    except:
-        ram_gb = 8
-        
-    cpu_cores = os.cpu_count() or 4
-    
-    if ram_gb < 6.0 or cpu_cores < 4:
-        return jsonify({"success": False, "error": f"Tu PC ({ram_gb:.1f}GB RAM, {cpu_cores} núcleos) NO CUMPLE los requisitos. Necesitas al menos 8GB de RAM y 4 núcleos para correr IA local. Tu computadora podría congelarse."})
-        
-    import socket
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('127.0.0.1', 8080))
-        sock.close()
-        
-        if result == 0:
-            return jsonify({"success": True, "message": "Ya estaba en ejecución"})
-            
-        if not voice_process or voice_process.poll() is not None:
-            # Asegurarse de que api_clonador.py encuentre ffmpeg.exe que está en BASE_DIR
-            env = os.environ.copy()
-            if BASE_DIR not in env.get("PATH", ""):
-                env["PATH"] = BASE_DIR + os.pathsep + env.get("PATH", "")
-                
-            # Usar Python del sistema (no venv, porque los venvs no son portables)
-            python_cmd = sys.executable if not getattr(sys, 'frozen', False) else "python"
-                        
-            log_path = os.path.join(EXEC_DIR, "clonar_voz_log.txt")
-            log_file = open(log_path, "w")
-            
-            # Limpiar variables de entorno de PyInstaller para no interferir con el subproceso
-            env.pop("PYTHONPATH", None)
-            env.pop("PYTHONHOME", None)
-            
-            # Lanzar api_clonador.py en la raiz
-            voice_process = subprocess.Popen(
-                [python_cmd, "api_clonador.py"], 
-                cwd=BASE_DIR, 
-                env=env, 
-                creationflags=subprocess.CREATE_NO_WINDOW, 
-                stdout=log_file, 
-                stderr=subprocess.STDOUT
-            )
-            
-        return jsonify({"success": True, "message": "Iniciando clonador de voz..."})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
 
-@app.route("/api/stop-voice-cloner", methods=["POST"])
-def stop_voice_cloner():
-    global voice_process
-    try:
-        if voice_process and voice_process.poll() is None:
-            voice_process.terminate()
-            voice_process = None
-            return jsonify({"success": True, "message": "IA apagada exitosamente. RAM liberada."})
-        return jsonify({"success": True, "message": "La IA ya estaba apagada."})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
-
+# ---------------------------------------------------------------------------
+# Cuentas (TikTok / Facebook)
+# ---------------------------------------------------------------------------
 @app.route("/api/auth/tiktok", methods=["GET"])
 def auth_tiktok():
     import api_subidor
     redirect_uri = request.url_root.rstrip('/') + "/oauth/tiktok/callback"
     try:
-        url = api_subidor.get_tiktok_auth_url(redirect_uri)
-        return jsonify({"success": True, "url": url})
+        return jsonify({"success": True, "url": api_subidor.get_tiktok_auth_url(redirect_uri)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+
 @app.route("/oauth/tiktok/callback", methods=["GET"])
 def oauth_tiktok_callback():
+    import html as _html
+    import api_subidor
     code = request.args.get("code")
     if not code:
         return "<h1>No se recibió el código de autorización</h1>"
-        
     redirect_uri = request.url_root.rstrip('/') + "/oauth/tiktok/callback"
-    import api_subidor
-    state = request.args.get("state")
-    success, msg = api_subidor.exchange_code_for_token(code, redirect_uri, state=state)
-    
+    success, msg = api_subidor.exchange_code_for_token(code, redirect_uri, state=request.args.get("state"))
     if success:
         return "<h1>¡Conexion Exitosa!</h1><p>Ya puedes cerrar esta ventana y volver a la aplicacion.</p>", 200
-    else:
-        return f"<h1>Error conectando con TikTok</h1><p>{msg}</p>", 400
+    return f"<h1>Error conectando con TikTok</h1><p>{_html.escape(str(msg))}</p>", 400
+
 
 @app.route("/api/upload_tiktok_api", methods=["POST"])
 def upload_tiktok_api():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     video_path = data.get("video_path")
-    title = data.get("title", "")
     if not video_path or not os.path.exists(video_path):
         return jsonify({"success": False, "error": "Archivo de video no encontrado"})
-        
     try:
         import api_subidor
-        success, msg = api_subidor.upload_video_api(video_path, title)
+        success, msg = api_subidor.upload_video_api(video_path, data.get("title", ""))
         return jsonify({"success": success, "message": msg})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+
 @app.route("/api/tiktok/status", methods=["GET"])
 def tiktok_status():
     import api_subidor
-    secrets = api_subidor.load_secrets().get('tiktok', {})
-    accounts = secrets.get('accounts', {})
-    
-    if not accounts and secrets.get('access_token'):
-        accounts = {
-            secrets.get('open_id', 'default'): {
-                'display_name': 'Cuenta Principal',
-                'avatar_url': ''
-            }
-        }
-        
-    acc_list = [{"open_id": k, "display_name": v.get('display_name', 'Cuenta'), "avatar_url": v.get('avatar_url', '')} for k, v in accounts.items()]
-    is_connected = len(acc_list) > 0
-    return jsonify({"connected": is_connected, "accounts": acc_list})
+    try:
+        tk = api_subidor.load_secrets().get('tiktok', {})
+    except RuntimeError as e:
+        return jsonify({"connected": False, "accounts": [], "error": str(e)})
+    accounts = tk.get('accounts', {})
+    if not accounts and tk.get('access_token'):
+        accounts = {tk.get('open_id', 'default'): {'display_name': 'Cuenta Principal', 'avatar_url': ''}}
+    acc_list = [{"open_id": k, "display_name": v.get('display_name', 'Cuenta'),
+                 "avatar_url": v.get('avatar_url', '')} for k, v in accounts.items()]
+    return jsonify({"connected": bool(acc_list), "accounts": acc_list})
+
 
 @app.route("/api/tiktok/disconnect", methods=["POST"])
 def tiktok_disconnect():
     import api_subidor
-    data = request.json or {}
-    open_id = data.get('open_id')
+    open_id = (request.get_json(silent=True) or {}).get('open_id')
     secrets_data = api_subidor.load_secrets()
-    if 'tiktok' in secrets_data:
-        if 'accounts' in secrets_data['tiktok']:
-            if open_id in secrets_data['tiktok']['accounts']:
-                del secrets_data['tiktok']['accounts'][open_id]
+    tk = secrets_data.get('tiktok')
+    if tk is not None:
+        if 'accounts' in tk:
+            if open_id in tk['accounts']:
+                del tk['accounts'][open_id]
             elif not open_id:
-                secrets_data['tiktok']['accounts'] = {}
-                
-        # Compatibilidad hacia atrás
-        if not open_id or secrets_data['tiktok'].get('open_id') == open_id:
-            secrets_data['tiktok']['access_token'] = ""
-            secrets_data['tiktok']['refresh_token'] = ""
-            secrets_data['tiktok']['open_id'] = ""
-            
+                tk['accounts'] = {}
+        if not open_id or tk.get('open_id') == open_id:
+            tk['access_token'] = tk['refresh_token'] = tk['open_id'] = ""
         api_subidor.save_secrets(secrets_data)
     return jsonify({"success": True})
+
 
 @app.route("/api/tiktok/rename", methods=["POST"])
 def tiktok_rename():
     import api_subidor
-    data = request.json or {}
-    open_id = data.get('open_id')
-    new_name = data.get('new_name')
+    data = request.get_json(silent=True) or {}
+    open_id, new_name = data.get('open_id'), data.get('new_name')
     if not open_id or not new_name:
         return jsonify({"success": False, "error": "Faltan datos"})
-        
     secrets_data = api_subidor.load_secrets()
-    if 'tiktok' in secrets_data and 'accounts' in secrets_data['tiktok']:
-        if open_id in secrets_data['tiktok']['accounts']:
-            secrets_data['tiktok']['accounts'][open_id]['display_name'] = new_name
-            api_subidor.save_secrets(secrets_data)
-            return jsonify({"success": True})
-            
+    cuentas = secrets_data.get('tiktok', {}).get('accounts', {})
+    if open_id in cuentas:
+        cuentas[open_id]['display_name'] = new_name
+        api_subidor.save_secrets(secrets_data)
+        return jsonify({"success": True})
     return jsonify({"success": False, "error": "Cuenta no encontrada"})
+
+
+FACEBOOK_REDIRECT = "http://localhost:5001/oauth/facebook/callback"
+
 
 @app.route("/api/auth/facebook", methods=["GET"])
 def auth_facebook():
     import api_subidor
-    redirect_uri = "http://localhost:5001/oauth/facebook/callback"
     try:
-        url = api_subidor.get_facebook_auth_url(redirect_uri)
-        return jsonify({"success": True, "url": url})
+        return jsonify({"success": True, "url": api_subidor.get_facebook_auth_url(FACEBOOK_REDIRECT)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+
 @app.route("/oauth/facebook/callback", methods=["GET"])
 def oauth_facebook_callback():
+    import html as _html
+    import api_subidor
     code = request.args.get("code")
     if not code:
         return "<h1>No se recibió el código de autorización</h1>"
-        
-    redirect_uri = "http://localhost:5001/oauth/facebook/callback"
-    import api_subidor
-    success, msg = api_subidor.exchange_facebook_code_for_token(code, redirect_uri)
-    
+    success, msg = api_subidor.exchange_facebook_code_for_token(code, FACEBOOK_REDIRECT)
     if success:
-        return f"<h1>¡Conexion Exitosa!</h1><p>{msg}</p><p>Ya puedes cerrar esta ventana y volver a la aplicacion.</p>", 200
-    else:
-        return f"<h1>Error conectando con Facebook</h1><p>{msg}</p>", 400
+        return (f"<h1>¡Conexion Exitosa!</h1><p>{_html.escape(str(msg))}</p>"
+                "<p>Ya puedes cerrar esta ventana y volver a la aplicacion.</p>"), 200
+    return f"<h1>Error conectando con Facebook</h1><p>{_html.escape(str(msg))}</p>", 400
+
 
 @app.route("/api/facebook/status", methods=["GET"])
 def facebook_status():
     import api_subidor
-    secrets = api_subidor.load_secrets().get('meta', {})
-    accounts = secrets.get('accounts', {})
-    
-    # Migración de tokens viejos
-    if not accounts and secrets.get('fb_page_token'):
-        accounts = {
-            secrets.get('fb_page_id', 'default'): {
-                'page_name': 'Página Principal',
-                'ig_id': secrets.get('ig_id', '')
-            }
-        }
-        
+    try:
+        meta = api_subidor.load_secrets().get('meta', {})
+    except RuntimeError as e:
+        return jsonify({"connected": False, "accounts": [], "error": str(e)})
+    accounts = meta.get('accounts', {})
+    if not accounts and meta.get('fb_page_token'):
+        accounts = {meta.get('fb_page_id', 'default'): {'page_name': 'Página Principal',
+                                                        'ig_id': meta.get('ig_id', '')}}
     acc_list = [{"page_id": k, "page_name": v.get('page_name', 'Página')} for k, v in accounts.items()]
-    is_connected = len(acc_list) > 0
-    return jsonify({"connected": is_connected, "accounts": acc_list})
+    return jsonify({"connected": bool(acc_list), "accounts": acc_list})
+
 
 @app.route("/api/facebook/disconnect", methods=["POST"])
 def facebook_disconnect():
     import api_subidor
-    data = request.json or {}
-    page_id = data.get('page_id')
+    page_id = (request.get_json(silent=True) or {}).get('page_id')
     secrets_data = api_subidor.load_secrets()
-    if 'meta' in secrets_data:
-        if 'accounts' in secrets_data['meta']:
-            if page_id in secrets_data['meta']['accounts']:
-                del secrets_data['meta']['accounts'][page_id]
+    meta = secrets_data.get('meta')
+    if meta is not None:
+        if 'accounts' in meta:
+            if page_id in meta['accounts']:
+                del meta['accounts'][page_id]
             elif not page_id:
-                secrets_data['meta']['accounts'] = {}
-                
-        # Limpiar viejas vars
-        if not page_id or secrets_data['meta'].get('fb_page_id') == page_id:
-            secrets_data['meta']['fb_page_token'] = ""
-            secrets_data['meta']['fb_page_id'] = ""
-            
+                meta['accounts'] = {}
+        if not page_id or meta.get('fb_page_id') == page_id:
+            meta['fb_page_token'] = meta['fb_page_id'] = ""
         api_subidor.save_secrets(secrets_data)
     return jsonify({"success": True})
 
+
+# ---------------------------------------------------------------------------
+# UI y utilidades
+# ---------------------------------------------------------------------------
 @app.route("/")
 def index():
     return render_template("index.html")
 
+
+# Ventana de pywebview (se asigna al arrancar). Sus diálogos nativos son seguros
+# desde cualquier hilo; Tkinter no lo es y colgaba la app.
+_window = None
+_dialogo_lock = threading.Lock()
+
+_FILTROS = {
+    "media": ("Media", "*.mp4 *.mov *.avi *.mkv *.flv *.wmv *.webm *.ts *.m4v *.mp3 *.wav *.m4a *.ogg *.flac *.wma"),
+    "audio": ("Audio", "*.mp3 *.wav *.m4a *.ogg *.flac *.wma"),
+    "image": ("Imagen", "*.png *.jpg *.jpeg"),
+}
+
+
+def _dialogo_nativo(carpeta=False, filtro=None):
+    with _dialogo_lock:
+        if _window is not None:
+            import webview  # type: ignore
+            fd = getattr(webview, "FileDialog", None)  # pywebview >= 5
+            if fd is not None:
+                tipo = fd.FOLDER if carpeta else fd.OPEN
+            else:
+                tipo = webview.FOLDER_DIALOG if carpeta else webview.OPEN_DIALOG
+            kwargs = {}
+            if filtro:
+                nombre, patrones = filtro
+                kwargs["file_types"] = (f"{nombre} ({';'.join(patrones.split())})", "Todos (*.*)")
+            res = _window.create_file_dialog(tipo, **kwargs)
+            if not res:
+                return ""
+            return res[0] if isinstance(res, (list, tuple)) else str(res)
+
+        # Sin pywebview (modo navegador): Tkinter, serializado con el lock.
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        try:
+            root.withdraw()
+            root.attributes('-topmost', True)
+            if carpeta:
+                return filedialog.askdirectory(parent=root, title="Selecciona una carpeta") or ""
+            tipos = [filtro] if filtro else []
+            return filedialog.askopenfilename(parent=root, filetypes=tipos) or ""
+        finally:
+            root.destroy()
+
+
 @app.route("/api/browse", methods=["GET"])
 def browse():
-    # Usar Tkinter para abrir la ventana nativa
     type_file = request.args.get('type')
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    if type_file == 'video':
-        path = filedialog.askopenfilename(filetypes=[("Media files", "*.mp4 *.mov *.avi *.mkv *.flv *.wmv *.webm *.ts *.m4v *.mp3 *.wav *.m4a *.ogg *.flac *.wma")])
-    elif type_file == 'media':
-        path = filedialog.askopenfilename(filetypes=[("Media files", "*.mp4 *.mov *.avi *.mkv *.flv *.wmv *.webm *.ts *.m4v *.mp3 *.wav *.m4a *.ogg *.flac *.wma")])
-    elif type_file == 'audio' or type_file == 'bg_music_smart':
-        path = filedialog.askopenfilename(filetypes=[("Audio files", "*.mp3 *.wav *.m4a *.ogg *.flac *.wma")])
+    if type_file in ('video', 'media'):
+        filtro = _FILTROS["media"]
+    elif type_file in ('audio', 'bg_music_smart'):
+        filtro = _FILTROS["audio"]
     else:
-        path = filedialog.askopenfilename(filetypes=[("Image files", "*.png *.jpg *.jpeg")])
-    root.destroy()
-    return jsonify({"path": path})
+        filtro = _FILTROS["image"]
+    try:
+        return jsonify({"path": _dialogo_nativo(filtro=filtro)})
+    except Exception as e:
+        return jsonify({"path": "", "error": str(e)})
+
+
+@app.route("/api/select-folder", methods=["GET"])
+def select_folder():
+    try:
+        folder_path = _dialogo_nativo(carpeta=True)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+    if folder_path:
+        return jsonify({"success": True, "folder": folder_path})
+    return jsonify({"success": False, "error": "No se seleccionó ninguna carpeta"})
+
 
 @app.route("/api/video_info", methods=["POST"])
 def video_info():
-    data = request.json
-    path = data.get("path")
+    path = (request.get_json(silent=True) or {}).get("path")
     if not path or not os.path.exists(path):
         return jsonify({"error": "File not found"}), 404
     try:
         import cv2
         cap = cv2.VideoCapture(path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 0
-        cap.release()
-        return jsonify({"duration": duration})
+        try:
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        finally:
+            cap.release()
+        return jsonify({"duration": frame_count / fps if fps > 0 else 0})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/open_file", methods=["POST"])
 def open_file():
-    data = request.json
-    path = data.get("path")
+    path = (request.get_json(silent=True) or {}).get("path")
     if path and os.path.exists(path):
         try:
             os.startfile(path)
@@ -1074,297 +1066,267 @@ def open_file():
             return jsonify({"success": False, "error": str(e)})
     return jsonify({"success": False, "error": "File not found"})
 
+
 @app.route("/api/abrir_chrome", methods=["POST"])
 def abrir_chrome():
     log("Abriendo Chrome especial...")
-    # Read default profile if needed, or pass via JSON
-    perfil = "Default"
-    base_dir = os.path.join(EXEC_DIR, "chrome_tiktok")
-    flags = (
-        "--restore-last-session "
-        "--disable-blink-features=AutomationControlled "
-        "--disable-infobars "
-        f"--remote-debugging-port=9222 "
-        f'--user-data-dir="{base_dir}" '
-        f'--profile-directory="{perfil}"'
-    )
-    cmd = f'start chrome {flags} "https://www.tiktok.com/tiktokstudio/upload"'
-    os.system(cmd)
-    return jsonify({"success": True})
-
-@app.route("/api/preview", methods=["POST"])
-def generar_preview():
-    data = request.json
-    video = data.get('video_path', '').strip()
-    wm = data.get('watermark_path', '').strip()
-    texto_arriba = data.get('text_top', '').strip()
-    texto_abajo = data.get('text_bottom', '').strip()
-    try: inicio_minuto = float(data.get('start_minute', 0))
-    except (ValueError, TypeError): inicio_minuto = 0.0
-    inicio_seg = inicio_minuto * 60.0
-    fs_top = str(data.get('fontsize_top', '25'))
-    fs_bot = str(data.get('fontsize_bottom', '25'))
-    bg_image = data.get('bg_image_path', '').strip()
-
-    import tempfile
-    import json
-    import uuid
-    preview_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_preview_{uuid.uuid4().hex}.json")
-    os.makedirs(os.path.dirname(preview_cfg_path), exist_ok=True)
-    with open(preview_cfg_path, 'w', encoding='utf-8') as cf:
-        json.dump({
-            "video": video, "inicio": str(inicio_seg), "wm": wm,
-            "texto_arriba": texto_arriba, "texto_abajo": texto_abajo,
-            "fs_top": fs_top, "fs_bot": fs_bot, "bg_image": bg_image
-        }, cf)
-    
-    cmd = [sys.executable, "editor.py", "--preview-config", preview_cfg_path]
-    if getattr(sys, 'frozen', False):
-        cmd[1] = "--run-editor"
-    
+    base_dir = paths.data_path("chrome_tiktok")
+    args = ["cmd", "/c", "start", "", "chrome",
+            "--restore-last-session", "--disable-blink-features=AutomationControlled",
+            "--disable-infobars", "--remote-debugging-port=9222",
+            f"--user-data-dir={base_dir}", "--profile-directory=Default",
+            "https://www.tiktok.com/tiktokstudio/upload"]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', cwd=BASE_DIR)
-        img_path = None
-        for line in proc.stdout:
-            lin = line.strip()
-            if lin.startswith("PREVIEW_OK:"):
-                img_path = lin.split("PREVIEW_OK:")[1]
-            elif lin.startswith("PREVIEW_ERROR:"):
-                log("Error en vista previa: " + lin.split("PREVIEW_ERROR:")[1])
-        proc.wait()
-        
-        if img_path and os.path.exists(img_path):
-            return jsonify({"success": True, "image_url": "/api/preview_img"})
-        else:
-            return jsonify({"success": False, "error": "No se pudo generar la imagen"})
+        subprocess.Popen(args, **winproc.popen_kwargs())
+        return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+
+PREVIEW_PATH = os.path.join(TEMP_DIR, "preview_temp.jpg")
+
+
+@app.route("/api/preview", methods=["POST"])
+def generar_preview():
+    data = request.get_json(silent=True) or {}
+    try:
+        inicio_seg = float(data.get('start_minute', 0)) * 60.0
+    except (ValueError, TypeError):
+        inicio_seg = 0.0
+    try:
+        os.remove(PREVIEW_PATH)
+    except OSError:
+        pass
+    cfg = _escribir_config("config_preview", {
+        "video": data.get('video_path', '').strip(), "inicio": str(inicio_seg),
+        "wm": data.get('watermark_path', '').strip(),
+        "texto_arriba": data.get('text_top', '').strip(), "texto_abajo": data.get('text_bottom', '').strip(),
+        "fs_top": str(data.get('fontsize_top', '25')), "fs_bot": str(data.get('fontsize_bottom', '25')),
+        "bg_image": data.get('bg_image_path', '').strip(), "salida": PREVIEW_PATH,
+    })
+    cmd = _cmd_script("editor.py", "--run-editor", "--preview-config", cfg)
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              encoding='utf-8', errors='replace', cwd=BASE_DIR, timeout=180,
+                              **winproc.popen_kwargs())
+        error = ""
+        for lin in (proc.stdout or "").splitlines():
+            if lin.startswith("PREVIEW_ERROR:"):
+                error = lin.split("PREVIEW_ERROR:", 1)[1]
+                log("Error en vista previa: " + error)
+        if not error and os.path.exists(PREVIEW_PATH) and os.path.getsize(PREVIEW_PATH) > 0:
+            return jsonify({"success": True, "image_url": "/api/preview_file"})
+        return jsonify({"success": False, "error": error or "No se pudo generar la imagen"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+    finally:
+        try:
+            os.remove(cfg)
+        except OSError:
+            pass
+
+
+@app.route("/api/preview_file")
+def get_preview_file():
+    if not os.path.exists(PREVIEW_PATH):
+        return "Not found", 404
+    resp = send_from_directory(TEMP_DIR, os.path.basename(PREVIEW_PATH))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/extract_audio", methods=["POST"])
 def extract_audio_api():
-    data = request.json
-    source = data.get("source")
+    source = (request.get_json(silent=True) or {}).get("source")
     if not source:
         return jsonify({"success": False, "error": "Ruta o URL no proporcionada."})
     try:
         import audio_extractor
-        output_dir = os.path.join(EXEC_DIR, "downloads", "audio")
-        result_path = audio_extractor.extract_audio(source, output_dir)
-        filename = os.path.basename(result_path)
-        return jsonify({"success": True, "download_url": f"/api/download_audio?file={filename}"})
+        result_path = audio_extractor.extract_audio(source, paths.data_path("downloads", "audio"))
+        return jsonify({"success": True, "download_url": f"/api/download_audio?file={os.path.basename(result_path)}"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
 
 @app.route("/api/download_audio")
 def download_audio():
     filename = request.args.get("file")
     if not filename:
         return "File not specified", 400
-    directory = os.path.join(EXEC_DIR, "downloads", "audio")
-    return send_from_directory(directory, filename, as_attachment=True)
+    return send_from_directory(paths.data_path("downloads", "audio"), filename, as_attachment=True)
+
 
 @app.route("/api/separate_audio", methods=["POST"])
 def separate_audio_api():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     source = data.get("source")
-    stems = data.get("stems", "2")
     if not source:
         return jsonify({"success": False, "error": "Ruta o URL no proporcionada."})
     try:
         import audio_separator
-        output_dir = os.path.join(EXEC_DIR, "downloads", "separated")
-        results = audio_separator.separate_music(source, output_dir, stems)
-        download_links = []
-        for key, filename in results.items():
-            download_links.append({"name": key, "url": f"/api/download_separated?file={filename}"})
-            
-        return jsonify({"success": True, "download_links": download_links})
+        results = audio_separator.separate_music(source, paths.data_path("downloads", "separated"),
+                                                 data.get("stems", "2"))
+        links = [{"name": k, "url": f"/api/download_separated?file={v}"} for k, v in results.items()]
+        return jsonify({"success": True, "download_links": links})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
 
 @app.route("/api/download_separated")
 def download_separated():
     filename = request.args.get("file")
     if not filename:
         return "File not specified", 400
-    directory = os.path.join(EXEC_DIR, "downloads", "separated")
-    return send_from_directory(directory, filename, as_attachment=True)
+    return send_from_directory(paths.data_path("downloads", "separated"), filename, as_attachment=True)
+
 
 @app.route("/api/preview_img")
 def get_preview_img():
+    """Miniatura de un video (frame al 10%)."""
     path = request.args.get("path")
     if not path or not os.path.exists(path):
         return "Not found", 404
-        
     try:
         import cv2
         import hashlib
-        
-        # Generar un nombre único basado en la ruta del archivo
-        path_hash = hashlib.md5(path.encode('utf-8')).hexdigest()
-        thumb_filename = f"thumb_{path_hash}.jpg"
-        temp_dir = os.path.join(EXEC_DIR, "temp")
-        os.makedirs(temp_dir, exist_ok=True)
-        thumb_path = os.path.join(temp_dir, thumb_filename)
-        
-        # Si la miniatura no existe, generarla
+        thumb_filename = f"thumb_{hashlib.md5(path.encode('utf-8')).hexdigest()}.jpg"
+        thumb_path = os.path.join(TEMP_DIR, thumb_filename)
         if not os.path.exists(thumb_path):
             cap = cv2.VideoCapture(path)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            # Tomar un frame al 10% del video
-            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(total_frames * 0.1)))
-            ret, frame = cap.read()
+            try:
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(total_frames * 0.1)))
+                ret, frame = cap.read()
+            finally:
+                cap.release()
             if ret:
-                # Redimensionar para miniatura rápida (ancho 320px)
                 height, width = frame.shape[:2]
-                new_width = 320
-                new_height = int((new_width / width) * height)
-                frame = cv2.resize(frame, (new_width, new_height))
+                frame = cv2.resize(frame, (320, int((320 / width) * height)))
                 cv2.imwrite(thumb_path, frame)
-            cap.release()
-            
         if os.path.exists(thumb_path):
-            return send_from_directory(temp_dir, thumb_filename)
+            return send_from_directory(TEMP_DIR, thumb_filename)
     except Exception as e:
         print(f"Error generando miniatura: {e}")
-        
     return "Not found", 404
 
+
+# ---------------------------------------------------------------------------
+# Smart Split: se ejecuta en un SUBPROCESO (antes corría dentro del proceso de
+# la UI: un fallo de memoria cerraba la app y no se podía cancelar).
+# ---------------------------------------------------------------------------
+SMART_PROGRESS = os.path.join(TEMP_DIR, "smart_progress.txt")
+
+
+def _escribir_progreso_smart(texto):
+    try:
+        with open(SMART_PROGRESS, "w", encoding="utf-8") as f:
+            f.write(texto)
+    except OSError:
+        pass
+
+
 def run_smart_split_thread(data):
-    global automation_status, cancel_requested
-    automation_status = 'running'
-    cancel_requested = False
-    
-    source = data.get('source', '')
-    style = data.get('style', 'tiktok_yellow')
-    clip_duration = data.get('clip_duration', 60)
-    num_clips = data.get('num_clips', 1)
-    start_time = data.get('start_time', '')
-    end_time = data.get('end_time', '')
-    
-    # Reset progress
+    """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
+    _escribir_progreso_smart("Iniciando descargas...|0")
     try:
-        with open("smart_progress.txt", "w", encoding="utf-8") as f:
-            f.write("Iniciando descargas...|0")
-    except: pass
-    
-    try:
-        import yt_downloader
-        import smart_editor
-        
+        source = data.get('source', '')
         if source.startswith("http"):
+            import yt_downloader
             log("Descargando video para Smart Split...")
-            custom_dl = data.get('custom_output_dir', '')
-            dl_dir = custom_dl if custom_dl else os.path.join(EXEC_DIR, "videos_descargados")
+            dl_dir = data.get('custom_output_dir', '') or paths.data_path("videos_descargados")
             source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440")
             if not source:
                 raise Exception("Error al descargar video")
-                
-        if cancel_requested: raise Exception("Cancelado.")
-        
-        custom_out = data.get('custom_output_dir', '')
-        output_dir = custom_out if custom_out else os.path.join(EXEC_DIR, "videos_procesados")
+        if _cancelado():
+            raise Exception("Cancelado.")
+
+        output_dir = data.get('custom_output_dir', '') or paths.data_path("videos_procesados")
         os.makedirs(output_dir, exist_ok=True)
-        filename = "smart_" + os.path.basename(source)
-        if not filename.endswith(".mp4"):
-            filename += ".mp4"
+        filename = "smart_" + os.path.splitext(os.path.basename(source))[0] + ".mp4"
         output_path = os.path.join(output_dir, filename)
-        
-        subtitle_scale = float(data.get('subtitle_scale', 100))
-        subtitle_style = data.get('style', 'style5')
-        anti_copyright_filter = data.get('anti_copyright_filter', True)
-        anti_copyright_audio = data.get('anti_copyright_audio', True)
-        bg_music = data.get('bg_music', '')
-        show_progress_bar = data.get('show_progress_bar', True)
-        
-        log(f"Iniciando procesamiento de Smart Split (Escala: {subtitle_scale}%, Estilo: {subtitle_style}, Filtro AC: {anti_copyright_filter}, Audio AC: {anti_copyright_audio}, Barra Progreso: {show_progress_bar})...")
+
+        cfg_datos = {
+            "source": source,
+            "output_path": output_path,
+            "clip_duration": data.get('clip_duration', 60),
+            "num_clips": data.get('num_clips', 1),
+            "start_time": data.get('start_time', ''),
+            "end_time": data.get('end_time', ''),
+            "subtitle_scale": float(data.get('subtitle_scale', 100)),
+            "subtitle_style": data.get('style', 'style5'),
+            "anti_copyright_filter": data.get('anti_copyright_filter', True),
+            "anti_copyright_audio": data.get('anti_copyright_audio', True),
+            "bg_music": data.get('bg_music', ''),
+            "show_progress_bar": data.get('show_progress_bar', True),
+        }
+        log(f"Iniciando procesamiento de Smart Split (Escala: {cfg_datos['subtitle_scale']}%, "
+            f"Estilo: {cfg_datos['subtitle_style']})...")
         log_telemetry("Iniciando Smart Split", f"Origen: {source}")
-        result_paths = smart_editor.process_smart_split(
-            source, output_path, clip_duration, num_clips, start_time, end_time, 
-            subtitle_scale, subtitle_style, anti_copyright_filter, anti_copyright_audio, bg_music, show_progress_bar
-        )
-        
-        if result_paths:
-            log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips.")
-            show_notification("Smart Split Completado", f"Se han generado {len(result_paths)} clips con éxito.")
-            
-            subir_tiktok = data.get('subir_tiktok', False)
-            subir_youtube = data.get('subir_youtube', False)
-            subir_facebook = data.get('subir_facebook', False)
-            
-            if subir_tiktok or subir_youtube or subir_facebook:
-                log("Iniciando subida de clips a plataformas seleccionadas...")
-                import tempfile
-                import json
-                import uuid
-                import subprocess
-                import sys
-                
-                for clip_path in result_paths:
-                    if subir_tiktok:
-                        log(f"--- SUBIENDO {os.path.basename(clip_path)} A TIKTOK ---")
-                        # Para Smart Split podemos extraer el título del metadato o usar el nombre del archivo si no hay título generado.
-                        # Asumiendo que el proceso ya devuelve el título en result_paths o lo subimos con título básico.
-                        clip_title = data.get('smart_split_title', '').strip()
-                        if not clip_title:
-                            clip_title = "Clip generado por Smart Split #viral"
-                        
-                        subidor_cfg_path = os.path.join(EXEC_DIR, "temp", f"config_subidor_smart_{uuid.uuid4().hex}.json")
-                        os.makedirs(os.path.dirname(subidor_cfg_path), exist_ok=True)
-                        with open(subidor_cfg_path, 'w', encoding='utf-8') as cf:
-                            json.dump({
-                                "video": clip_path,
-                                "title": clip_title
-                            }, cf)
-                        subidor_cmd = [sys.executable, "api_subidor.py", "--config", subidor_cfg_path]
-                        if getattr(sys, 'frozen', False):
-                            subidor_cmd[1] = "--run-subidor"
-                        
-                        try:
-                            current_subprocess = subprocess.Popen(subidor_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', cwd=BASE_DIR)
-                            for line in current_subprocess.stdout:
-                                lin = line.strip()
-                                if lin: log(lin)
-                            current_subprocess.wait()
-                        except Exception as e:
-                            log(f"Error subiendo a TikTok: {e}")
-        else:
-            raise Exception("No se pudo generar el video Smart Split")
-            
+
+        resultado = {"rutas": []}
+
+        def leer_smart(lin):
+            if lin.startswith("RESULT_PATHS:"):
+                try:
+                    resultado["rutas"] = json.loads(lin.split("RESULT_PATHS:", 1)[1])
+                except ValueError:
+                    pass
+                return True
+            return False
+
+        cfg = _escribir_config("config_smart", cfg_datos)
+        codigo = _ejecutar_subproceso(_cmd_script("smart_editor.py", "--run-smart", "--config", cfg),
+                                      leer_smart, config_path=cfg)
+        if _cancelado():
+            raise Exception("Cancelado.")
+        result_paths = resultado["rutas"]
+        if codigo != 0 or not result_paths:
+            raise Exception("No se pudo generar el video Smart Split (revisa el log de arriba)")
+
+        log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips.")
+        show_notification("Smart Split Completado", f"Se han generado {len(result_paths)} clips con éxito.")
+
+        tiktok = bool(data.get('subir_tiktok', False))
+        youtube = bool(data.get('subir_youtube', False))
+        facebook = bool(data.get('subir_facebook', False))
+        if tiktok or youtube or facebook:
+            log("Iniciando subida de clips a plataformas seleccionadas...")
+            titulo = data.get('smart_split_title', '').strip() or "Clip generado por Smart Split #viral"
+            for clip_path in result_paths:
+                _log_destinos(os.path.basename(clip_path), tiktok, youtube, facebook)
+                _subir(clip_path, titulo, tiktok, facebook, youtube)
+                if _cancelado():
+                    raise Exception("Cancelado.")
     except Exception as e:
         log(f"PROCESO SMART SPLIT ABORTADO: {e}")
-        try:
-            with open("smart_progress.txt", "w", encoding="utf-8") as f:
-                f.write(f"Error: {e}|-1")
-        except: pass
+        _escribir_progreso_smart(f"Error: {e}|-1")
     finally:
         log(">>> PROCESO SMART SPLIT COMPLETADO <<<")
-        automation_status = 'stopped'
+        _terminar_trabajo()
+
 
 @app.route("/api/smart_split", methods=["POST"])
 def smart_split_api():
-    global automation_status
-    if automation_status == 'running':
+    data = request.get_json(silent=True) or {}
+    if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "error": "Ya hay una automatización en curso"})
-    data = request.json
     threading.Thread(target=run_smart_split_thread, args=(data,), daemon=True).start()
     return jsonify({"success": True})
+
 
 @app.route("/api/smart_split_progress", methods=["GET"])
 def get_smart_split_progress():
     try:
-        with open("smart_progress.txt", "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            parts = content.split("|")
-            msg = parts[0] if len(parts) > 0 else "Preparando..."
-            pct = parts[1] if len(parts) > 1 else "0"
-            return jsonify({"success": True, "message": msg, "percent": pct})
-    except:
+        with open(SMART_PROGRESS, "r", encoding="utf-8") as f:
+            parts = f.read().strip().split("|")
+        return jsonify({"success": True, "message": parts[0] if parts else "Preparando...",
+                        "percent": parts[1] if len(parts) > 1 else "0"})
+    except OSError:
         return jsonify({"success": True, "message": "Preparando...", "percent": "0"})
+
 
 @app.route("/api/radar_config_get", methods=["GET"])
 def get_radar_config():
-    global firebase_db
     if firebase_db:
         try:
             doc = firebase_db.collection('config').document('radar').get()
@@ -1374,190 +1336,211 @@ def get_radar_config():
             return jsonify({'success': False, 'message': str(e)})
     return jsonify({'success': False, 'message': 'No data'})
 
+
 @app.route("/api/radar_config", methods=["POST"])
 def save_radar_config():
     try:
-        data = request.json
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'success': False, 'message': 'No se recibieron datos'})
-        
-        # Guardar en Firebase
-        global firebase_db
-        if firebase_db:
-            firebase_db.collection('config').document('radar').set(data)
-            
-            # Ejecutar chequeo de radar inmediatamente en segundo plano
-            def trigger_radar():
-                try:
-                    from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
-                    radar_monitor()
-                except Exception as e:
-                    print("Error disparando radar:", e)
-            threading.Thread(target=trigger_radar, daemon=True).start()
-            
-            return jsonify({'success': True, 'message': 'Radar guardado y activo en Firebase'})
-        else:
+        if not firebase_db:
             return jsonify({'success': True, 'message': 'Radar guardado localmente (Firebase no conectado)'})
+        firebase_db.collection('config').document('radar').set(data)
+
+        def trigger_radar():
+            try:
+                from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
+                radar_monitor()
+            except Exception as e:
+                print("Error disparando radar:", e)
+        threading.Thread(target=trigger_radar, daemon=True).start()
+        return jsonify({'success': True, 'message': 'Radar guardado y activo en Firebase'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
 
 @app.route("/api/inbox", methods=["GET"])
 def get_inbox():
     if not firebase_db:
         return jsonify({"error": "Firebase no está configurado (falta firebase-key.json)"})
-    
     try:
-        # Obtenemos los videos de la coleccion 'inbox' ordenados por fecha
-        docs = firebase_db.collection('inbox').order_by('detected_at', direction=firestore.Query.DESCENDING).limit(10).stream()
+        docs = firebase_db.collection('inbox').order_by(
+            'detected_at', direction=firestore.Query.DESCENDING).limit(10).stream()
         videos = []
         for doc in docs:
             d = doc.to_dict()
-            # Calculate time ago
-            import datetime
             time_ago = "Reciente"
             try:
                 dt = d.get('detected_at')
                 if dt:
                     diff = datetime.datetime.now(datetime.timezone.utc) - dt
-                    if diff.days > 0: time_ago = f"{diff.days} días"
-                    elif diff.seconds > 3600: time_ago = f"{diff.seconds//3600}h"
-                    else: time_ago = f"{diff.seconds//60}m"
-            except: pass
-            
+                    if diff.days > 0:
+                        time_ago = f"{diff.days} días"
+                    elif diff.seconds > 3600:
+                        time_ago = f"{diff.seconds // 3600}h"
+                    else:
+                        time_ago = f"{diff.seconds // 60}m"
+            except Exception:
+                pass
             videos.append({
                 "id": doc.id,
                 "title": d.get('title', 'Sin Título'),
                 "channel": d.get('channel', 'Desconocido'),
                 "thumbnail": d.get('thumbnail', 'https://via.placeholder.com/150x84?text=Video'),
                 "url": d.get('url', ''),
-                "time_ago": time_ago
+                "time_ago": time_ago,
             })
-            
         return jsonify({"videos": videos})
     except Exception as e:
         return jsonify({"error": str(e)})
 
+
 @app.route("/api/start", methods=["POST"])
 def start_auto():
-    global automation_status
-    if automation_status == 'running':
+    data = request.get_json(silent=True) or {}
+    if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "error": "Ya hay una automatización en curso"})
-    data = request.json
     threading.Thread(target=run_automation_thread, args=(data,), daemon=True).start()
     return jsonify({"success": True})
 
+
 @app.route("/api/cancel", methods=["POST"])
 def cancel_auto():
-    global cancel_requested, current_subprocess
-    cancel_requested = True
+    global cancel_requested
+    with _estado_lock:
+        cancel_requested = True
+        proc = current_subprocess
     log("\n>>> CANCELANDO PROCESO... ESPERA... <<<")
-    if current_subprocess:
-        try:
-            current_subprocess.terminate()
-        except Exception:
-            pass
+    winproc.matar_arbol(proc)
     return jsonify({"success": True})
+
 
 @app.route("/api/monitor", methods=["POST"])
 def monitor_api():
     global monitor_running
-    data = request.json
+    data = request.get_json(silent=True) or {}
     action = data.get('action')
-    if action == 'start_monitor':
-        if not monitor_running:
-            monitor_running = True
-            threading.Thread(target=channel_monitor_thread, args=(data,), daemon=True).start()
+    if action == 'start_monitor' and not monitor_running:
+        monitor_running = True
+        threading.Thread(target=channel_monitor_thread, args=(data,), daemon=True).start()
     elif action == 'stop_monitor':
         monitor_running = False
     return jsonify({"success": True})
 
+
 @app.route("/api/logs", methods=["GET"])
 def get_logs():
-    global logs_queue
-    out = list(logs_queue)
-    logs_queue.clear()
-    return jsonify({"logs": out, "status": automation_status})
+    with _logs_lock:
+        out = list(logs_queue)
+        logs_queue.clear()
+    with _estado_lock:
+        estado = automation_status
+    return jsonify({"logs": out, "status": estado})
 
-@app.route("/api/select-folder", methods=["GET"])
-def select_folder():
-    import tkinter as tk
-    from tkinter import filedialog
-    # Ocultar ventana principal de tkinter
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True) # Hacer que aparezca encima
-    folder_path = filedialog.askdirectory(parent=root, title="Selecciona una carpeta para guardar los videos")
-    root.destroy()
-    
-    if folder_path:
-        return jsonify({"success": True, "folder": folder_path})
-    return jsonify({"success": False, "error": "No se seleccionó ninguna carpeta"})
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    mem = winproc.estado_memoria()
+    return jsonify({"ok": True, "status": automation_status,
+                    "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
+
+
+# ---------------------------------------------------------------------------
+# Arranque
+# ---------------------------------------------------------------------------
+def _instancia_unica():
+    """Evita dos copias de la app peleando por el puerto 5001."""
+    if winproc.ES_WINDOWS:
+        try:
+            import ctypes
+            ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\ContentAppPro_SingleInstance")
+            return ctypes.windll.kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+        except Exception:
+            return True
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", 5001)) != 0
+
+
+def _salir_limpio():
+    global current_subprocess
+    with _estado_lock:
+        proc, current_subprocess = current_subprocess, None
+    winproc.matar_arbol(proc)
+    os._exit(0)
+
 
 if __name__ == "__main__":
-    import sys
     hidden_mode = "--hidden" in sys.argv
-    
+
+    if not _instancia_unica():
+        print("Content App ya está en ejecución.")
+        if not hidden_mode:
+            import webbrowser
+            webbrowser.open("http://127.0.0.1:5001")
+        sys.exit(0)
+
+    # Los subprocesos pesados (editor, ffmpeg, llama-tts...) se adjuntan a este
+    # Job y mueren con la app, incluso si crashea.
+    winproc.activar_job_object()
+
+    threading.Thread(target=init_firebase_async, daemon=True, name="firebase").start()
+    threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
+    threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
+
     print("Iniciando Content App Pro Web Server en el puerto 5001...")
-    
-    # Log telemetry
     log_telemetry("Aplicación Iniciada", "La aplicación de escritorio ha sido arrancada.")
-    
+
     def start_server():
-        app.run(host="0.0.0.0", port=5001, debug=False, use_reloader=False)
-        
-    # Iniciar Flask en segundo plano
-    threading.Thread(target=start_server, daemon=True).start()
-    
-    # Iniciar el Radar de Firebase automáticamente en segundo plano
+        # Solo localhost: antes escuchaba en 0.0.0.0 y cualquiera en la red podía
+        # usar la API (incluido /api/open_file).
+        app.run(host="127.0.0.1", port=5001, debug=False, use_reloader=False, threaded=True)
+
+    threading.Thread(target=start_server, daemon=True, name="flask").start()
+
     def start_radar():
         try:
             from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
         except ImportError:
             print(">> Módulo de Radar no encontrado. Omitiendo monitoreo en segundo plano.")
             return
-
-        import time
         while True:
             try:
                 radar_monitor()
             except Exception as e:
                 print("Error en el radar:", e)
-            time.sleep(1800) # Revisa cada 30 minutos
+            time.sleep(1800)
 
-    threading.Thread(target=start_radar, daemon=True).start()
-    
+    threading.Thread(target=start_radar, daemon=True, name="radar").start()
+
     try:
         import webview  # type: ignore
-        
-        # Abre como un programa nativo de escritorio (.exe)
+
         window = webview.create_window(
-            'Content App Premium', 
-            'http://127.0.0.1:5001', 
-            width=1280, 
-            height=800, 
+            'Content App Premium',
+            'http://127.0.0.1:5001',
+            width=1280,
+            height=800,
             background_color='#09111e',
             min_size=(1000, 600),
             maximized=not hidden_mode,
-            hidden=hidden_mode
+            hidden=hidden_mode,
         )
-        
+        _window = window
+
         def on_closing():
-            # Ocultar en lugar de cerrar
-            window.hide()
-            return False # Cancelar el evento de cierre
-            
+            window.hide()  # ocultar a la bandeja en lugar de cerrar
+            return False
+
         window.events.closing += on_closing
-        
+
         def run_tray():
             try:
                 import pystray
                 from PIL import Image, ImageDraw
-                
-                # Crear un icono simple para la bandeja
+
                 def create_image():
-                    image = Image.new('RGB', (64, 64), color = (9, 17, 30))
-                    dc = ImageDraw.Draw(image)
-                    dc.rectangle((16, 16, 48, 48), fill=(41, 121, 255))
+                    image = Image.new('RGB', (64, 64), color=(9, 17, 30))
+                    ImageDraw.Draw(image).rectangle((16, 16, 48, 48), fill=(41, 121, 255))
                     return image
 
                 def show_window(icon, item):
@@ -1565,46 +1548,31 @@ if __name__ == "__main__":
 
                 def quit_app(icon, item):
                     icon.stop()
-                    window.destroy()
-                    
-                    global voice_process, current_subprocess
-                    if voice_process and voice_process.poll() is None:
-                        try:
-                            voice_process.terminate()
-                        except:
-                            pass
-                    if current_subprocess and current_subprocess.poll() is None:
-                        try:
-                            current_subprocess.terminate()
-                        except:
-                            pass
-                            
-                    import os
-                    os._exit(0)
+                    try:
+                        window.destroy()
+                    except Exception:
+                        pass
+                    _salir_limpio()
 
                 menu = pystray.Menu(
                     pystray.MenuItem("Mostrar App", show_window, default=True),
-                    pystray.MenuItem("Salir", quit_app)
+                    pystray.MenuItem("Salir", quit_app),
                 )
-                icon = pystray.Icon("ContentApp", create_image(), "Content App Premium", menu)
-                icon.run()
+                pystray.Icon("ContentApp", create_image(), "Content App Premium", menu).run()
             except Exception as e:
                 print("Error iniciando bandeja del sistema:", e)
 
-        # Iniciar el icono de la bandeja en segundo plano
-        threading.Thread(target=run_tray, daemon=True).start()
-        
+        threading.Thread(target=run_tray, daemon=True, name="tray").start()
         webview.start(private_mode=False)
+        _salir_limpio()
     except ImportError:
         print("Módulo pywebview no encontrado. Abriendo en el navegador...")
         import webbrowser
-        import time
         if not hidden_mode:
             time.sleep(1.5)
             webbrowser.open("http://127.0.0.1:5001")
-        # Mantener el proceso vivo si no hay ventana nativa
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            pass
+            _salir_limpio()

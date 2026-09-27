@@ -10,7 +10,6 @@ Uso:  python app.py            ->  http://127.0.0.1:8080
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import queue
@@ -18,9 +17,9 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
-from flask import abort
 import uuid
 import wave
 from datetime import datetime
@@ -33,17 +32,22 @@ from flask import Blueprint, request, jsonify, send_file, render_template, Respo
 
 
 import descargar_modelo
+import paths
+import winproc
 
-BASE = Path(__file__).resolve().parent
-DIR_MODELO = BASE / "modelo"
-DIR_VOCES = BASE / "voces"
-DIR_SALIDAS = BASE / "salidas"
-DIR_TMP = BASE / ".tmp"
-DIR_ESTATICO = BASE / "static"
-ARCHIVO_CONFIG = BASE / "config.json"
+# Código/recursos de solo lectura
+BASE = Path(paths.RES_DIR)
+# Datos persistentes (nunca dentro de _MEIPASS)
+DATOS = Path(paths.DATA_DIR)
+DIR_MODELO = DATOS / "modelo"
+DIR_VOCES = DATOS / "voces"
+DIR_SALIDAS = DATOS / "salidas"
+DIR_TMP = DATOS / ".tmp"
+paths.migrar_desde_recursos("config.json")
+ARCHIVO_CONFIG = DATOS / "config.json"
 
-for _d in (DIR_VOCES, DIR_SALIDAS, DIR_TMP, DIR_ESTATICO):
-    _d.mkdir(exist_ok=True)
+for _d in (DIR_MODELO, DIR_VOCES, DIR_SALIDAS, DIR_TMP):
+    _d.mkdir(parents=True, exist_ok=True)
 
 SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -117,6 +121,7 @@ def buscar_binario() -> str:
         # Windows (winget)
         local / "Microsoft/WinGet/Packages"
         / "ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe/llama-tts.exe",
+        Path(paths.EXEC_DIR) / "llamacpp" / "llama-tts.exe",
         BASE / "llamacpp" / "llama-tts.exe",
         BASE / "llama.cpp" / "llama-tts.exe",
         Path("C:/llama.cpp/llama-tts.exe"),
@@ -139,9 +144,13 @@ def buscar_binario() -> str:
 
 def buscar_modelos() -> tuple[str, str]:
     """Devuelve (modelo, mmproj) a partir de los .gguf presentes en ./modelo."""
-    if not DIR_MODELO.is_dir():
-        return "", ""
-    ggufs = sorted(DIR_MODELO.glob("*.gguf"))
+    # Primero la carpeta de datos; luego la antigua junto al código (compatibilidad).
+    ggufs = []
+    for carpeta in (DIR_MODELO, BASE / "modelo"):
+        if carpeta.is_dir():
+            ggufs = sorted(carpeta.glob("*.gguf"))
+            if ggufs:
+                break
     mmproj = next((g for g in ggufs if g.name.lower().startswith("mmproj")), None)
     modelo = next((g for g in ggufs if not g.name.lower().startswith("mmproj")), None)
     return (str(modelo) if modelo else "", str(mmproj) if mmproj else "")
@@ -458,6 +467,8 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 creationflags=SIN_VENTANA,
             )
+            # llama-tts muere con la app aunque esta crashee (no queda VRAM ocupada).
+            winproc.adjuntar_a_job(tarea.proceso)
             assert tarea.proceso.stdout is not None
             for linea in tarea.proceso.stdout:
                 linea = linea.rstrip()
@@ -535,7 +546,7 @@ def obtener_config() -> dict[str, Any]:
 
 @clonador_bp.route("/api/config", methods=["POST"])
 def actualizar_config():
-    datos = request.get_json()
+    datos = request.get_json(silent=True) or {}
     cfg = cargar_config()
     for clave, valor in datos.items():
         if clave in CONFIG_POR_DEFECTO:
@@ -582,13 +593,13 @@ def catalogo_modelos() -> dict[str, Any]:
         "url": f"https://huggingface.co/{descargar_modelo.REPO}",
         "catalogo": descargar_modelo.CATALOGO,
         "por_defecto": descargar_modelo.POR_DEFECTO,
-        "falta": descargar_modelo.falta_algo(DIR_MODELO),
+        "falta": not all(buscar_modelos()),
     }
 
 
 @clonador_bp.route("/api/modelo/descargar", methods=["POST"])
 def iniciar_descarga():
-    datos = request.get_json()
+    datos = request.get_json(silent=True) or {}
     if DESCARGA.activa:
         return jsonify({"error": "Ya hay una descarga en curso."}), 409
 
@@ -643,6 +654,8 @@ def api_listar_voces() -> list[dict[str, Any]]:
 @clonador_bp.route("/api/voces", methods=["POST"])
 def crear_voz() -> dict[str, Any]:
     audio = request.files.get('audio')
+    if audio is None:
+        return jsonify({"error": "Falta el archivo de audio de referencia."}), 400
     nombre = request.form.get('nombre', '')
     transcripcion = request.form.get('transcripcion', '')
     id_voz = uuid.uuid4().hex[:12]
@@ -689,7 +702,7 @@ def audio_voz(id_voz: str):
 
 @clonador_bp.route("/api/generar", methods=["POST"])
 def generar():
-    datos = request.get_json()
+    datos = request.get_json(silent=True) or {}
     cfg = cargar_config()
     for clave in ("idioma", "top_k", "top_p", "temp", "semilla", "max_frames",
                   "chars_por_bloque", "pausa_ms", "capas_gpu", "hilos"):
@@ -812,7 +825,7 @@ def abrir_salida(archivo: str):
         return jsonify({"error": "Archivo no encontrado"}), 404
     try:
         if os.name == 'nt':
-            subprocess.run(['explorer', '/select,', str(ruta)])
+            subprocess.Popen(['explorer', '/select,', str(ruta)])
         elif sys.platform == 'darwin':
             subprocess.run(['open', '-R', str(ruta)])
         else:
