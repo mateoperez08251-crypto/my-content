@@ -957,6 +957,10 @@ def generar_video():
         return jsonify({"success": False, "error": f"{m['name']} necesita ~{m['vram_gb']} GB de VRAM y tu GPU tiene "
                                                     f"{motor['vram_gb']} GB. Usa Wan2.1 1.3B o CogVideoX."}), 400
 
+    if motor.get("formato") == "fp32" and m.get("motor") in ("cogvideox", "cogvideox_i2v", "hunyuan"):
+        return jsonify({"success": False, "error": f"{m['name']} necesita una gráfica RTX (serie 20 o más "
+                                                    f"nueva). En tu {motor.get('gpu') or 'GPU'} usa Wan2.1 1.3B o LTX-Video."}), 400
+
     # Protección contra 0xc000012d (sin memoria de commit en Windows).
     mem = estado_memoria()
     if mem["commit_libre_gb"] < MIN_COMMIT_GB:
