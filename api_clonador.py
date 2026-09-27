@@ -26,10 +26,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+import uvicorn  # pyrefly: ignore [missing-import]
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # pyrefly: ignore [missing-import]
+from fastapi.responses import FileResponse, StreamingResponse  # pyrefly: ignore [missing-import]
+from fastapi.staticfiles import StaticFiles  # pyrefly: ignore [missing-import]
 
 import descargar_modelo
 
@@ -292,6 +292,8 @@ def unir_wavs(partes: list[Path], destino: Path, pausa_ms: int = 150) -> None:
 # ---------------------------------------------------------------------------
 def trocear_texto(texto: str, maximo: int) -> list[str]:
     """Parte el texto en bloques por frases para no agotar el límite de frames."""
+    # Eliminar etiquetas de expresión como [risas], (suspira), *llora*
+    texto = re.sub(r"\[.*?\]|\(.*?\)|\*.*?\*", "", texto)
     texto = re.sub(r"\s+", " ", texto).strip()
     if not texto:
         return []

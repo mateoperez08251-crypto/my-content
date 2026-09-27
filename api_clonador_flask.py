@@ -714,29 +714,14 @@ def generar():
         return jsonify({"error": "Escribe el texto que quieres sintetizar."}), 400
 
     # ----- OPCION 2: INTERCEPTOR DE EMOCIONES LLAMA 3 -----
+    # Se eliminó la importación de llama_cpp aquí porque cargar modelos 
+    # en la memoria principal de Flask causa el error de Windows 0xc000012d (OOM).
     import re
     matches = re.findall(r'[\[\(](.*?)[\]\)]', texto)
     if matches:
-        try:
-            from llama_cpp import Llama
-            models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "video_ai")
-            gguf_path = os.path.join(models_dir, "llama-3-8b-instruct.Q8_0.gguf")
-            if os.path.exists(gguf_path):
-                texto_limpio = re.sub(r'[\[\(].*?[\]\)]', '', texto).strip()
-                emociones_str = ", ".join(matches)
-                llm = Llama(model_path=gguf_path, n_ctx=1024, n_gpu_layers=-1, verbose=False)
-                sys_prompt = f"Eres un actor de voz experto. Toma el siguiente texto y reescríbelo para que se note claramente que estás: {emociones_str}. Usa puntuación exagerada, puntos suspensivos, pausas, y expresiones si es necesario para forzar a la IA de voz a sonar con esa emoción. Responde SOLO con el texto actuado, sin explicaciones ni comillas ni tu propio nombre."
-                output = llm.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": texto_limpio}
-                    ],
-                    max_tokens=300
-                )
-                texto = output["choices"][0]["message"]["content"].strip()
-                print(f"[Emociones aplicadas] Llama3 reescribio el texto: {texto}")
-        except Exception as e:
-            print(f"[Emociones] Error procesando Llama3: {e}")
+        # Aquí se podría conectar a Ollama si se desea en el futuro,
+        # pero NUNCA cargar llama_cpp.Llama en el proceso Flask.
+        texto = re.sub(r'[\[\(].*?[\]\)]', '', texto).strip()
     # --------------------------------------------------------
 
     ref: Path | None = None

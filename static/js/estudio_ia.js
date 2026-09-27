@@ -698,18 +698,6 @@ window.generarPromptMagico = function() {
     const inputArea = document.getElementById('prompt-input-gen');
     let ideaBasica = inputArea.value.trim();
     
-    // Obtener todos los estilos activos
-    const activeChips = document.querySelectorAll('.style-chip.active');
-    let estilosSeleccionados = [];
-    activeChips.forEach(chip => {
-        // Remover el emoji del texto (ej. "🍓 Frutinovelas" -> "Frutinovelas")
-        estilosSeleccionados.push(chip.innerText.replace(/[\u1000-\uFFFF]/g, '').trim());
-    });
-
-    if (estilosSeleccionados.length > 0) {
-        ideaBasica += ` (Estilos: ${estilosSeleccionados.join(', ')})`;
-    }
-
     if (!ideaBasica.trim()) {
         mostrarToast("Falta tu idea", "Escribe una idea básica primero para que la IA la convierta en un prompt espectacular.", true);
         return;
@@ -743,4 +731,19 @@ window.generarPromptMagico = function() {
 
 window.toggleStyle = function(btn) {
     btn.classList.toggle('active');
+    
+    const inputArea = document.getElementById('prompt-input-gen');
+    let text = inputArea.value;
+    
+    // Extraer nombre del estilo quitando el emoji
+    let styleText = btn.innerText.replace(/[\u1000-\uFFFF]/g, '').trim();
+    let tag = `(Estilo: ${styleText})`;
+    
+    if (btn.classList.contains('active')) {
+        if (!text.includes(tag)) {
+            inputArea.value = text ? text + ` ${tag}` : tag;
+        }
+    } else {
+        inputArea.value = text.replace(` ${tag}`, '').replace(tag, '').trim();
+    }
 };

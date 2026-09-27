@@ -818,7 +818,7 @@ def start_voice_cloner():
             return jsonify({"success": True, "message": "Ya estaba en ejecución"})
             
         if not voice_process or voice_process.poll() is not None:
-            # Asegurarse de que app.py encuentre ffmpeg.exe que está en BASE_DIR
+            # Asegurarse de que api_clonador.py encuentre ffmpeg.exe que está en BASE_DIR
             env = os.environ.copy()
             if BASE_DIR not in env.get("PATH", ""):
                 env["PATH"] = BASE_DIR + os.pathsep + env.get("PATH", "")
@@ -833,14 +833,15 @@ def start_voice_cloner():
             env.pop("PYTHONPATH", None)
             env.pop("PYTHONHOME", None)
             
-            # Agregar la carpeta 'lib' portable con las dependencias (fastapi, uvicorn, etc.)
-            lib_dir = os.path.join(cloner_dir, "lib")
-            if os.path.isdir(lib_dir):
-                env["PYTHONPATH"] = lib_dir + os.pathsep + cloner_dir
-            else:
-                env["PYTHONPATH"] = cloner_dir
-            
-            voice_process = subprocess.Popen([python_cmd, "app.py"], cwd=cloner_dir, env=env, creationflags=subprocess.CREATE_NO_WINDOW, stdout=log_file, stderr=subprocess.STDOUT)
+            # Lanzar api_clonador.py en la raiz
+            voice_process = subprocess.Popen(
+                [python_cmd, "api_clonador.py"], 
+                cwd=BASE_DIR, 
+                env=env, 
+                creationflags=subprocess.CREATE_NO_WINDOW, 
+                stdout=log_file, 
+                stderr=subprocess.STDOUT
+            )
             
         return jsonify({"success": True, "message": "Iniciando clonador de voz..."})
     except Exception as e:
@@ -1388,7 +1389,7 @@ def save_radar_config():
             # Ejecutar chequeo de radar inmediatamente en segundo plano
             def trigger_radar():
                 try:
-                    from firebase_radar.local_radar import radar_monitor
+                    from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
                     radar_monitor()
                 except Exception as e:
                     print("Error disparando radar:", e)
@@ -1509,7 +1510,12 @@ if __name__ == "__main__":
     
     # Iniciar el Radar de Firebase automáticamente en segundo plano
     def start_radar():
-        from firebase_radar.local_radar import radar_monitor
+        try:
+            from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
+        except ImportError:
+            print(">> Módulo de Radar no encontrado. Omitiendo monitoreo en segundo plano.")
+            return
+
         import time
         while True:
             try:

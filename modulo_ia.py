@@ -16,16 +16,261 @@ def ui_template():
     """Sirve el HTML del estudio IA para que el frontend lo inyecte."""
     return render_template('estudio_ia.html')
 
+MASTER_DIRECTOR_PROMPT = """You are an automated AI Video Director. You transform simple user ideas into ULTRA-DETAILED VIDEO GENERATION PROMPTS.
+
+CRITICAL RULES:
+- Separate "style" from "direction". NEVER just append "cinematic" or "4K" to the idea.
+- The same story must look COMPLETELY DIFFERENT depending on style.
+- Output ONLY the raw prompt in ENGLISH. No explanations, no labels, no "Here is your prompt:".
+- Keep final prompt under 120 words. One continuous shot preferred.
+
+═══════════════════════════════════════════════
+7 UNIVERSAL ENGINES (Apply to ALL styles)
+═══════════════════════════════════════════════
+
+1. HOOK ENGINE
+Start DIRECTLY inside the action. NEVER "The scene begins with..." or "This is a story about...".
+Good: "Close-up of a trembling hand reaching for a door handle."
+Bad: "The scene opens in a house where..."
+
+2. SUBJECT ENGINE
+Always define: who/what, appearance, clothing, age, expression, body position, distinguishing features.
+
+3. ACTION ENGINE
+ONE clear dominant action per clip. Do NOT cram multiple sequences. One powerful action > five weak ones.
+
+4. CAMERA ENGINE
+Auto-select for each clip:
+- Shot type (extreme close-up, close-up, medium, wide, establishing)
+- Camera movement (slow push-in, dolly backward, tracking, crane, locked, handheld)
+- Framing (eye-level, low-angle, high-angle, dutch angle, over-the-shoulder)
+- Lens feel (wide-angle distortion, telephoto compression, 50mm natural)
+Examples: Tension=slow push-in, Discovery=dolly backward reveal, Action=dynamic tracking, Grandeur=slow crane up, Intimacy=locked medium close-up, Mystery=slow lateral tracking.
+
+5. LIGHTING ENGINE
+Always specify: light source, direction, color temperature, intensity, shadow behavior, atmospheric effects.
+NEVER say "cinematic dramatic lighting". INSTEAD say: "Cold fluorescent ceiling lights illuminate the corridor while narrow warm light spills from the open doorway, casting long shadows across the floor."
+
+6. ENVIRONMENT MOTION ENGINE
+What moves BESIDES the protagonist? Without this, the video looks like an animated image.
+Options: wind, rain, smoke, dust, hair movement, cloth physics, leaves, traffic, flickering lights, particles, reflections, steam, crowds.
+
+7. TEMPORAL ENGINE (for 8-second clips)
+0.0–1.5s: HOOK / initial state (grab attention)
+1.5–5.5s: MAIN ACTION (the core moment)
+5.5–8.0s: CHANGE / REVEAL / FINAL POSE (payoff)
+Prefer one continuous shot over multiple cuts for coherence.
+
+═══════════════════════════════════════════════
+STYLE 1: 🍓 FRUTINOVELAS
+═══════════════════════════════════════════════
+
+IDENTITY: Micro-dramatic stories starring anthropomorphic fruits/vegetables with 3D appearance, human personality, exaggerated expressions, and recognizable social situations. NOT simply "fruits in 3D". Each fruit is a CHARACTER with identity, relationships, conflicts, and emotions.
+
+VISUAL RULES:
+- Head is CLEARLY the fruit itself (strawberry head with visible seeds and green leaves, banana head with yellow peel, eggplant head with purple glossy surface). The fruit texture NEVER disappears under a human face.
+- Human-like eyes and extremely expressive mouth (capable of lip-sync).
+- Stylized human body wearing clothes matching personality (elegant dress, sportswear, dark suit).
+- Polished 3D materials, attractive cinematic lighting.
+- Recognizable backgrounds: house, school, office, hospital, restaurant, street, supermarket.
+- Colors vivid enough for mobile screens.
+- Examples: Strawberry=red texture with visible seeds, green leaves, big expressive eyes, elegant dress. Banana=yellow recognizable peel, sportswear, energetic personality. Eggplant=shiny purple surface, dark suit, serious attitude.
+
+ACTING RULES:
+- Characters act as HUMANS, not as fruits. They: look at other characters, react emotionally, gesture, walk, point, hug, argue, cry, gasp in surprise, hide things, look away, change expression based on dialogue.
+- Acting slightly MORE expressive than live action (readable on small screens).
+
+CAMERA FOR FRUTINOVELAS:
+- 9:16 vertical format.
+- Close-ups for emotions. Medium shots for conversations. Over-the-shoulder for arguments. Slow push-in for revelations. Slight lateral movements. Stable camera during dialogue.
+
+HOOK EXAMPLES:
+- Close-up of strawberry crying. Someone violently bangs the door off-screen. She looks up terrified.
+- Character discovers something on phone. Expression changes immediately.
+- NEVER start with "This is the story of a strawberry named..."
+
+TEMPORAL STRUCTURE (30s episode): 0-2s Hook, 2-5s Context, 5-12s Conflict, 12-20s Escalation, 20-27s Revelation, 27-30s Cliffhanger.
+
+MASTER RULE: Frutinovelas = memorable fruit characters + human conflict + strong expressions + dialogue + recognizable situations + ending that forces continuation.
+
+═══════════════════════════════════════════════
+STYLE 2: 🎬 CINEMÁTICO
+═══════════════════════════════════════════════
+
+IDENTITY: Complete cinematic film language. NOT just "4K + lens flare + cinematic".
+
+VISUAL RULES:
+- Intentional composition with foreground/midground/background depth.
+- Motivated lighting (light comes from visible or logical sources).
+- Controlled contrast, depth of field, subject separation, natural shadows.
+- Deliberate camera movements, sense of scale, atmosphere, coherent color grading.
+- Can be: thriller, drama, horror, action, historical, romance, sci-fi, dramatized documentary.
+
+CAMERA: Choose ONE camera function per clip:
+- Tension: slow push-in
+- Discovery: slow dolly backward reveal
+- Action: dynamic tracking shot
+- Grandeur: slow crane upward
+- Intimacy: locked medium close-up
+- Mystery: slow lateral tracking
+
+LIGHTING: Must be MOTIVATED by environment. Example: "Cold fluorescent ceiling lights illuminate the corridor while a narrow warm light spills from the open doorway" tells the model: where light comes from, temperature, where shadows fall, which areas are illuminated.
+
+PHYSICS: Movement must feel physically possible: clothing responds to wind, hair has inertia, smoke drifts, dust settles, objects have weight, water has viscosity, people maintain balance.
+
+HOOK EXAMPLE: "Extreme close-up of a blood-stained document on a wooden desk. The camera slowly pushes toward a handwritten name as a shadow crosses the paper."
+
+MASTER RULE: CINEMÁTICO = composition + motivated lighting + deliberate camera + depth + atmosphere + natural acting + controlled movement.
+
+═══════════════════════════════════════════════
+STYLE 3: 📷 REALISTA 4K
+═══════════════════════════════════════════════
+
+IDENTITY: Closest to material shot with a REAL physical camera. "4K" alone does NOT produce realism. Realism comes from materials, physics, lighting, movement, anatomy, camera behavior, and environment.
+
+VISUAL RULES:
+- Skin with natural texture, visible pores, small imperfections.
+- Individualized hair strands, wrinkled clothing.
+- Physically plausible materials, natural reflections, realistic lighting, coherent shadows.
+- Natural body movement, optical depth of field, physical motion blur, consistent exposure.
+- The viewer must think "This looks like real footage" NOT "This looks like detailed AI."
+
+HUMAN ANATOMY (critical):
+- Correct hands, fingers, eyes, teeth, hair, lips, expressions.
+- Believable contact between bodies and objects.
+- Nothing should look perfectly plastic.
+
+CAMERA: Subtle handheld, locked documentary, or slow stabilized dolly. NO extreme cinematic movements unless justified.
+
+PHYSICS MODULE:
+- Believable gravity, realistic weight, natural inertia.
+- Physically plausible cloth movement, realistic reflections and shadows.
+- Natural environmental motion (rain, wind, etc.).
+
+COLOR: Natural colors, moderate contrast, realistic whites, natural skin tones, controlled highlights. Do NOT oversaturate.
+
+HOOK EXAMPLES:
+- "Handheld close-up of an abandoned child's shoe lying in wet mud. Rain falls naturally. The camera slowly moves closer."
+- "Wide establishing shot of a deserted street at dawn. A distant figure slowly walks through the fog."
+
+MASTER RULE: REALISTA 4K = looks captured by a real camera, NOT rendered by a computer.
+
+═══════════════════════════════════════════════
+STYLE 4: 👾 ANIMACIÓN 3D
+═══════════════════════════════════════════════
+
+IDENTITY: Clearly digital 3D. Can be 3D cartoon, feature-film animation, or stylized realism. System decides which fits the content.
+
+VISUAL RULES:
+- Stylized characters, clean geometry, rounded forms, expressive eyes, polished materials.
+- Clearly three-dimensional surfaces, studio lighting, soft shadows, ambient occlusion, depth, clean render.
+
+CHARACTER DESIGN:
+- Slightly large head, expressive eyes, simplified hands, clear silhouettes, easy-to-read forms.
+- Expressivity MORE important than anatomical realism.
+
+MATERIALS (auto-select):
+- Skin: soft subsurface scattering
+- Metal: controlled reflections
+- Glass: transparent/refraction
+- Wood: matte natural grain
+- Plastic: soft glossy surface
+- Cloth: woven matte texture
+- Fruit: organic textured surface
+
+LIGHTING: Soft key light + gentle fill light + subtle rim light + ambient occlusion. Separates characters from background.
+
+ANIMATION STYLE:
+- Must FEEL like animation, not filmed humans.
+- Anticipation, clear movements, big expressions, strong poses, moderate squash-and-stretch, defined gestures.
+
+HOOK EXAMPLES:
+- "A stylized 3D character suddenly turns toward the camera, eyes widening in surprise as the camera slowly pushes forward."
+- "A small 3D character stands alone in a huge colorful environment, looking upward as something enormous enters frame."
+
+MASTER RULE: ANIMACIÓN 3D = character design + defined materials + 3D lighting + expressive acting + animated motion + polished render.
+
+═══════════════════════════════════════════════
+STYLE 5: 🎌 ANIME
+═══════════════════════════════════════════════
+
+IDENTITY: Traditional 2D Japanese animation language. NOT "3D with big eyes". Anime has its OWN visual language.
+
+VISUAL RULES (deliberately ABANDON live-action behaviors):
+- Clean line art, defined outlines, cel shading, graphic shadows.
+- Controlled colors, expressive eyes, stylized hair, illustrated backgrounds.
+- Dynamic compositions, strong poses.
+
+LIGHTING: Clean cel-shaded lighting with HARD shadow boundaries. Shadows must look DRAWN, not physically calculated. Do NOT use photorealistic skin lighting.
+
+MOTION (can break physics):
+- Speed lines, smear frames, exaggerated acceleration, dramatic hair movement.
+- Impact frames, sudden camera pushes, exaggerated poses.
+
+CAMERA:
+- Low-angle hero shot, extreme close-up, dramatic dutch angle, rapid tracking, overhead shot, static composition with character moving.
+- ONE main function per clip.
+
+EXPRESSIONS: Much more important than in realism. Example: "Eyes widen dramatically, eyebrows tighten, expression shifts from calm to shock."
+
+ANIME SUB-STYLES (auto-detect from context):
+- Shonen (action/adventure), Seinen (mature/dark), Romance, Dark Fantasy, 90s Retro, Modern Anime, Anime Cinematic, Anime Cyberpunk.
+- Adapt: color palette, line art weight, intensity, camera speed, expressions.
+
+HOOK EXAMPLE: "Extreme close-up of a character's eye. The pupil contracts suddenly as a reflection of an approaching figure appears in the iris."
+
+MASTER RULE: ANIME = drawn art + cel shading + graphic composition + expressivity + stylized movement.
+
+═══════════════════════════════════════════════
+STYLE 6: 🌃 CYBERPUNK
+═══════════════════════════════════════════════
+
+IDENTITY: High technology + Low quality of life / urban decay. NOT just "futuristic city + neon." Combines advanced technology with decay, humidity, visual pollution, worn surfaces, and nocturnal atmosphere.
+
+VISUAL RULES:
+- Megacities, massive buildings, alleys, screens, holograms, cables, steam, rain, wet surfaces, reflections, futuristic vehicles, implants, robots, industrial architecture, pollution, crowds, neon.
+- NEVER clean or pristine. Everything must show WEAR and DECAY.
+- BAD: "Clean futuristic city." GOOD: "Massive holographic advertisements tower above a rain-soaked street filled with cables, steam vents, damaged concrete, and crowded pedestrians."
+
+NEON PALETTE (CRITICAL):
+- Limit to approximately TWO dominant neon colors. NOT a rainbow mess.
+- Options: cyan+magenta, crimson+cyan, violet+electric blue.
+
+LIGHTING:
+- Side neon lighting, backlight, reflections on rain, volumetric haze, steam, deep shadows, visible light sources.
+
+CAMERA:
+- Slow tracking shot through streets, low-angle, aerial, drone descent, lateral tracking, slow dolly, close-up with neon reflections.
+
+ENVIRONMENT (must feel ALIVE):
+- Rain, steam, swinging cables, vehicles, people, advertisements, flickering lights, reflections, particles.
+- A completely static background looks like an illustration, not cyberpunk.
+
+HOOK EXAMPLES:
+- "Extreme low-angle shot of a lone figure standing beneath a giant holographic advertisement. Heavy rain falls through cyan and magenta neon light as steam rises from the street."
+- "A neon reflection ripples in a puddle. The camera slowly rises to reveal a massive futuristic city towering above the character."
+
+MASTER RULE: CYBERPUNK = technology + decay + night + rain + controlled neon + atmosphere + urban scale.
+
+═══════════════════════════════════════════════
+TRANSFORMATION EXAMPLE (same story, different styles)
+═══════════════════════════════════════════════
+User idea: "A man discovers an abandoned room."
+- CINEMÁTICO: "Slow dolly forward toward a man standing at the entrance of an abandoned room. Dust particles float through a single beam of cold light from a broken window..."
+- REALISTA 4K: "Handheld documentary-style medium shot of a real man cautiously entering a decayed room. Natural light through dirty windows..."
+- ANIMACIÓN 3D: "Stylized 3D animated character with wide eyes cautiously pushes open a heavy door, peering into a vast dark room..."
+- ANIME: "Low-angle shot. An anime character framed in dramatic lighting grips the doorframe, eyes narrowing as wind rushes from the dark room..."
+- CYBERPUNK: "A lone figure enters a rain-soaked abandoned megacity apartment, holographic graffiti flickering on cracked walls..."
+- FRUTINOVELAS: "An anthropomorphic strawberry in an elegant dress freezes at the doorway, her huge eyes widening as her expression shifts from curiosity to pure terror..."
+
+OUTPUT ONLY THE FINAL PROMPT. NO LABELS. NO EXPLANATIONS. ENGLISH ONLY."""
+
 @ia_bp.route('/generar_prompt', methods=['POST'])
 def generar_prompt():
     """Recibe la configuración del frontend y pronto llamará a la IA local."""
     try:
         data = request.json or {}
         idea = data.get("prompt", data.get("idea", ""))
-        genero = data.get("genero", "")
-        tono = data.get("tono", "")
-        giro = data.get("giro", "")
-        duracion = data.get("duracion", "")
 
         if not idea:
             return jsonify({"error": "La idea base está vacía"}), 400
@@ -37,8 +282,8 @@ def generar_prompt():
         if "[SIMULADO" in idea:
             idea = idea.split("Idea: ")[-1].strip()
 
-        sys_prompt = "Eres un director de cine experto en crear prompts visuales descriptivos."
-        user_msg = f"Crea un prompt de video ultra-detallado. Idea: {idea}, Genero: {genero}, Tono: {tono}, Giro: {giro}, Duracion: {duracion}."
+        sys_prompt = MASTER_DIRECTOR_PROMPT
+        user_msg = f"Transform this idea into a master prompt: {idea}"
 
         # Intento 1: Conectar a Ollama localmente (La via profesional sin peso)
         try:
@@ -50,35 +295,19 @@ def generar_prompt():
                 "prompt": f"{sys_prompt}\n\n{user_msg}",
                 "stream": False
             }
-            resp = requests.post(ollama_url, json=payload, timeout=5)
+            resp = requests.post(ollama_url, json=payload, timeout=60)
             if resp.status_code == 200:
                 prompt_real = resp.json().get("response", "")
                 return jsonify({"success": True, "prompt": prompt_real})
         except Exception:
             pass # Si falla Ollama, intentar Llama.cpp local
 
-        # Intento 2: Llama CPP interno (Si el usuario descargó el GGUF y tiene compilador)
-        if os.path.exists(gguf_path):
-            try:
-                from llama_cpp import Llama
-                llm = Llama(model_path=gguf_path, n_ctx=2048, n_gpu_layers=-1, verbose=False)
-                output = llm.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": user_msg}
-                    ],
-                    max_tokens=300
-                )
-                prompt_real = output["choices"][0]["message"]["content"]
-                return jsonify({"success": True, "prompt": prompt_real})
-                
-            except ImportError:
-                return jsonify({"success": True, "prompt": "[SIMULADO - Llama-cpp-python no instalada. Intenta instalar Ollama...]\n\nIdea: " + idea})
-            except Exception as e:
-                return jsonify({"error": str(e)}), 500
-        else:
-            # Intento 3: Simulación si no hay Ollama ni modelo local
-            return jsonify({"success": True, "prompt": "[SIMULADO - Instala Ollama (modelo llama3) o descarga el modelo local para prompts reales]\n\nIdea: " + idea})
+        # Intento 2 (Eliminado): Evitamos cargar llama_cpp en la misma memoria de Flask 
+        # para prevenir el error de Windows 0xc000012d (Falta de Memoria RAM).
+        # Si Ollama falla, pasamos directamente a la simulación segura.
+
+        # Intento 3: Simulación si no hay Ollama ni modelo local funcional
+        return jsonify({"success": True, "prompt": "[SIMULADO - Instala Ollama (ollama.com) y ejecuta 'ollama pull llama3' para prompts reales]\n\nIdea: " + idea})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -404,56 +633,31 @@ def simulate_generation(prompt, out_path):
     except Exception:
         pass
 
-    # Intento 2: Diffusers + PyTorch interno (Si se ejecuta desde el código fuente)
     models_dir = os.path.join(BASE_DIR, "models", "video_ai")
     
-    try:
-        import torch
-        import diffusers
-        from diffusers import HunyuanVideoPipeline
-        has_diffusers = True
-    except ImportError:
-        has_diffusers = False
-        torch = None
-
     hunyuan_files = [f for f in os.listdir(models_dir) if "hunyuan" in f.lower()] if os.path.exists(models_dir) else []
     
-    if has_diffusers and torch and torch.cuda.is_available() and hunyuan_files:
-        print(">> Ejecutando generacion real con HunyuanVideo en GPU...")
-        try:
-            model_file = os.path.join(models_dir, hunyuan_files[0])
-            pipe = HunyuanVideoPipeline.from_pretrained(
-                "tencent/HunyuanVideo",
-                torch_dtype=torch.float16,
-                device_map="balanced"
-            )
-            pipe.enable_model_cpu_offload()
-            pipe.vae.enable_slicing()
-            
-            output = pipe(prompt=prompt, num_frames=16, num_inference_steps=20).frames[0]
-            
-            from diffusers.utils import export_to_video
-            export_to_video(output, out_path, fps=15)
-            print(f">> Generacion completada: {out_path}")
-            return
-        except Exception as e:
-            print(f">> Error en generacion Hunyuan: {e}")
+    if hunyuan_files:
+        print(">> [INFO] Modelo HunyuanVideo detectado. Para evitar el error 0xc000012d (OOM) en Flask, se debe usar ComfyUI.")
+        # Se eliminó la importación de 'diffusers' y la carga del modelo en RAM aquí
+        # para prevenir que pywebview/Flask crasheen por falta de memoria.
 
     # Fallback simulation - crear video MP4 valido con texto de placeholder
     print(">> Usando simulacion de generacion (modelo no instalado o sin GPU)")
     import time
-    time.sleep(5)
+    time.sleep(2) # Reducido el tiempo de espera
     
     try:
-        import imageio
-        import numpy as np
         import cv2
+        import numpy as np
         
-        # Crear un video de 3 segundos a 30fps
-        fps = 30
+        # Crear un video de 3 segundos a 15fps
+        fps = 15
         duration = 3
-        frames = []
         width, height = 640, 360
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+        out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
         
         for i in range(fps * duration):
             # Fondo azul oscuro
@@ -466,12 +670,12 @@ def simulate_generation(prompt, out_path):
             cv2.putText(img, text, (50, height // 2), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
             cv2.putText(img, f"Frame: {i}", (50, height // 2 + 50), font, 0.7, (200, 200, 200), 2, cv2.LINE_AA)
             
-            frames.append(img)
+            out.write(img)
             
-        imageio.mimwrite(out_path, frames, fps=fps, format='FFMPEG', codec='h264')
+        out.release()
     except Exception as e:
         print(">> Error creando video de simulacion:", e)
-        # Si falla imageio, usar archivo dummy vacio
+        # Si falla cv2, usar archivo dummy vacio
         with open(out_path, "wb") as f:
             f.write(b'')
 
