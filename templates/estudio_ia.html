@@ -54,17 +54,60 @@
                             <input type="file" id="guion-archivo" accept=".txt,text/plain" style="display:none" onchange="cargarGuionArchivo(this, 'guion-texto')">
                             <button onclick="document.getElementById('guion-archivo').click()" style="margin-top: 6px; background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; color: #fff; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: 'Outfit'; font-size: 0.8rem;">Cargar guion (.txt)</button>
                             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
-                                <select id="select-voz-guion" title="Voz del narrador" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
-                                    <option value="preset:narrador_documental">Narrador documental</option>
-                                </select>
+                                <div style="display:flex; gap:6px;">
+                                    <select id="select-voz-guion" title="Voz del narrador" style="flex:1; min-width:0; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                        <option value="auto">Automática (según el estilo)</option>
+                                    </select>
+                                    <button id="btn-escuchar-voz" type="button" onclick="escucharVozGuion()" title="Escuchar esta voz"
+                                        style="background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; color: #fff; border-radius: 8px; width: 40px; cursor: pointer;"><i class="ph-fill ph-play"></i></button>
+                                </div>
                                 <select id="select-escena-guion" title="Cada cuánto cambia la imagen" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                    <option value="0" selected>Ritmo del estilo</option>
                                     <option value="3">Imagen cada ~3 s</option>
-                                    <option value="5" selected>Imagen cada ~5 s</option>
+                                    <option value="5">Imagen cada ~5 s</option>
                                     <option value="8">Imagen cada ~8 s</option>
                                 </select>
                             </div>
                             <div id="aviso-voz-guion" style="font-size: 0.75rem; color: #fbbf24; margin-top: 6px; display: none;"></div>
                         </div>
+                        <div id="opciones-montaje" class="panel-montaje" style="display:none; margin-top: 12px; padding: 12px; border: 1px solid rgba(45, 212, 191, 0.35); border-radius: 12px; background: linear-gradient(160deg, rgba(20, 184, 166, 0.10), rgba(139, 92, 246, 0.10));">
+                            <div class="ai-feature-title" style="margin-bottom: 8px; font-size: 0.9rem;">🎬 Estilo del video</div>
+                            <select id="select-estilo-video" onchange="describirEstiloVideo()" style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                <option value="viral">🔥 Viral dinámico</option>
+                            </select>
+                            <div id="desc-estilo-video" style="font-size: 0.75rem; color: #a7f3d0; margin: 6px 0 10px;"></div>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                <label class="etiqueta-montaje">Subtítulos
+                                    <select id="select-sub-estilo" style="width:100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';"><option value="">Los del estilo</option></select></label>
+                                <label class="etiqueta-montaje">Fuente
+                                    <select id="select-sub-fuente" style="width:100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';"><option value="">La del estilo</option></select></label>
+                                <label class="etiqueta-montaje">Color de la palabra que suena
+                                    <span style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="chk-sub-activo" title="Usar mi color">
+                                    <input type="color" id="color-sub-activo" value="#39FF14" style="flex:1; height: 32px; background: transparent; border: none;"></span></label>
+                                <label class="etiqueta-montaje">Posición <span id="v-sub-pos">del estilo</span>
+                                    <input type="range" id="range-sub-pos" min="0" max="92" value="0" style="width:100%;"
+                                        oninput="document.getElementById('v-sub-pos').textContent = this.value == 0 ? 'del estilo' : this.value + '%'"></label>
+                                <label class="etiqueta-montaje">Tamaño <span id="v-sub-escala">100%</span>
+                                    <input type="range" id="range-sub-escala" min="60" max="160" value="100" style="width:100%;"
+                                        oninput="document.getElementById('v-sub-escala').textContent = this.value + '%'"></label>
+                                <label class="etiqueta-montaje">Música
+                                    <select id="select-musica" onchange="document.getElementById('archivo-musica').style.display = this.value === 'archivo' ? 'block' : 'none'" style="width:100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                        <option value="auto">Automática (según el estilo)</option>
+                                        <option value="ninguna">Sin música</option>
+                                        <option value="archivo">Mi canción (subir MP3)</option>
+                                    </select></label>
+                            </div>
+                            <input type="file" id="archivo-musica" accept="audio/*" style="display:none; margin-top: 6px; width: 100%; color: #cbd5e1;">
+                            <label class="etiqueta-montaje" style="margin-top: 8px; display:block;">Volumen de la música <span id="v-vol-musica">del estilo</span>
+                                <input type="range" id="range-vol-musica" min="0" max="60" value="0" style="width:100%;"
+                                    oninput="document.getElementById('v-vol-musica').textContent = this.value == 0 ? 'del estilo' : this.value + '%'"></label>
+                            <div style="display:flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: 0.8rem; color: #e2e8f0;">
+                                <label><input type="checkbox" id="chk-efectos" checked> Efectos de sonido (whoosh, golpes, pops)</label>
+                                <label><input type="checkbox" id="chk-sub-emojis" checked> Emojis en los subtítulos</label>
+                                <label><input type="checkbox" id="chk-texto-imagen" checked> Texto dentro de las imágenes (carteles, neones) y caras expresivas</label>
+                            </div>
+                        </div>
+
                         <div id="opciones-imagen" style="display:none; margin-top: 12px;">
                             <div class="ai-feature-title" style="margin-bottom: 6px; font-size: 0.85rem;">Cantidad de imágenes</div>
                             <select id="select-cantidad-img" style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
@@ -80,8 +123,9 @@
                             <span id="audio-secuencia-nombre" style="font-size: 0.8rem; color: #94a3b8; margin-left: 8px;">Ningún audio</span>
                             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
                                 <select id="select-escena-seg" title="Cada cuánto cambia la imagen" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                    <option value="0" selected>Ritmo del estilo</option>
                                     <option value="3">Imagen cada ~3 s</option>
-                                    <option value="5" selected>Imagen cada ~5 s</option>
+                                    <option value="5">Imagen cada ~5 s</option>
                                     <option value="8">Imagen cada ~8 s</option>
                                     <option value="12">Imagen cada ~12 s</option>
                                 </select>

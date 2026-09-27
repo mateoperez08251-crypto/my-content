@@ -64,7 +64,9 @@ window.cambiarModoEstudio = function (modo) {
     mostrar('opciones-imagen', modo === 'imagen');
     mostrar('opciones-audio-img', modo === 'audio_imagenes');
     mostrar('opciones-guion', modo === 'guion_video');
+    mostrar('opciones-montaje', modo === 'guion_video' || modo === 'audio_imagenes');
     if (modo === 'guion_video') cargarVocesGuion();
+    if (modo === 'guion_video' || modo === 'audio_imagenes') cargarOpcionesMontaje();
     ['select-duration-gen', 'toggle-upscale-gen', 'toggle-60fps-gen', 'toggle-lipsync-gen', 'select-resolution-gen'].forEach(id => {
         const el = document.getElementById(id);
         const caja = el && el.closest('.ai-feature');
@@ -86,6 +88,87 @@ function textoBotonGenerar() {
     return "Generar Video Ahora";
 }
 
+// Opciones del montaje (estilos de video, subtítulos, fuentes) desde el servidor, una sola vez
+let opcionesMontaje = null;
+const NOMBRES_MUSICA = { suave: 'Ambiente suave', alegre: 'Alegre', epico: 'Épica', energica: 'Enérgica',
+    terror: 'Terror', misterio: 'Misterio', noticias: 'Noticias' };
+window.cargarOpcionesMontaje = function () {
+    if (opcionesMontaje) return;
+    fetch('/api/ia/opciones_video').then(r => r.json()).then(d => {
+        if (!d.success) return;
+        opcionesMontaje = d;
+        const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const llenar = (id, lista, primero) => {
+            const sel = document.getElementById(id);
+            if (sel) sel.innerHTML = primero + lista.map(x => `<option value="${esc(x.id)}">${esc(x.nombre)}</option>`).join('');
+        };
+        llenar('select-estilo-video', d.estilos, '');
+        llenar('select-sub-estilo', d.subtitulos, '<option value="">Los del estilo</option>');
+        llenar('select-sub-fuente', d.fuentes, '<option value="">La del estilo</option>');
+        const mus = document.getElementById('select-musica');
+        if (mus) mus.insertAdjacentHTML('beforeend', '<optgroup label="Ambiente generado">' +
+            d.musicas.map(m => `<option value="${m}">${NOMBRES_MUSICA[m] || m}</option>`).join('') + '</optgroup>');
+        describirEstiloVideo();
+    }).catch(() => {});
+};
+
+window.describirEstiloVideo = function () {
+    const id = document.getElementById('select-estilo-video')?.value;
+    const e = (opcionesMontaje?.estilos || []).find(x => x.id === id);
+    const caja = document.getElementById('desc-estilo-video');
+    if (caja) caja.textContent = e ? `${e.descripcion} · Imagen cada ~${e.escena_seg} s` : '';
+};
+
+// Opciones del montaje para enviar al servidor
+function opcionesMontajeForm(fd) {
+    const v = (id) => document.getElementById(id);
+    fd.append('estilo_video', v('select-estilo-video')?.value || 'viral');
+    fd.append('subtitulos', v('select-sub-estilo')?.value || '');
+    fd.append('sub_fuente', v('select-sub-fuente')?.value || '');
+    if (v('chk-sub-activo')?.checked) fd.append('sub_activo', v('color-sub-activo').value);
+    const pos = parseInt(v('range-sub-pos')?.value || '0', 10);
+    if (pos > 0) fd.append('sub_pos', (pos / 100).toString());
+    const escala = parseInt(v('range-sub-escala')?.value || '100', 10);
+    if (escala !== 100) fd.append('sub_escala', (escala / 100).toString());
+    fd.append('sub_emojis', v('chk-sub-emojis')?.checked ? 'true' : 'false');
+    fd.append('musica', v('select-musica')?.value || 'auto');
+    const vol = parseInt(v('range-vol-musica')?.value || '0', 10);
+    if (vol > 0) fd.append('vol_musica', (vol / 100).toString());
+    if (v('select-musica')?.value === 'archivo' && v('archivo-musica')?.files[0]) fd.append('musica_archivo', v('archivo-musica').files[0]);
+    fd.append('efectos', v('chk-efectos')?.checked ? 'true' : 'false');
+    fd.append('texto_en_imagen', v('chk-texto-imagen')?.checked ? 'true' : 'false');
+}
+
+// Escuchar una voz antes de usarla (las de la lista se crean una vez y quedan guardadas)
+let audioMuestra = null;
+window.escucharVozGuion = function () {
+    let voz = document.getElementById('select-voz-guion')?.value || 'auto';
+    if (voz === 'auto') {
+        const id = document.getElementById('select-estilo-video')?.value;
+        const e = (opcionesMontaje?.estilos || []).find(x => x.id === id);
+        voz = 'preset:' + (e ? e.voz : 'locutor_energico');
+    }
+    const btn = document.getElementById('btn-escuchar-voz');
+    if (audioMuestra && !audioMuestra.paused) { audioMuestra.pause(); if (btn) btn.innerHTML = '<i class="ph-fill ph-play"></i>'; return; }
+    if (btn) btn.innerHTML = '<i class="ph ph-spinner ph-spin"></i>';
+    fetch('/api/ia/muestra_voz?voz=' + encodeURIComponent(voz)).then(async r => {
+        if (!r.ok) {
+            let msg = 'No se pudo crear la muestra.';
+            try { msg = (await r.json()).error || msg; } catch (e) { }
+            throw new Error(msg);
+        }
+        return r.blob();
+    }).then(b => {
+        audioMuestra = new Audio(URL.createObjectURL(b));
+        audioMuestra.onended = () => { if (btn) btn.innerHTML = '<i class="ph-fill ph-play"></i>'; };
+        audioMuestra.play();
+        if (btn) btn.innerHTML = '<i class="ph-fill ph-pause"></i>';
+    }).catch(e => {
+        if (btn) btn.innerHTML = '<i class="ph-fill ph-play"></i>';
+        mostrarToast('Voz', e.message, true);
+    });
+};
+
 // Guion desde un archivo .txt
 window.cargarGuionArchivo = function (input, destino) {
     const f = input.files && input.files[0];
@@ -104,7 +187,7 @@ window.cargarVocesGuion = function () {
         if (!d.success) return;
         const previo = sel.value;
         const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        let html = '<optgroup label="Voces de la lista">' +
+        let html = '<option value="auto">Automática (según el estilo)</option><optgroup label="Voces de la lista">' +
             d.preset.map(v => `<option value="preset:${v.id}">${esc(v.nombre)}</option>`).join('') + '</optgroup>';
         if (d.clonadas.length) {
             html += '<optgroup label="Tus voces clonadas">' + d.clonadas.map(v =>
@@ -142,10 +225,12 @@ function generarImagenesEstudio(modo) {
         if (guion.length < 10) { mostrarToast("Falta el guion", "Pega el guion o la historia que quieres narrar.", true); return; }
         fd.append('guion', guion);
         fd.append('voz', document.getElementById('select-voz-guion')?.value || 'preset:narrador_documental');
-        fd.append('escena_seg', document.getElementById('select-escena-guion')?.value || '5');
+        fd.append('escena_seg', document.getElementById('select-escena-guion')?.value || '0');
+        opcionesMontajeForm(fd);
     } else {
         const audio = document.getElementById('audio-secuencia-file')?.files[0];
         fd.append('guion', document.getElementById('guion-audio')?.value.trim() || '');
+        opcionesMontajeForm(fd);
         if (!audio) { mostrarToast("Falta el audio", "Selecciona el audio con el que se crearán las imágenes.", true); return; }
         fd.append('audio', audio);
         fd.append('escena_seg', document.getElementById('select-escena-seg')?.value || '5');

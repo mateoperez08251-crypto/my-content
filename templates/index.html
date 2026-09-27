@@ -2958,6 +2958,11 @@
                                 box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
                             }
 
+                            .subtitle-option-nombre {
+                                position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 4px;
+                                font-size: 0.72rem; text-align: center; color: #fff; pointer-events: none;
+                                background: linear-gradient(transparent, rgba(0,0,0,0.75));
+                            }
                             .subtitle-option img {
                                 width: 100%;
                                 height: 100%;
@@ -2968,29 +2973,53 @@
                         </style>
                         <div class="presets-gallery"
                             style="display: flex; gap: 15px; padding-bottom: 15px; overflow-x: auto; scroll-snap-type: x mandatory; align-items: center; padding-top: 10px; margin-left: -5px; padding-left: 5px;">
-                            <div class="subtitle-option active" onclick="selectSubtitleStyle('style1', this)">
-                                <img src="/static/presets/Neon o Brillante.webp" alt="Estilo 1">
+                            <div class="subtitle-option active" title="Una palabra" onclick="selectSubtitleStyle('una_palabra', this)">
+                                <img src="/static/presets/sub_una_palabra.webp" alt="Una palabra" loading="lazy">
+                                <span class="subtitle-option-nombre">Una palabra</span>
                             </div>
-                            <div class="subtitle-option" onclick="selectSubtitleStyle('style2', this)">
-                                <img src="/static/presets/style2.webp" alt="Estilo 2">
+                            <div class="subtitle-option" title="Karaoke" onclick="selectSubtitleStyle('karaoke', this)">
+                                <img src="/static/presets/sub_karaoke.webp" alt="Karaoke" loading="lazy">
+                                <span class="subtitle-option-nombre">Karaoke</span>
                             </div>
-                            <div class="subtitle-option" onclick="selectSubtitleStyle('style3', this)">
-                                <img src="/static/presets/style3.webp" alt="Estilo 3">
+                            <div class="subtitle-option" title="Pop Art" onclick="selectSubtitleStyle('pop_art', this)">
+                                <img src="/static/presets/sub_pop_art.webp" alt="Pop Art" loading="lazy">
+                                <span class="subtitle-option-nombre">Pop Art</span>
                             </div>
-                            <div class="subtitle-option" onclick="selectSubtitleStyle('style4', this)">
-                                <img src="/static/presets/style4.webp" alt="Estilo 4">
+                            <div class="subtitle-option" title="Resaltador" onclick="selectSubtitleStyle('resaltador', this)">
+                                <img src="/static/presets/sub_resaltador.webp" alt="Resaltador" loading="lazy">
+                                <span class="subtitle-option-nombre">Resaltador</span>
                             </div>
-                            <div class="subtitle-option" onclick="selectSubtitleStyle('style5', this)">
-                                <img src="/static/presets/style5.webp" alt="Estilo 5">
+                            <div class="subtitle-option" title="Bubblegum" onclick="selectSubtitleStyle('bubblegum', this)">
+                                <img src="/static/presets/sub_bubblegum.webp" alt="Bubblegum" loading="lazy">
+                                <span class="subtitle-option-nombre">Bubblegum</span>
                             </div>
-                            <div class="subtitle-option" onclick="selectSubtitleStyle('style6', this)">
-                                <img src="/static/presets/style6.webp" alt="Estilo 6">
+                            <div class="subtitle-option" title="Frase con fondo" onclick="selectSubtitleStyle('caja_frase', this)">
+                                <img src="/static/presets/sub_caja_frase.webp" alt="Frase con fondo" loading="lazy">
+                                <span class="subtitle-option-nombre">Frase con fondo</span>
                             </div>
-                            <div class="subtitle-option" onclick="selectSubtitleStyle('style7', this)">
-                                <img src="/static/presets/style7.webp" alt="Estilo 7">
+                            <div class="subtitle-option" title="Neón" onclick="selectSubtitleStyle('neon', this)">
+                                <img src="/static/presets/sub_neon.webp" alt="Neón" loading="lazy">
+                                <span class="subtitle-option-nombre">Neón</span>
                             </div>
-                            <div class="subtitle-option" onclick="selectSubtitleStyle('style8', this)">
-                                <img src="/static/presets/style8.webp" alt="Estilo 8">
+                            <div class="subtitle-option" title="Terror" onclick="selectSubtitleStyle('terror', this)">
+                                <img src="/static/presets/sub_terror.webp" alt="Terror" loading="lazy">
+                                <span class="subtitle-option-nombre">Terror</span>
+                            </div>
+                            <div class="subtitle-option" title="Cuento" onclick="selectSubtitleStyle('cuento', this)">
+                                <img src="/static/presets/sub_cuento.webp" alt="Cuento" loading="lazy">
+                                <span class="subtitle-option-nombre">Cuento</span>
+                            </div>
+                            <div class="subtitle-option" title="Documental" onclick="selectSubtitleStyle('documental', this)">
+                                <img src="/static/presets/sub_documental.webp" alt="Documental" loading="lazy">
+                                <span class="subtitle-option-nombre">Documental</span>
+                            </div>
+                            <div class="subtitle-option" title="Noticias" onclick="selectSubtitleStyle('noticias', this)">
+                                <img src="/static/presets/sub_noticias.webp" alt="Noticias" loading="lazy">
+                                <span class="subtitle-option-nombre">Noticias</span>
+                            </div>
+                            <div class="subtitle-option" title="Minimal" onclick="selectSubtitleStyle('minimal', this)">
+                                <img src="/static/presets/sub_minimal.webp" alt="Minimal" loading="lazy">
+                                <span class="subtitle-option-nombre">Minimal</span>
                             </div>
                         </div>
                         <div
@@ -3007,6 +3036,49 @@
                             </div>
                             <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 5px;">Mueve a la
                                 izquierda para achicar, a la derecha para agrandar.</small>
+                        </div>
+
+                        <div style="margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+                            <label style="margin:0; margin-bottom: 10px; display: block; color: var(--accent-primary);"><i class="ph-duotone ph-crop"></i> Encuadre y estilo de subtítulos</label>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <label style="font-size: 0.8rem; color: rgba(255,255,255,0.7);">Encuadre
+                                    <select id="smart_encuadre" class="form-control" style="background: #111; width: 100%;">
+                                        <option value="caras" selected>Seguir caras y hablante</option>
+                                        <option value="zoom_dinamico">Seguir caras + zoom dinámico</option>
+                                        <option value="difuminado">Video completo + fondo difuminado</option>
+                                        <option value="dividido">Pantalla dividida (2 personas)</option>
+                                    </select></label>
+                                <label style="font-size: 0.8rem; color: rgba(255,255,255,0.7);">Fuente
+                                    <select id="smart_sub_fuente" class="form-control" style="background: #111; width: 100%;">
+                                        <option value="">La del estilo</option>
+                                        <option value="montserrat">Montserrat Black</option>
+                                        <option value="anton">Anton</option>
+                                        <option value="bebas">Bebas Neue</option>
+                                        <option value="poppins">Poppins Bold</option>
+                                        <option value="poppins_it">Poppins Black Italic</option>
+                                        <option value="bangers">Bangers (cómic)</option>
+                                        <option value="luckiest">Luckiest Guy</option>
+                                        <option value="creepster">Creepster (terror)</option>
+                                        <option value="playfair">Playfair Display</option>
+                                        <option value="special_elite">Máquina de escribir</option>
+                                        <option value="nunito">Nunito Black</option>
+                                        <option value="oswald">Oswald</option>
+                                        <option value="roboto">Roboto Black</option>
+                                        <option value="marker">A mano (Marker)</option>
+                                    </select></label>
+                                <label style="font-size: 0.8rem; color: rgba(255,255,255,0.7);">Color de la palabra que suena
+                                    <span style="display:flex; gap:6px; align-items:center;">
+                                        <input type="checkbox" id="smart_sub_activo_on" title="Usar mi color">
+                                        <input type="color" id="smart_sub_activo" value="#39FF14" style="width: 100%; height: 34px; background: transparent; border: none;">
+                                    </span></label>
+                                <label style="font-size: 0.8rem; color: rgba(255,255,255,0.7);">Posición <span id="smart_sub_pos_v">del estilo</span>
+                                    <input type="range" id="smart_sub_pos" min="0" max="92" step="1" value="0"
+                                        oninput="document.getElementById('smart_sub_pos_v').innerText = this.value == 0 ? 'del estilo' : (this.value + '% de arriba')" style="width: 100%;"></label>
+                            </div>
+                            <label class="custom-checkbox" style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-top: 10px;">
+                                <input type="checkbox" id="smart_efectos" checked style="width: 18px; height: 18px; accent-color: var(--accent-primary);">
+                                <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Efectos de sonido (pop en cada emoji)</span>
+                            </label>
                         </div>
 
                         <div
@@ -3062,8 +3134,13 @@
                                     <i class="ph-bold ph-trash" style="font-size: 1.3rem;"></i>
                                 </button>
                             </div>
-                            <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 8px;">La IA ajustará
-                                automáticamente el volumen para que las voces se escuchen claras.</small>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                                <span style="font-size: 0.8rem; color: rgba(255,255,255,0.7); white-space: nowrap;">Volumen <b id="smart_vol_musica_v">20%</b></span>
+                                <input type="range" id="smart_vol_musica" min="5" max="60" step="1" value="20" style="flex: 1;"
+                                    oninput="document.getElementById('smart_vol_musica_v').innerText = this.value + '%'">
+                            </div>
+                            <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 8px;">La música baja sola
+                                cuando alguien habla y todo se normaliza al volumen de YouTube/TikTok.</small>
                         </div>
                     </div>
                 </div>
@@ -3387,6 +3464,8 @@
         async function browseFileAudio() {
             const res = await fetch('/api/browse?type=media');
             const data = await res.json();
+            // En RunPod no hay explorador de Windows: el archivo se sube desde el navegador
+            if (data.subir) data.path = await subirDesdeNavegador('video/*,audio/*', 'audio_source');
             if (data.path) {
                 document.getElementById('audio_source').value = data.path;
             }
@@ -3437,6 +3516,8 @@
         async function browseFileSeparateAudio() {
             const res = await fetch('/api/browse?type=media');
             const data = await res.json();
+            // En RunPod no hay explorador de Windows: el archivo se sube desde el navegador
+            if (data.subir) data.path = await subirDesdeNavegador('video/*,audio/*', 'separate_audio_source');
             if (data.path) {
                 document.getElementById('separate_audio_source').value = data.path;
             }
@@ -3608,7 +3689,7 @@
                 document.getElementById('slider_end').value = parseTimeString(endStr);
             }
         }
-        window.selectedSubtitleStyle = 'style1';
+        window.selectedSubtitleStyle = 'una_palabra';
         function selectSubtitleStyle(styleId, element) {
             document.querySelectorAll('.subtitle-option').forEach(el => {
                 el.classList.remove('active');
@@ -3693,7 +3774,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         source: source,
-                        style: window.selectedSubtitleStyle || 'style1',
+                        style: window.selectedSubtitleStyle || 'una_palabra',
                         clip_duration: parseFloat(duration),
                         num_clips: parseInt(numClips),
                         start_time: startTime,
@@ -3706,6 +3787,12 @@
                         bg_music: bg_music_smart,
                         motor_ia: document.getElementById('smart_motor_ia') ? document.getElementById('smart_motor_ia').value : 'pro',
                         emojis: document.getElementById('smart_emojis') ? document.getElementById('smart_emojis').checked : true,
+                        encuadre: document.getElementById('smart_encuadre')?.value || 'caras',
+                        sub_fuente: document.getElementById('smart_sub_fuente')?.value || '',
+                        sub_activo: document.getElementById('smart_sub_activo_on')?.checked ? document.getElementById('smart_sub_activo').value : '',
+                        sub_pos: (document.getElementById('smart_sub_pos')?.value || '0') !== '0' ? (parseInt(document.getElementById('smart_sub_pos').value, 10) / 100) : '',
+                        efectos: document.getElementById('smart_efectos') ? document.getElementById('smart_efectos').checked : true,
+                        vol_musica: (parseInt(document.getElementById('smart_vol_musica')?.value || '20', 10) / 100),
                         titulo_en_video: document.getElementById('smart_titulo_video') ? document.getElementById('smart_titulo_video').checked : false,
                         transcripcion: document.getElementById('smart_transcripcion') ? document.getElementById('smart_transcripcion').value : 'groq',
                         whisper_local: document.getElementById('smart_whisper_local') ? document.getElementById('smart_whisper_local').value : 'auto',
