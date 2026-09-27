@@ -3,7 +3,7 @@ import os
 # pyrefly: ignore [missing-import]
 import imageio_ffmpeg
 
-def download_video(url, output_dir="videos_descargados", quality="1440"):
+def download_video(url, output_dir="videos_descargados", quality="1440", cancel_checker=None):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
@@ -54,18 +54,25 @@ def download_video(url, output_dir="videos_descargados", quality="1440"):
     # Usar aria2c si está disponible (descarga MUCHO más rápido con múltiples conexiones)
     import shutil
     if shutil.which('aria2c'):
-        print(">>> Usando aria2c para descarga acelerada <<<")
-        ydl_opts['external_downloader'] = 'aria2c'
-        ydl_opts['external_downloader_args'] = {
-            'default': [
-                '--min-split-size=1M',
-                '--max-connection-per-server=16',
-                '--max-concurrent-downloads=16',
-                '--split=16',
-            ]
-        }
+        print(">>> yt-dlp nativo activado (aria2c deshabilitado para evitar Error 22 en YouTube) <<<")
+        # ydl_opts['external_downloader'] = 'aria2c'
+        # ydl_opts['external_downloader_args'] = {
+        #     'default': [
+        #         '--min-split-size=1M',
+        #         '--max-connection-per-server=16',
+        #         '--max-concurrent-downloads=16',
+        #         '--split=16',
+        #     ]
+        # }
     else:
-        print("TIP: Instala aria2c para descargas hasta 5x más rápidas (choco install aria2 / winget install aria2)")
+        print("Usando descargador nativo de yt-dlp.")
+        
+    def progress_hook(d):
+        if cancel_checker and cancel_checker():
+            print("\n>>> Descarga cancelada por el usuario en yt-dlp <<<")
+            raise Exception("CANCELADO_POR_USUARIO")
+            
+    ydl_opts['progress_hooks'] = [progress_hook]
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

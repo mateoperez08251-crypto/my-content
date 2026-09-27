@@ -1,1 +1,1 @@
-¡Proceso finalizado con éxito!|100
+Error: 'NoneType' object has no attribute 'stdout'|-1

@@ -595,7 +595,7 @@ def run_automation_thread(data):
             log("Descargando video desde URL...")
             calidad = data.get('video_quality', '1440')
             output_folder = data.get('custom_output_dir', '') or paths.data_path("videos_descargados")
-            video = yt_downloader.download_video(video, output_dir=output_folder, quality=calidad)
+            video = yt_downloader.download_video(video, output_dir=output_folder, quality=calidad, cancel_checker=lambda: cancel_requested)
             if not video:
                 return
             log(f"Video descargado: {video}")
@@ -1234,7 +1234,7 @@ def run_smart_split_thread(data):
             import yt_downloader
             log("Descargando video para Smart Split...")
             dl_dir = data.get('custom_output_dir', '') or paths.data_path("videos_descargados")
-            source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440")
+            source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440", cancel_checker=lambda: cancel_requested)
             if not source:
                 raise Exception("Error al descargar video")
         if _cancelado():
