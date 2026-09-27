@@ -868,6 +868,12 @@ def generar(cfg):
                 oom = True
             if not oom:
                 break
+            if PERSISTENTE.get("txt") is not None:  # 1º: sacar de la GPU el lector del prompt
+                PERSISTENTE.update(txt=None)
+                _liberar_vram(torch)
+                aviso("La VRAM se llenó: se liberó el lector del prompt y se reintenta.")
+                kwargs["generator"] = torch.Generator(device="cpu").manual_seed(semilla + i)
+                continue
             _liberar_vram(torch)
             if not bajar_estrategia(pipe, torch):
                 raise RuntimeError("CUDA out of memory incluso cargando el modelo por partes.")
@@ -1167,6 +1173,7 @@ def _pipe_imagen(motor, carpeta, torch, gpu):
         pipe.to("cuda")
     else:
         pipe.enable_model_cpu_offload(device="cuda")
+        pipe._estrategia = "offload"
         aviso("El modelo de imagen no cabe entero en la VRAM: va por partes (más lento).")
     if _persistente():
         PERSISTENTE.update(clave=clave, pipe=pipe, pipe_img=None, txt=None)
@@ -1366,7 +1373,16 @@ def generar_imagenes(cfg):
     imgs = []
     for i, pr in enumerate(prompts):
         progreso(22 + 62 * i / len(prompts), 2, f"Generando imagen {i + 1}/{len(prompts)}...")
-        img = _una_imagen(pipe, motor, pr, w, h, semilla + i, pasos, torch)
+        while True:
+            try:
+                img = _una_imagen(pipe, motor, pr, w, h, semilla + i, pasos, torch)
+                break
+            except Exception as e:
+                if not _es_oom(e):
+                    raise
+            _liberar_vram(torch)
+            if not bajar_estrategia(pipe, torch):  # GPU entera -> GPU + RAM -> por partes
+                raise RuntimeError("CUDA out of memory incluso cargando el modelo de imagen por partes.")
         ruta = os.path.join(carpeta_img, f"img_{sello}_{i + 1:02d}.png")
         img.save(ruta)
         imgs.append(ruta)
@@ -1452,24 +1468,38 @@ def servidor():
     return 0
 
 
-def ejecutar_tarea(cfg):
+def ejecutar_tarea(cfg, reintento=True):
+    reintentar = False
     try:
         generar(cfg)
         return 0
     except Exception as e:
-        if _persistente():  # tras un error no se reutiliza nada (estado dudoso)
-            _vaciar_persistente()
         import traceback
         traceback.print_exc(file=sys.stdout)  # queda en logs/motor_video.log
-        msg = str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}"
-        if isinstance(e, MemoryError):
-            msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Usa Wan2.1 1.3B, cierra "
-                   "otros programas y aumenta la memoria virtual de Windows a 32 GB o más.")
-        if "out of memory" in msg.lower() or "CUDA out of memory" in msg:
-            msg = ("La GPU se quedó sin memoria (VRAM). Prueba con menos duración, un modelo más "
-                   "ligero (Wan2.1 1.3B) o cierra otros programas que usen la GPU.")
-        emitir("error", msg=msg)
+        if reintento and _es_oom(e):
+            reintentar = True
+        else:
+            if _persistente():  # tras un error no se reutiliza nada (estado dudoso)
+                _vaciar_persistente()
+            emitir("error", msg=_mensaje_error(e))
+    if not reintentar:
         return 1
+    # Fuera del except: el error guarda referencias al modelo y dentro la VRAM no se libera.
+    _vaciar_persistente()
+    print("[aviso] VRAM llena: se liberó la GPU y se reintenta una vez desde cero.", flush=True)
+    aviso("La VRAM se llenó: se liberó la GPU y se reintentó desde cero.")
+    return ejecutar_tarea(cfg, reintento=False)
+
+
+def _mensaje_error(e):
+    msg = str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}"
+    if isinstance(e, MemoryError):
+        msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Usa Wan2.1 1.3B, cierra "
+               "otros programas y aumenta la memoria virtual de Windows a 32 GB o más.")
+    if "out of memory" in msg.lower():
+        msg = ("La GPU se quedó sin memoria (VRAM) incluso tras liberarla y reintentar. Prueba con "
+               "menos duración, formato más pequeño o un modelo más ligero (Wan2.2 Turbo, Z-Image).")
+    return msg
 
 
 if __name__ == "__main__":
