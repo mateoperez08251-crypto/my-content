@@ -55,6 +55,13 @@ echo "Python: $PY"
 if [ -x "$VPY" ] && ! "$VPY" -c "import sys" 2>/dev/null; then
     echo "[!] Entorno roto: se recrea."; rm -rf "$VENV"
 fi
+# torch a medio instalar dentro del entorno (p. ej. se cortó con Ctrl+C) tapa al de la
+# plantilla y rompe todo: se borra el entorno y se vuelve a usar el torch del sistema.
+if [ -x "$VPY" ] && [ -d "$VENV/lib" ] && ls -d "$VENV"/lib/python3*/site-packages/torch >/dev/null 2>&1 \
+        && ! "$VPY" -c "import torch" >/dev/null 2>&1; then
+    echo "[!] torch incompleto en el entorno (instalación cortada): se recrea el entorno."
+    rm -rf "$VENV"
+fi
 if [ ! -x "$VPY" ]; then
     # --system-site-packages: reutiliza el torch de la plantilla
     "$PY" -m venv --system-site-packages "$VENV" 2>/dev/null || {
