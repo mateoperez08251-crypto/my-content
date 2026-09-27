@@ -20,6 +20,16 @@ if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
     kill "$(cat "$PID")" 2>/dev/null || true
     sleep 2
 fi
+# Motores que siguieron vivos (generando) tras cerrar la app: ocupan la VRAM y el nuevo
+# motor se queda sin memoria.
+if pgrep -f "video_worker.py|tts_worker.py|content.py --servidor" >/dev/null 2>&1; then
+    echo "Cerrando motores anteriores que seguían ocupando la GPU..."
+    pkill -f "video_worker.py" 2>/dev/null || true
+    pkill -f "tts_worker.py" 2>/dev/null || true
+    pkill -f "content.py --servidor" 2>/dev/null || true
+    sleep 3
+    pkill -9 -f "video_worker.py|tts_worker.py|content.py --servidor" 2>/dev/null || true
+fi
 
 # Director IA: arrancar Ollama si está instalado y no está corriendo
 if command -v ollama >/dev/null && ! curl -fs http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
