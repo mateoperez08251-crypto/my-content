@@ -11,6 +11,11 @@ echo.
 set "APP_DIR=%~dp0"
 cd /d "%APP_DIR%"
 
+:: El motor se instala FUERA del proyecto (carpeta limpia del usuario): así VS Code
+:: u otros programas no bloquean sus archivos y no hay restos de intentos viejos.
+set "VENV=%LOCALAPPDATA%\ContentApp\motor_video"
+if not exist "%LOCALAPPDATA%\ContentApp" mkdir "%LOCALAPPDATA%\ContentApp"
+
 :: 1. Buscar Python 3.10 - 3.12
 set "PY="
 py -3.11 --version >nul 2>&1 && set "PY=py -3.11"
@@ -43,12 +48,16 @@ if not errorlevel 1 (
     pause >nul
 )
 call :liberar_venv
+if exist ".venv_video" (
+    echo  [i] La carpeta vieja .venv_video ya no se usa. Si no te deja borrarla, reinicia el PC y borrala.
+)
 :: No usar paquetes del Python del usuario (evita que un torch viejo "se cuele")
 set "PYTHONNOUSERSITE=1"
-set "VPY=%APP_DIR%.venv_video\Scripts\python.exe"
+set "VPY=%VENV%\Scripts\python.exe"
+echo  [*] Carpeta del motor: %VENV%
 
 if exist "%VPY%" goto validar_entorno
-if exist ".venv_video" goto rehacer_entorno
+if exist "%VENV%" goto rehacer_entorno
 goto crear_entorno
 
 :validar_entorno
@@ -56,35 +65,35 @@ goto crear_entorno
 if errorlevel 1 goto rehacer_entorno
 "%VPY%" -c "import os,sys,pip._vendor.certifi as c;sys.exit(0 if os.path.exists(c.where()) else 1)" >nul 2>&1
 if errorlevel 1 goto rehacer_entorno
-echo  [OK] Entorno .venv_video correcto.
+echo  [OK] Entorno del motor correcto.
 goto entorno_ok
 
 :rehacer_entorno
-echo  [!] El entorno .venv_video esta incompleto o dañado: se borra y se crea de nuevo.
+echo  [!] El entorno del motor esta incompleto o dañado: se borra y se crea de nuevo.
 echo      Si falla, cierra Content App (tambien desde la bandeja junto al reloj).
 :: se conserva lo ya descargado de PyTorch para no bajarlo otra vez
-if exist ".venv_video\descargas" (
-    if exist "_descargas_motor" rmdir /s /q "_descargas_motor" >nul 2>&1
-    move ".venv_video\descargas" "_descargas_motor" >nul 2>&1
+if exist "%VENV%\descargas" (
+    if exist "%LOCALAPPDATA%\ContentApp\_descargas_motor" rmdir /s /q "%LOCALAPPDATA%\ContentApp\_descargas_motor" >nul 2>&1
+    move "%VENV%\descargas" "%LOCALAPPDATA%\ContentApp\_descargas_motor" >nul 2>&1
 )
 call :liberar_venv
-rmdir /s /q ".venv_video" >nul 2>&1
-if exist ".venv_video" (
-    echo  [X] No se pudo borrar .venv_video porque algun programa lo esta usando.
+rmdir /s /q "%VENV%" >nul 2>&1
+if exist "%VENV%" (
+    echo  [X] No se pudo borrar %VENV% porque algun programa lo esta usando.
     echo      Cierra Content App, espera unos segundos y vuelve a ejecutar este archivo.
     pause
     exit /b 1
 )
 
 :crear_entorno
-echo  [*] Creando entorno .venv_video ...
-%PY% -m venv .venv_video
+echo  [*] Creando entorno del motor ...
+%PY% -m venv "%VENV%"
 if errorlevel 1 (
     echo  [X] No se pudo crear el entorno virtual.
     pause
     exit /b 1
 )
-if exist "_descargas_motor" move "_descargas_motor" ".venv_video\descargas" >nul 2>&1
+if exist "%LOCALAPPDATA%\ContentApp\_descargas_motor" move "%LOCALAPPDATA%\ContentApp\_descargas_motor" "%VENV%\descargas" >nul 2>&1
 
 :entorno_ok
 echo  [*] Actualizando pip...
@@ -92,8 +101,14 @@ echo  [*] Actualizando pip...
 if errorlevel 1 "%VPY%" -m ensurepip --upgrade >nul 2>&1
 
 :: --- PyTorch: descarga reanudable con reintentos (el archivo pesa ~2.5 GB) ---
-set "WHEELS=%APP_DIR%.venv_video\descargas"
+set "WHEELS=%VENV%\descargas"
 if not exist "%WHEELS%" mkdir "%WHEELS%"
+:: reaprovechar PyTorch ya descargado en la carpeta vieja (.venv_video)
+if exist "%APP_DIR%.venv_video\descargas\*.whl" (
+    echo  [*] Reutilizando la descarga de PyTorch de la carpeta vieja...
+    copy /y "%APP_DIR%.venv_video\descargas\*.whl" "%WHEELS%\" >nul 2>&1
+    copy /y "%APP_DIR%.venv_video\descargas\*.ok" "%WHEELS%\" >nul 2>&1
+)
 set "REPORTE=%WHEELS%\torch_reporte.json"
 set "URLTXT=%WHEELS%\torch_url.txt"
 
@@ -148,14 +163,14 @@ set INTENTO=0
 :reintento_instalar_torch
 set /a INTENTO+=1
 call :liberar_venv
-if %INTENTO% gtr 1 if exist ".venv_video\Lib\site-packages\torch" rmdir /s /q ".venv_video\Lib\site-packages\torch" >nul 2>&1
+if %INTENTO% gtr 1 if exist "%VENV%\Lib\site-packages\torch" rmdir /s /q "%VENV%\Lib\site-packages\torch" >nul 2>&1
 echo  [*] Instalando PyTorch desde el archivo descargado (intento %INTENTO% de 3)...
 "%VPY%" -m pip install "%TORCH_FILE%" --retries 10 --timeout 120
 if not errorlevel 1 goto diffusers
 if %INTENTO% geq 3 (
     echo  [X] No se pudo instalar PyTorch. Si dice "Acceso denegado" o "WinError 32":
     echo      cierra Content App ^(tambien desde la bandeja^), reinicia el PC y vuelve a ejecutar.
-    echo      Si dice que el archivo esta dañado, borra la carpeta .venv_video\descargas.
+    echo      Si dice que el archivo esta dañado, borra la carpeta %VENV%\descargas.
     pause
     exit /b 1
 )
@@ -199,11 +214,11 @@ pause
 exit /b 0
 
 :: ------------------------------------------------------------------
-:: Cierra los procesos que usan el Python de .venv_video (el motor de video
+:: Cierra los procesos que usan el Python del motor (el motor de video
 :: o su diagnóstico). Mientras están abiertos, Windows bloquea los archivos
 :: de PyTorch y da "Acceso denegado" (WinError 5) al instalar o borrar.
 :: ------------------------------------------------------------------
 :liberar_venv
-powershell -NoProfile -Command "$d = (Resolve-Path '.venv_video' -ErrorAction SilentlyContinue).Path; if ($d) { $p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID -and ( $_.Path -like ($d + '*') -or ( $_.Modules -and ($_.Modules | Where-Object { $_.FileName -like ($d + '*') }) ) ) }; foreach ($x in $p) { Write-Host ('  [*] Cerrando ' + $x.ProcessName + ' (PID ' + $x.Id + ') que bloqueaba archivos de .venv_video'); Stop-Process -Id $x.Id -Force -ErrorAction SilentlyContinue }; if ($p) { Start-Sleep -Seconds 2 } }"
+powershell -NoProfile -Command "$d = (Resolve-Path $env:VENV -ErrorAction SilentlyContinue).Path; if ($d) { $p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID -and ( $_.Path -like ($d + '*') -or ( $_.Modules -and ($_.Modules | Where-Object { $_.FileName -like ($d + '*') }) ) ) }; foreach ($x in $p) { Write-Host ('  [*] Cerrando ' + $x.ProcessName + ' (PID ' + $x.Id + ') que bloqueaba archivos del motor'); Stop-Process -Id $x.Id -Force -ErrorAction SilentlyContinue }; if ($p) { Start-Sleep -Seconds 2 } }"
 exit /b 0
 

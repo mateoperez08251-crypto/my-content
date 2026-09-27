@@ -742,6 +742,9 @@ def _candidatos_python():
     cands = []
     if os.environ.get("CONTENTAPP_VIDEO_PYTHON"):
         cands.append(os.environ["CONTENTAPP_VIDEO_PYTHON"])
+    local = os.environ.get("LOCALAPPDATA")
+    if local:  # ubicación actual del motor (fuera del proyecto)
+        cands.append(os.path.join(local, "ContentApp", "motor_video", "Scripts", "python.exe"))
     for base in (paths.EXEC_DIR, paths.DATA_DIR, paths.RES_DIR):
         for sub in ((".venv_video", "Scripts", "python.exe"), (".venv_video", "bin", "python"),
                     ("VideoAI", ".venv", "Scripts", "python.exe"), ("VideoAI", ".venv", "bin", "python")):
