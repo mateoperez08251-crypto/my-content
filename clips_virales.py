@@ -138,8 +138,41 @@ def _transcribir_archivo(ruta, modelo, idioma):
     raise RuntimeError("Groq Whisper no respondió (límite de uso). Espera un minuto y reintenta.")
 
 
-def transcribir(video, inicio=None, fin=None, modelo="whisper-large-v3", idioma="es", progreso=None):
-    """Devuelve (palabras, segmentos) con tiempos relativos a `inicio`."""
+def _transcribir_local(video, inicio, fin, idioma, python_local, script_local, modelo_local, progreso):
+    """Whisper en TU GPU (sin Groq). Se ejecuta con el Python del motor de video (torch +
+    transformers); si no se indica, en este mismo proceso (p. ej. dentro del motor)."""
+    if progreso:
+        progreso(0, 1)
+    if not python_local:
+        import transcripcion_local
+        return transcripcion_local.transcribir(video, modelo_local, idioma, _ffmpeg(), inicio, fin)
+    salida = os.path.join(tempfile.mkdtemp(prefix="trans_local_"), "texto.json")
+    cmd = [python_local, script_local, video, salida, modelo_local or "auto", idioma or "",
+           _ffmpeg(), "" if inicio is None else str(inicio), "" if fin is None else str(fin)]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       creationflags=SIN_VENTANA)
+    try:
+        with open(salida, "r", encoding="utf-8") as f:
+            datos = json.load(f)
+    except (OSError, ValueError):
+        datos = {"error": (r.stderr or r.stdout or "sin salida")[-400:]}
+    finally:
+        try:
+            os.remove(salida)
+            os.rmdir(os.path.dirname(salida))
+        except OSError:
+            pass
+    if datos.get("error"):
+        raise RuntimeError(f"La transcripción local falló: {datos['error']}")
+    return datos.get("words") or [], datos.get("segments") or []
+
+
+def transcribir(video, inicio=None, fin=None, modelo="whisper-large-v3", idioma="es", progreso=None,
+                proveedor="groq", python_local="", script_local="", modelo_local="auto"):
+    """Devuelve (palabras, segmentos) con tiempos relativos a `inicio`.
+    proveedor: "groq" (nube, gratis) o "local" (Whisper en tu GPU)."""
+    if proveedor == "local":
+        return _transcribir_local(video, inicio, fin, idioma, python_local, script_local, modelo_local, progreso)
     tmp = tempfile.mkdtemp(prefix="smart_audio_")
     audio = os.path.join(tmp, "audio.m4a")
     cmd = [_ffmpeg(), "-y", "-loglevel", "error"]

@@ -2843,10 +2843,29 @@
                             <option value="equilibrado">Equilibrado · GPT-OSS 20B · caras + hablante</option>
                             <option value="pro" selected>Pro · GPT-OSS 120B · caras + hablante con anticipación (recomendado)</option>
                         </select>
-                        <small style="color: var(--text-muted); font-size: 0.75rem;">Elige los momentos virales, escribe la descripción con #hashtags y enfoca a quien habla. La IA corre en Groq (no usa tu GPU).</small>
+                        <small style="color: var(--text-muted); font-size: 0.75rem;">Elige los momentos virales, escribe la descripción con #hashtags y enfoca a quien habla. La selección de clips corre en Groq; la transcripción puede ser en Groq o en tu GPU.</small>
                         <label style="display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer;">
                             <input type="checkbox" id="smart_emojis" checked> Emojis automáticos en los subtítulos
                         </label>
+                        <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer;">
+                            <input type="checkbox" id="smart_titulo_video"> Mostrar el título dentro del video (opcional, discreto)
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-top: 15px;">
+                        <label style="display:block; margin-bottom:5px;">Transcripción del audio</label>
+                        <select id="smart_transcripcion" class="form-control"
+                            onchange="document.getElementById('smart_whisper_box').style.display = this.value === 'local' ? 'block' : 'none';">
+                            <option value="groq" selected>Groq (nube, gratis, no usa tu GPU)</option>
+                            <option value="local">Local: Whisper en tu GPU (sin internet para transcribir)</option>
+                        </select>
+                        <div id="smart_whisper_box" style="display:none; margin-top:8px;">
+                            <select id="smart_whisper_local" class="form-control">
+                                <option value="auto" selected>Automático según tu gráfica</option>
+                                <option value="large-v3">Whisper large-v3 — el más preciso (RTX 5000, A40, 4090, H100)</option>
+                                <option value="turbo">Whisper large-v3-turbo — rápido (gráficas de 8-12 GB)</option>
+                            </select>
+                            <small style="color: var(--text-muted); font-size: 0.75rem;">Necesita el motor de video instalado. La 1ª vez baja el modelo (~1.5-3 GB).</small>
+                        </div>
                     </div>
                     <div class="form-group" style="margin-top: 20px;">
                         <label
@@ -3662,6 +3681,9 @@
                         bg_music: bg_music_smart,
                         motor_ia: document.getElementById('smart_motor_ia') ? document.getElementById('smart_motor_ia').value : 'pro',
                         emojis: document.getElementById('smart_emojis') ? document.getElementById('smart_emojis').checked : true,
+                        titulo_en_video: document.getElementById('smart_titulo_video') ? document.getElementById('smart_titulo_video').checked : false,
+                        transcripcion: document.getElementById('smart_transcripcion') ? document.getElementById('smart_transcripcion').value : 'groq',
+                        whisper_local: document.getElementById('smart_whisper_local') ? document.getElementById('smart_whisper_local').value : 'auto',
                         subir_tiktok: subir_tiktok_smart === 'on',
                         subir_youtube: subir_youtube_smart === 'on',
                         subir_facebook: subir_facebook_smart === 'on'
