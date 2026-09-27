@@ -6,21 +6,50 @@ import cv2
 from PIL import Image, ImageDraw, ImageFont
 import math
 
-try:
-    # pyrefly: ignore [missing-import]
-    from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_audioclips
-except ImportError:
-    from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_audioclips
+# Se requiere moviepy 2.x (API subclipped/with_*).
+from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_audioclips
 
 # Usamos el detector de rostros de OpenCV con el archivo local
 _cascade_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'haarcascade_frontalface_default.xml')
 try:
     face_cascade = cv2.CascadeClassifier(_cascade_path)
 except AttributeError as e:
-    print(f"ERROR INIT CV2: {e}. cv2 path: {getattr(cv2, '__file__', 'unknown')}, dir: {dir(cv2)}")
+    print(f"Aviso: detector de caras no disponible ({e}). Se usa detección por movimiento.")
     face_cascade = None
 import imageio_ffmpeg
 import subprocess
+import json
+import functools
+
+import paths
+
+SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+PROGRESS_FILE = os.path.join(paths.TEMP_DIR, "smart_progress.txt")
+GROQ_TIMEOUT = (10, 120)
+
+
+def _groq_key():
+    """API key de Groq: variable GROQ_API_KEY o secrets.json -> {"groq": {"api_key": "..."}}."""
+    from app_secrets import get_secret
+    key = get_secret("groq", "api_key", env="GROQ_API_KEY")
+    if not key:
+        raise RuntimeError("Falta la API key de Groq. Ponla en secrets.json como "
+                           "{\"groq\": {\"api_key\": \"...\"}} o en la variable GROQ_API_KEY.")
+    return key
+
+
+@functools.lru_cache(maxsize=64)
+def _fuente(nombres, tam):
+    """Carga una fuente una sola vez (antes se cargaba en cada frame)."""
+    for n in nombres:
+        try:
+            return ImageFont.truetype(n, tam)
+        except OSError:
+            continue
+    try:
+        return ImageFont.load_default(size=tam)  # Pillow >= 10.1: fuente escalable
+    except TypeError:
+        return ImageFont.load_default()
 
 def extract_audio_temp(video_path, audio_path, start_t=None, end_t=None):
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -30,14 +59,14 @@ def extract_audio_temp(video_path, audio_path, start_t=None, end_t=None):
     if end_t is not None:
         cmd.extend(["-to", str(end_t)])
     cmd.extend(["-i", video_path, "-vn", "-c:a", "aac", "-b:a", "32k", "-ac", "1", audio_path])
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=SIN_VENTANA)
 
 def generate_title_from_transcription(text):
     print("Generando título corto con Groq IA...")
     import requests
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": "Bearer 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",
+        "Authorization": f"Bearer {_groq_key()}",
         "Content-Type": "application/json"
     }
     prompt = f"Basado en esta transcripción, crea un título MUY corto y llamativo para un video corto de TikTok o YouTube Shorts (máximo 4 a 6 palabras). Solo responde con el título, sin comillas, sin explicaciones, sin introducciones. Todo en mayúsculas.\n\nTranscripción:\n{text}"
@@ -47,7 +76,7 @@ def generate_title_from_transcription(text):
         "temperature": 0.7
     }
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=GROQ_TIMEOUT)
         if response.status_code == 200:
             title = response.json()["choices"][0]["message"]["content"].strip().replace('"', '')
             return title
@@ -61,7 +90,7 @@ def get_transcription(audio_path):
     
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     headers = {
-        "Authorization": "Bearer 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"
+        "Authorization": f"Bearer {_groq_key()}"
     }
     
     with open(audio_path, "rb") as f:
@@ -75,7 +104,7 @@ def get_transcription(audio_path):
             "language": "es"
         }
         
-        response = requests.post(url, headers=headers, files=files, data=data)
+        response = requests.post(url, headers=headers, files=files, data=data, timeout=(10, 600))
         
     if response.status_code != 200:
         raise Exception(f"Error en Groq API: {response.text}")
@@ -112,13 +141,7 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
     # Dibujar titulo corto arriba si existe
     if gen_title:
         title_font_size = int(h * 0.06)
-        try:
-            title_font = ImageFont.truetype("impact.ttf", title_font_size)
-        except:
-            try:
-                title_font = ImageFont.truetype("arialbd.ttf", title_font_size)
-            except:
-                title_font = ImageFont.load_default()
+        title_font = _fuente(("impact.ttf", "arialbd.ttf"), title_font_size)
         try:
             bbox = draw.textbbox((0, 0), gen_title, font=title_font)
             tw = bbox[2] - bbox[0]
@@ -156,13 +179,8 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
     if subtitle_style in ["style3", "style8"]:
         font_name = "impact.ttf"
         
-    try:
-        font = ImageFont.truetype(font_name, font_size)
-    except:
-        try:
-            font = ImageFont.truetype("impact.ttf" if font_name == "arialbd.ttf" else "arialbd.ttf", font_size)
-        except:
-            font = ImageFont.load_default()
+    fuentes = (font_name, "impact.ttf" if font_name == "arialbd.ttf" else "arialbd.ttf")
+    font = _fuente(fuentes, font_size)
             
     # Calcular ancho total de la frase (MAYUSCULAS)
     texts = [w["word"].upper() for w in current_phrase]
@@ -182,10 +200,7 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
             break
             
         font_size -= 2
-        try:
-            font = ImageFont.truetype(font_name, font_size)
-        except:
-            font = ImageFont.truetype("impact.ttf", font_size)
+        font = _fuente(fuentes, font_size)
         try:
             bbox = draw.textbbox((0, 0), full_text, font=font)
             total_w = bbox[2] - bbox[0]
@@ -258,7 +273,7 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
         emoji_char = current_phrase[0]["emoji"]
         try:
             emoji_font_size = int(h * 0.05)
-            emoji_font = ImageFont.truetype("seguiemj.ttf", emoji_font_size)
+            emoji_font = _fuente(("seguiemj.ttf",), emoji_font_size)
             try:
                 e_bbox = draw.textbbox((0, 0), emoji_char, font=emoji_font)
                 ew = e_bbox[2] - e_bbox[0]
@@ -286,7 +301,7 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
 
 def write_progress(msg, percent=0):
     try:
-        with open("smart_progress.txt", "w", encoding="utf-8") as f:
+        with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
             f.write(f"{msg}|{percent}")
     except:
         pass
@@ -306,7 +321,7 @@ def generate_emojis_for_phrases(phrases):
     import requests
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": "Bearer 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",
+        "Authorization": f"Bearer {_groq_key()}",
         "Content-Type": "application/json"
     }
     texts = [" ".join([w["word"] for w in p]) for p in phrases]
@@ -320,7 +335,7 @@ def generate_emojis_for_phrases(phrases):
         "temperature": 0.5
     }
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=GROQ_TIMEOUT)
         if response.status_code == 200:
             content = response.json()["choices"][0]["message"]["content"].strip()
             emojis = [e.strip() for e in content.replace('\n', ',').split(',')]
@@ -343,7 +358,7 @@ def analyze_best_moments_with_ai(words, total_duration, clip_duration, num_clips
     print("Analizando transcripción con Groq IA para buscar los mejores momentos...")
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": "Bearer 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",
+        "Authorization": f"Bearer {_groq_key()}",
         "Content-Type": "application/json"
     }
     
@@ -393,7 +408,7 @@ Transcripción con marcas de tiempo (en segundos):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=GROQ_TIMEOUT)
         if response.status_code == 200:
             content = response.json()["choices"][0]["message"]["content"].strip()
             # Limpiar posible formato markdown
@@ -455,14 +470,15 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     write_progress("Extrayendo audio para Groq IA...", 10)
     import tempfile
     temp_audio = os.path.join(tempfile.gettempdir(), f"temp_smart_audio_{os.getpid()}.m4a")
-    extract_audio_temp(video_path, temp_audio, s_time, e_time)
-    
-    write_progress("Transcribiendo audio ultrarrápido (Buscando mejores momentos)...", 15)
-    words = get_transcription(temp_audio)
+    try:
+        extract_audio_temp(video_path, temp_audio, s_time, e_time)
+        write_progress("Transcribiendo audio ultrarrápido (Buscando mejores momentos)...", 15)
+        words = get_transcription(temp_audio)
+    finally:
+        if os.path.exists(temp_audio):
+            os.remove(temp_audio)
     # Agrupar de a 3 palabras para subtitulos cortos y legibles
     phrases = group_words_into_phrases(words, max_words=3)
-    if os.path.exists(temp_audio):
-        os.remove(temp_audio)
     print("Transcripción completada. Total palabras:", len(words))
     
     # Generaremos el título corto por cada subclip seleccionado más adelante
@@ -669,9 +685,15 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         safe_title = re.sub(r'[\\/*?:"<>|]', "", gen_title).strip()
         if safe_title:
             safe_title = safe_title.replace(" ", "_").lower()
-            out_name = os.path.join(out_dir, f"{safe_title}{ext}")
+            out_name = os.path.join(out_dir, f"{safe_title}_{parte_num}{ext}")
         else:
             out_name = f"{base}_parte_{parte_num}{ext}"
+        # No pisar archivos existentes
+        n_copia = 2
+        raiz_out, ext_out = os.path.splitext(out_name)
+        while os.path.exists(out_name):
+            out_name = f"{raiz_out}_{n_copia}{ext_out}"
+            n_copia += 1
         
         processed_clip.write_videofile(
             out_name,
@@ -683,12 +705,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         )
         
         generated_files.append(out_name)
-        
-        try:
-            processed_clip.close()
-            subclip.close()
-        except:
-            pass
+        # No se cierran processed_clip/subclip: comparten el lector del clip padre
+        # y cerrarlos rompe el siguiente corte. El padre se cierra al final.
 
     if base_dummy_clip:
         try: base_dummy_clip.close()
@@ -703,10 +721,37 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     print("¡Proceso finalizado!")
     return generated_files
 
-if __name__ == "__main__":
-    if len(sys.argv) > 4:
-        process_smart_split(sys.argv[1], sys.argv[2], float(sys.argv[3]), int(sys.argv[4]))
-    elif len(sys.argv) > 2:
-        process_smart_split(sys.argv[1], sys.argv[2])
+def main(argv):
+    """Modo subproceso: smart_editor.py --config <json>. Imprime RESULT_PATHS:<json>."""
+    if len(argv) >= 2 and argv[0] == "--config":
+        with open(argv[1], "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        try:
+            rutas = process_smart_split(
+                cfg["source"], cfg["output_path"], cfg.get("clip_duration", 60),
+                cfg.get("num_clips", 1), cfg.get("start_time", ""), cfg.get("end_time", ""),
+                cfg.get("subtitle_scale", 100), cfg.get("subtitle_style", "style5"),
+                cfg.get("anti_copyright_filter", True), cfg.get("anti_copyright_audio", True),
+                cfg.get("bg_music", ""), cfg.get("show_progress_bar", True))
+        except Exception as e:
+            print(f"ERROR: {e}")
+            write_progress(f"Error: {e}", -1)
+            return 1
+        print("RESULT_PATHS:" + json.dumps(rutas or [], ensure_ascii=False))
+        return 0 if rutas else 1
+    if len(argv) > 3:
+        process_smart_split(argv[0], argv[1], float(argv[2]), int(argv[3]))
+    elif len(argv) > 1:
+        process_smart_split(argv[0], argv[1])
     else:
-        print("Uso: python smart_editor.py <input.mp4> <output.mp4> [duracion] [cantidad]")
+        print("Uso: smart_editor.py --config <json> | <input.mp4> <output.mp4> [duracion] [cantidad]")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+    except Exception:
+        pass
+    sys.exit(main(sys.argv[1:]))

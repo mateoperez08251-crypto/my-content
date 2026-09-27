@@ -121,8 +121,8 @@ function initEstudioEventHandlers() {
                 btnProcessGen.style.boxShadow = "none";
                 btnProcessGen.style.opacity = "1";
                 if(data.success) {
-                    mostrarToast("¡Video Completado!", "Tu video se ha generado con éxito y está en la biblioteca.", false);
-                    cargarHistorial();
+                    // El backend responde al iniciar; se consulta el estado real hasta que termine.
+                    esperarTareaVideo(data.task_id);
                     // Opcional: window.switchEstudioView('edicion'); // No forzar cambio si el usuario está en otra cosa
                 } else {
                     mostrarToast("Error", data.error, true);
@@ -168,7 +168,7 @@ function initEstudioEventHandlers() {
                 btnProcess.innerText = "Procesar Video";
                 if(data.success) {
                     mostrarToast("Procesamiento Exitoso", data.mensaje);
-                    cargarHistorial(); // Refrescar historial por si acaso
+                    esperarTareaVideo(data.task_id);
                 } else {
                     mostrarToast("Error", data.error, true);
                 }
@@ -439,7 +439,7 @@ function renderizarHistorial(items) {
 
 window.descargarVideoActualEstudio = function() {
     if(window.estudioCurrentFile) {
-        fetch('/api/salidas/' + encodeURIComponent(window.estudioCurrentFile) + '/abrir')
+        fetch('/api/salidas/' + encodeURIComponent(window.estudioCurrentFile) + '/abrir', { method: 'POST' })
         .then(res => res.json())
         .then(data => {
             if(data.success) {
@@ -747,3 +747,26 @@ window.toggleStyle = function(btn) {
         inputArea.value = text.replace(` ${tag}`, '').replace(tag, '').trim();
     }
 };
+
+
+// Consulta el estado de una generación de video hasta que termina.
+function esperarTareaVideo(taskId, intentos) {
+    intentos = intentos || 0;
+    if (!taskId) { cargarHistorial(); return; }
+    fetch('/api/ia/tarea_video/' + encodeURIComponent(taskId))
+        .then(r => r.json())
+        .then(t => {
+            if (t.estado === 'terminado') {
+                const extra = t.simulado ? " (simulación: aún no hay motor de video instalado)" : "";
+                mostrarToast("¡Video Completado!", "Tu video está en la biblioteca." + extra, false);
+                cargarHistorial();
+            } else if (t.estado === 'error' || t.success === false) {
+                mostrarToast("Error", t.error || "La generación falló.", true);
+            } else if (intentos < 600) {
+                setTimeout(() => esperarTareaVideo(taskId, intentos + 1), 2000);
+            }
+        })
+        .catch(() => {
+            if (intentos < 600) setTimeout(() => esperarTareaVideo(taskId, intentos + 1), 3000);
+        });
+}
