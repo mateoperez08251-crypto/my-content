@@ -65,9 +65,9 @@ ALTURAS = {"4k": 2160, "1080p": 1080, "720p": 720, "480p": 480}
 MODELOS = {
     "ltx": {"clase": "LTXPipeline", "te_gb": 9.0, "params": 1.9, "vram_min": 8},
     "wan": {"clase": "WanPipeline", "te_gb": 10.6, "params": 1.4, "vram_min": 8},
-    "cogvideox": {"clase": "CogVideoXPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8},
-    "cogvideox_i2v": {"clase": "CogVideoXImageToVideoPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8},
-    "hunyuan": {"clase": "HunyuanVideoPipeline", "te_gb": 16.5, "params": 12.8, "vram_min": 24},
+    "cogvideox": {"clase": "CogVideoXPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8, "fp32": False},
+    "cogvideox_i2v": {"clase": "CogVideoXImageToVideoPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8, "fp32": False},
+    "hunyuan": {"clase": "HunyuanVideoPipeline", "te_gb": 16.5, "params": 12.8, "vram_min": 24, "fp32": False},
 }
 COMPONENTES_TEXTO = ("text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2")
 
@@ -287,16 +287,10 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
     dtype = gpu["dtype"]
     bytes_por_param = {torch.float32: 4, torch.float16: 2, torch.bfloat16: 2}[dtype]
     peso_gb = info["params"] * bytes_por_param + 0.5  # + VAE
-    if dtype == torch.float32 and peso_gb + 3 > gpu["vram"] and \
-            info["params"] * 2 + 3 <= gpu["vram"] * 1.6:
-        # En Pascal un modelo grande no cabe en fp32: se usa fp16 (más lento pero cabe)
-        dtype, bytes_por_param = torch.float16, 2
-        peso_gb = info["params"] * 2 + 0.5
-        aviso("El modelo no cabe en la GPU en fp32: se usa fp16 (más lento en esta gráfica).")
 
     nulos = _nulos(carpeta, COMPONENTES_TEXTO)
     clase = getattr(diffusers, info["clase"])
-    progreso(10, 1, f"Cargando el modelo de video en la GPU ({gpu['dtype_nombre'] if dtype == gpu['dtype'] else 'fp16'})...")
+    progreso(10, 1, f"Cargando el modelo de video en la GPU ({gpu['dtype_nombre']})...")
     if motor == "wan":
         vae = diffusers.AutoencoderKLWan.from_pretrained(carpeta, subfolder="vae", torch_dtype=torch.float32)
         pipe = clase.from_pretrained(carpeta, vae=vae, torch_dtype=dtype, **nulos)
@@ -309,15 +303,11 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
 
     _liberar_vram(torch)
     libre = vram_libre_gb(torch, gpu)
-    # memoria de trabajo para generar los frames (fp32 ocupa el doble)
-    margen = 4.0 if dtype == torch.float32 else 3.0
+    # memoria de trabajo para generar los frames
+    # bf16: 3 GB (rápido), fp16: 3.5 GB (tensor cores), fp32: 4.5 GB (lento)
+    margen = 4.5 if dtype == torch.float32 else (3.5 if dtype == torch.float16 else 3.0)
     estrategia = ""
-    # LTX en gráficas antiguas (Pascal): offload secuencial desde el inicio
-    if motor == "ltx" and gpu["cc"] < (8, 0):
-        pipe.enable_sequential_cpu_offload()
-        estrategia = "secuencial"
-        aviso("LTX en esta gráfica: se carga por partes (lento, pero sin OOM).")
-    elif peso_gb + margen <= libre * 0.95:
+    if peso_gb + margen <= libre * 0.92:
         try:
             pipe.to("cuda")
             estrategia = "gpu"
@@ -326,13 +316,13 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
                 raise
             pipe.to("cpu")
             _liberar_vram(torch)
-    if not estrategia and peso_gb + 1.0 <= libre:
+    if not estrategia and peso_gb + 0.8 <= libre:
         pipe.enable_model_cpu_offload()
         estrategia = "offload"
     elif not estrategia:
         pipe.enable_sequential_cpu_offload()
         estrategia = "secuencial"
-        aviso("El modelo es más grande que la VRAM: se carga por partes (bastante más lento).")
+        aviso("El modelo es más grande que la VRAM: se carga por partes (más lento).")
     vae = getattr(pipe, "vae", None)
     for metodo in ("enable_tiling", "enable_slicing"):
         if vae is not None and hasattr(vae, metodo):
@@ -342,6 +332,8 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
                 pass
     pipe._estrategia = estrategia
     pipe._dtype = dtype
+    nom_est = {"gpu": "GPU entera", "offload": "GPU + RAM", "secuencial": "por partes"}
+    progreso(15, 1, f"Modelo cargado ({nom_est.get(estrategia, estrategia)}).")
     return pipe
 
 
@@ -476,8 +468,20 @@ def generar(cfg):
         raise RuntimeError("No se detectó una GPU NVIDIA con CUDA. La generación de video "
                            "necesita GPU (en CPU tardaría horas).")
     gpu = info_gpu(torch)
+    print(f"[modelo] {motor} · {cfg['carpeta_modelo']}", flush=True)  # queda en motor_video.log
+    if gpu["cc"] >= (8, 0):
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
     info = MODELOS[motor]
     progreso(2, 1, f"GPU: {gpu['nombre']} ({gpu['vram']:.0f} GB, formato {gpu['dtype_nombre']})")
+    if gpu["dtype"] == torch.float32 and not info.get("fp32", True):
+        # En Pascal (GTX 10xx, TITAN Xp) no cabe en fp32 y su fp16 es ~64 veces más lento:
+        # antes se intentaba en fp16 y Windows cerraba el motor (acceso a memoria).
+        raise RuntimeError(f"Este modelo necesita una gráfica RTX (serie 20 o más nueva). "
+                           f"En tu {gpu['nombre']} usa Wan2.1 1.3B o LTX-Video.")
     if gpu["vram"] + 0.5 < info["vram_min"]:
         raise RuntimeError(f"Este modelo necesita una GPU de {info['vram_min']} GB y la tuya tiene "
                            f"{gpu['vram']:.0f} GB. Usa Wan2.1 1.3B o LTX-Video.")
@@ -494,7 +498,6 @@ def generar(cfg):
             flotante = getattr(v, "is_floating_point", lambda: False)()
             v = v.to("cuda", dtype=dtype_tr) if flotante else v.to("cuda")
         vectores_gpu[k] = v
-    progreso(15, 1, f"Modelo cargado ({'entero en la GPU' if pipe._estrategia == 'gpu' else 'GPU + RAM'}).")
     imagen = None
     if cfg.get("imagen"):
         from PIL import Image
@@ -629,7 +632,10 @@ def main(argv):
     except Exception as e:
         import traceback
         traceback.print_exc(file=sys.stdout)  # queda en logs/motor_video.log
-        msg = f"{type(e).__name__}: {e}"
+        msg = str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}"
+        if isinstance(e, MemoryError):
+            msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Usa Wan2.1 1.3B, cierra "
+                   "otros programas y aumenta la memoria virtual de Windows a 32 GB o más.")
         if "out of memory" in msg.lower() or "CUDA out of memory" in msg:
             msg = ("La GPU se quedó sin memoria (VRAM). Prueba con menos duración, un modelo más "
                    "ligero (Wan2.1 1.3B) o cierra otros programas que usen la GPU.")

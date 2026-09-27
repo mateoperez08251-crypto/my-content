@@ -429,7 +429,7 @@ AVAILABLE_MODELS = [
         "name": "Wan2.1 1.3B (Texto a Video)",
         "type": "t2v",
         "motor": "wan",
-        "description": "El más ligero y estable. Recomendado para empezar. GPU de 8 GB.",
+        "description": "El más ligero y estable. Recomendado (funciona en GTX 10xx / TITAN Xp).",
         "size_gb": 26.9,
         "vram_gb": 8,
         "repo": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
@@ -449,7 +449,7 @@ AVAILABLE_MODELS = [
         "name": "CogVideoX-5B (Texto a Video)",
         "type": "t2v",
         "motor": "cogvideox",
-        "description": "Buena calidad con poca VRAM (más lento). GPU de 6 GB+.",
+        "description": "Buena calidad (más lento). Solo gráficas RTX (serie 20 o más nueva).",
         "size_gb": 20.1,
         "vram_gb": 6,
         "repo": "zai-org/CogVideoX-5b",
@@ -459,7 +459,7 @@ AVAILABLE_MODELS = [
         "name": "CogVideoX-5B (Imagen a Video)",
         "type": "i2v",
         "motor": "cogvideox_i2v",
-        "description": "Anima una imagen base. GPU de 6 GB+.",
+        "description": "Anima una imagen base. Solo gráficas RTX (serie 20 o más nueva).",
         "size_gb": 20.2,
         "vram_gb": 6,
         "repo": "zai-org/CogVideoX-5b-I2V",
@@ -662,6 +662,19 @@ def _lanzar_descarga(model_id):
     threading.Thread(target=real_download, args=(model_id,), daemon=True).start()
 
 
+def _incompatible(m):
+    """Motivo por el que el modelo no sirve en la GPU detectada ('' si sirve o no se sabe)."""
+    if m.get("type") == "other" or _motor_info.get("estado") != "listo":
+        return ""
+    gpu = _motor_info.get("gpu") or "tu GPU"
+    if _motor_info.get("formato") == "fp32" and m.get("motor") in ("cogvideox", "cogvideox_i2v", "hunyuan"):
+        return f"Necesita una gráfica RTX (serie 20 o más nueva). En tu {gpu} usa Wan2.1 1.3B o LTX-Video."
+    vram = _motor_info.get("vram_gb") or 0
+    if vram and vram + 0.5 < m.get("vram_gb", 0):
+        return f"Necesita ~{m['vram_gb']} GB de VRAM y tu {gpu} tiene {vram} GB."
+    return ""
+
+
 @ia_bp.route('/modelos', methods=['GET'])
 def get_modelos():
     """Lista de modelos con su estado."""
@@ -669,8 +682,11 @@ def get_modelos():
     lista = []
     for m in AVAILABLE_MODELS:
         info = _dl_get(m["id"])
+        motivo = _incompatible(m)
         lista.append({
             **{k: v for k, v in m.items() if k not in ("url",)},
+            "compatible": not motivo,
+            "motivo": motivo,
             "installed": _instalado(m),
             "downloading": info.get("status") == "downloading" or (_hay_parcial(m) and info.get("status") != "error"),
             "progress": info.get("progress", 0),
@@ -956,6 +972,9 @@ def generar_video():
     if motor.get("vram_gb") and motor["vram_gb"] + 0.5 < m.get("vram_gb", 0):
         return jsonify({"success": False, "error": f"{m['name']} necesita ~{m['vram_gb']} GB de VRAM y tu GPU tiene "
                                                     f"{motor['vram_gb']} GB. Usa Wan2.1 1.3B o CogVideoX."}), 400
+
+    if _incompatible(m):
+        return jsonify({"success": False, "error": f"{m['name']}: {_incompatible(m)}"}), 400
 
     # Protección contra 0xc000012d (sin memoria de commit en Windows).
     mem = estado_memoria()

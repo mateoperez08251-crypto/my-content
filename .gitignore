@@ -73,3 +73,7 @@ voces/
 logs/
 *.txt
 *.log
+
+# Logs y datos locales de la app
+logs/
+*.log
