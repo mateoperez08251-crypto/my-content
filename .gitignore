@@ -77,3 +77,6 @@ logs/
 # Logs y datos locales de la app
 logs/
 *.log
+
+# Excepción: dependencias de RunPod (el *.txt de arriba las ignoraba)
+!runpod/requirements-runpod.txt

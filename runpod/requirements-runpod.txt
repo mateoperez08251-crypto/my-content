@@ -1,0 +1,21 @@
+# Content App en RunPod (Linux, sin ventana). torch viene de la plantilla PyTorch de RunPod
+# (o lo instala instalar.sh según el driver). No incluye pywebview/pystray (solo Windows).
+flask>=3.0
+werkzeug>=3.0
+requests>=2.31
+pillow>=10.1
+numpy
+imageio-ffmpeg>=0.5
+moviepy>=2.0,<3
+opencv-python-headless>=4.8
+# Motor de video
+diffusers>=0.33
+transformers>=4.48
+accelerate>=1.3
+safetensors
+sentencepiece
+protobuf
+ftfy
+# Descargas rápidas de Hugging Face (Xet)
+huggingface_hub
+hf_xet
