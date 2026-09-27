@@ -50,22 +50,84 @@ set "VPY=%APP_DIR%.venv_video\Scripts\python.exe"
 echo  [*] Actualizando pip...
 "%VPY%" -m pip install --upgrade pip --quiet
 
-echo  [*] Instalando PyTorch con CUDA 12.6 ^(unos 3 GB, puede tardar^)...
-"%VPY%" -m pip install torch --index-url https://download.pytorch.org/whl/cu126
+:: --- PyTorch: descarga reanudable con reintentos (el archivo pesa ~2.5 GB) ---
+set "WHEELS=%APP_DIR%.venv_video\descargas"
+if not exist "%WHEELS%" mkdir "%WHEELS%"
+set "REPORTE=%WHEELS%\torch_reporte.json"
+set "URLTXT=%WHEELS%\torch_url.txt"
+
+"%VPY%" -c "import torch" >nul 2>&1
+if not errorlevel 1 (
+    echo  [OK] PyTorch ya estaba instalado.
+    goto diffusers
+)
+
+echo  [*] Buscando la version de PyTorch para tu Python...
+"%VPY%" -m pip install torch --index-url https://download.pytorch.org/whl/cu126 --dry-run --no-deps --ignore-installed --report "%REPORTE%" --quiet --retries 10 --timeout 120
 if errorlevel 1 (
-    echo  [X] Fallo la instalacion de PyTorch.
+    echo  [X] No se pudo consultar el servidor de PyTorch. Revisa tu internet y vuelve a ejecutar.
     pause
     exit /b 1
 )
+"%VPY%" -c "import json,urllib.parse as u;d=json.load(open(r'%REPORTE%'))['install'][0]['download_info']['url'].split('#')[0];print(d);print(u.unquote(d.rsplit('/',1)[1]))" > "%URLTXT%"
+set /p TORCH_URL=<"%URLTXT%"
+for /f "usebackq skip=1 delims=" %%n in ("%URLTXT%") do set "TORCH_WHL=%%n"
+set "TORCH_FILE=%WHEELS%\%TORCH_WHL%"
+echo  [*] Archivo: %TORCH_WHL%
 
-echo  [*] Instalando diffusers y dependencias...
-"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy pillow imageio-ffmpeg
-if errorlevel 1 (
-    echo  [X] Fallo la instalacion de diffusers.
+set INTENTO=0
+:descarga_torch
+if exist "%TORCH_FILE%.ok" goto instalar_torch
+set /a INTENTO+=1
+echo  [*] Descargando PyTorch (intento %INTENTO% de 8). Si se corta, sigue donde iba...
+curl.exe -L -C - --retry 10 --retry-delay 5 --connect-timeout 30 -o "%TORCH_FILE%" "%TORCH_URL%"
+if not errorlevel 1 (
+    echo ok> "%TORCH_FILE%.ok"
+    goto instalar_torch
+)
+if %INTENTO% geq 8 (
+    echo  [X] La descarga de PyTorch fallo varias veces. Revisa tu conexion y vuelve a
+    echo      ejecutar este archivo: continuara donde se quedo.
     pause
     exit /b 1
 )
+timeout /t 10 /nobreak >nul
+goto descarga_torch
 
+:instalar_torch
+set INTENTO=0
+:reintento_instalar_torch
+set /a INTENTO+=1
+echo  [*] Instalando PyTorch desde el archivo descargado (intento %INTENTO% de 3)...
+"%VPY%" -m pip install "%TORCH_FILE%" --retries 10 --timeout 120
+if not errorlevel 1 goto diffusers
+if %INTENTO% geq 3 (
+    echo  [X] No se pudo instalar PyTorch. Si el error dice "WinError 32", pausa el antivirus
+    echo      un momento o agrega esta carpeta como exclusion, y vuelve a ejecutar.
+    echo      Si dice que el archivo esta dañado, borra la carpeta .venv_video\descargas.
+    pause
+    exit /b 1
+)
+echo  [!] Fallo; el antivirus puede estar revisando el archivo. Reintentando en 15 s...
+timeout /t 15 /nobreak >nul
+goto reintento_instalar_torch
+
+:diffusers
+set INTENTO=0
+:reintento_diffusers
+set /a INTENTO+=1
+echo  [*] Instalando diffusers y dependencias (intento %INTENTO% de 3)...
+"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy pillow imageio-ffmpeg --retries 10 --timeout 120
+if not errorlevel 1 goto comprobar
+if %INTENTO% geq 3 (
+    echo  [X] Fallo la instalacion de diffusers. Revisa tu internet y vuelve a ejecutar.
+    pause
+    exit /b 1
+)
+timeout /t 15 /nobreak >nul
+goto reintento_diffusers
+
+:comprobar
 echo.
 echo  [*] Comprobando...
 "%VPY%" "%APP_DIR%video_worker.py" --diagnostico
