@@ -123,6 +123,11 @@
                             }
                         ">
                     </div>
+                    <label style="display:block; margin-top: 12px; color: #94a3b8; font-size: 0.85rem; text-align: left;">
+                        Foto final (opcional, Wan 14B): el video termina en esta imagen
+                        <input type="file" id="final-image-input" accept="image/*"
+                            style="display:block; margin-top: 6px; width: 100%; color: #cbd5e1;">
+                    </label>
                 </div>
 
                 <div style="width: 100%; max-width: 600px; text-align: center;">
@@ -210,18 +215,18 @@
                         
                         <div class="ai-feature" style="margin-bottom: 20px;">
                             <div class="ai-feature-header" style="cursor: pointer;" onclick="this.querySelector('.toggle-switch').classList.toggle('active')">
-                                <div class="ai-feature-title">Escalado a 4K <i class="ph-fill ph-sparkle" style="color: #a855f7;"></i></div>
+                                <div class="ai-feature-title">Mejorar resolución (Real-ESRGAN) <i class="ph-fill ph-sparkle" style="color: #a855f7;"></i></div>
                                 <div class="toggle-switch active" id="toggle-upscale-gen"></div>
                             </div>
-                            <div class="ai-feature-desc" style="font-size: 0.75rem; color: #94a3b8; margin-top: 5px;">El escalado por IA reduce el ruido y mejora la calidad de manera inteligente.</div>
+                            <div class="ai-feature-desc" style="font-size: 0.75rem; color: #94a3b8; margin-top: 5px;">Sube el video a la resolución elegida con IA (descarga "Real-ESRGAN x2" en el Gestor; sin él, reescalado normal).</div>
                         </div>
                         
                         <div class="ai-feature" style="margin-bottom: 20px;">
                             <div class="ai-feature-header" style="cursor: pointer;" onclick="this.querySelector('.toggle-switch').classList.toggle('active')">
-                                <div class="ai-feature-title">Interpolación a 60 FPS <i class="ph-fill ph-video-camera" style="color: #a855f7;"></i></div>
+                                <div class="ai-feature-title">Movimiento suave (RIFE) <i class="ph-fill ph-video-camera" style="color: #a855f7;"></i></div>
                                 <div class="toggle-switch active" id="toggle-60fps-gen"></div>
                             </div>
-                            <div class="ai-feature-desc" style="font-size: 0.75rem; color: #94a3b8; margin-top: 5px;">Genera frames adicionales para un movimiento extremadamente fluido.</div>
+                            <div class="ai-feature-desc" style="font-size: 0.75rem; color: #94a3b8; margin-top: 5px;">Duplica los cuadros con IA (16 -> 32 fps) para un movimiento fluido (descarga "RIFE 4.7" en el Gestor; sin él, 60 fps con ffmpeg).</div>
                         </div>
 
                         <div class="ai-feature" style="margin-bottom: 20px;">

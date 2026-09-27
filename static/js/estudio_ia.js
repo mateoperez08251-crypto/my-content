@@ -162,6 +162,10 @@ function initEstudioEventHandlers() {
             if (baseImageInput && baseImageInput.files.length > 0) {
                 formData.append('base_image', baseImageInput.files[0]);
             }
+            const finalImageInput = document.getElementById('final-image-input');
+            if (finalImageInput && finalImageInput.files.length > 0) {
+                formData.append('final_image', finalImageInput.files[0]);
+            }
             if (lipsync) {
                 const audioFile = document.getElementById('audio-file').files[0];
                 if (!audioFile) {
@@ -563,7 +567,7 @@ function renderizarModelos(modelos) {
     window.modelosPorId = {};
     modelos.forEach(m => {
         window.modelosPorId[m.id] = m;
-        if (selectActivo && m.installed && m.type !== "other" && m.type !== "stt" && m.type !== "tts") {
+        if (selectActivo && m.installed && m.type !== "other" && m.type !== "stt" && m.type !== "tts" && m.type !== "mejora") {
             modelosInstalados++;
             const opt = document.createElement('option');
             opt.value = m.id;

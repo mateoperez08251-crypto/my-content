@@ -98,6 +98,8 @@ copy /y "generate_prompt_variation.py" "%DIST%\" >nul 2>&1
 copy /y "video_worker.py" "%DIST%\" >nul 2>&1
 copy /y "transcripcion_local.py" "%DIST%\" >nul 2>&1
 copy /y "tts_worker.py" "%DIST%\" >nul 2>&1
+copy /y "mejora_video.py" "%DIST%\" >nul 2>&1
+copy /y "rife_arch.py" "%DIST%\" >nul 2>&1
 copy /y "clips_virales.py" "%DIST%\" >nul 2>&1
 copy /y "reencuadre.py" "%DIST%\" >nul 2>&1
 copy /y "gpu_video.py" "%DIST%\" >nul 2>&1
