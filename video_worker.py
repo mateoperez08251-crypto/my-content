@@ -122,6 +122,14 @@ def _memoria_linux_gb():
                 break
             with open(uso, "r", encoding="utf-8") as f:
                 usado = int(f.read().strip())
+            # La caché de disco (p. ej. tras bajar 50 GB de modelos) cuenta como "usada" en el
+            # cgroup pero se libera sola cuando hace falta: no es memoria ocupada de verdad.
+            try:
+                with open(os.path.join(os.path.dirname(uso), "memory.stat"), "r", encoding="utf-8") as f:
+                    stat = dict(l.split()[:2] for l in f if len(l.split()) >= 2)
+                usado -= int(stat.get("inactive_file") or stat.get("total_inactive_file") or 0)
+            except (OSError, ValueError):
+                pass
             total = int(limite)
             libre = min(libre, max(0, total - usado))
             break
@@ -418,7 +426,10 @@ def pipeline_imagen(motor, pipe):
     Reutiliza los pesos ya cargados: no duplica la memoria."""
     if motor == "ltx":
         import diffusers
-        p = diffusers.LTXImageToVideoPipeline.from_pipe(pipe)
+        # from_pipe convierte TODO a fp32 si no se le dice el formato (diffusers usa fp32 por
+        # defecto): el transformer compartido quedaba en fp32 y chocaba con el prompt en bf16.
+        p = diffusers.LTXImageToVideoPipeline.from_pipe(pipe, torch_dtype=getattr(pipe, "_dtype", None)
+                                                        or pipe.transformer.dtype)
         if getattr(pipe, "_estrategia", "gpu") == "offload":
             p.enable_model_cpu_offload()
         elif getattr(pipe, "_estrategia", "gpu") == "secuencial":

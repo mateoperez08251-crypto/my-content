@@ -9,6 +9,7 @@
 #    MODELOS="wan21_t2v_13b ltx_video"   modelos a bajar (por defecto wan21_t2v_13b)
 #    AUTOBORRAR_MIN=60                   minutos quieto (sin trabajos ni clics) para borrar el pod (0 = nunca)
 #    CONTENTAPP_CLAVE=...                contraseña de la web (si no, se genera una)
+#    DIRECTOR_IA=1                       instala Ollama + llama3 para mejorar prompts (0 = no)
 # ============================================================================
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,6 +22,10 @@ MODELOS="${MODELOS:-wan21_t2v_13b}"
 bash runpod/instalar.sh $MODELOS
 
 export CONTENTAPP_AUTOBORRAR_MIN="${AUTOBORRAR_MIN:-60}"
+# se recuerda para cuando se reinicie la app con iniciar.sh
+BASE="${CONTENTAPP_BASE:-/workspace/contentapp}"
+grep -q CONTENTAPP_AUTOBORRAR_MIN "$BASE/entorno.sh" 2>/dev/null \
+    || echo "export CONTENTAPP_AUTOBORRAR_MIN=\"\${CONTENTAPP_AUTOBORRAR_MIN:-$CONTENTAPP_AUTOBORRAR_MIN}\"" >> "$BASE/entorno.sh"
 bash runpod/iniciar.sh
 if [ "$CONTENTAPP_AUTOBORRAR_MIN" != "0" ]; then
     echo " Autoborrado: el pod se BORRA tras $CONTENTAPP_AUTOBORRAR_MIN min sin uso."

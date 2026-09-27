@@ -79,6 +79,27 @@ if [ "$#" -gt 0 ]; then
     DESCARGA_PID=$!
 fi
 
+# Director IA (mejora los prompts): Ollama + llama3 en la GPU, en segundo plano.
+DIRECTOR_PID=""
+if [ "${DIRECTOR_IA:-1}" = "1" ]; then
+    paso "Instalando el Director IA (Ollama + llama3) en segundo plano"
+    (
+        set +e
+        export OLLAMA_MODELS="$BASE/ollama" OLLAMA_HOST=127.0.0.1:11434
+        if ! command -v ollama >/dev/null; then
+            command -v zstd >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive \
+                apt-get install -y -qq zstd >/dev/null; }
+            curl -fsSL https://ollama.com/install.sh | sh
+        fi
+        if ! curl -fs http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            nohup ollama serve > "$CONTENTAPP_DATA_DIR/logs/ollama.log" 2>&1 &
+            for _ in $(seq 1 30); do curl -fs http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break; sleep 1; done
+        fi
+        ollama pull llama3
+    ) > "$CONTENTAPP_DATA_DIR/logs/director_ia.log" 2>&1 &
+    DIRECTOR_PID=$!
+fi
+
 paso "[3/5] PyTorch con CUDA"
 probar_torch() {
     "$VPY" - <<'PYEOF'
@@ -144,6 +165,7 @@ export CONTENTAPP_SERVIDOR=1
 export HF_HOME="$BASE/hf_cache"
 export HF_XET_HIGH_PERFORMANCE=1
 export PYTHONUTF8=1
+export OLLAMA_MODELS="$BASE/ollama"
 ENVEOF
 
 paso "[5/5] Diagnóstico del motor"
@@ -153,6 +175,16 @@ if [ -n "$DESCARGA_PID" ]; then
     paso "Esperando a que terminen los modelos..."
     tail -n +1 -f "$CONTENTAPP_DATA_DIR/logs/descarga_modelos.log" --pid="$DESCARGA_PID" 2>/dev/null || true
     wait "$DESCARGA_PID" || falla "Falló la descarga de modelos (ver $CONTENTAPP_DATA_DIR/logs/descarga_modelos.log)."
+fi
+
+if [ -n "$DIRECTOR_PID" ]; then
+    paso "Esperando al Director IA..."
+    if wait "$DIRECTOR_PID" && command -v ollama >/dev/null; then
+        echo "Director IA listo (Ollama + llama3)."
+    else
+        echo "[!] El Director IA no se pudo instalar (ver $CONTENTAPP_DATA_DIR/logs/director_ia.log)."
+        echo "    La app funciona igual; solo no mejorará los prompts automáticamente."
+    fi
 fi
 
 echo
