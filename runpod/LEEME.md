@@ -37,7 +37,6 @@ cd my-content
 bash runpod/instalar.sh wan21_t2v_13b
 ```
 
-- Si el repo es privado, cuando `git clone` pida contraseña usa un token de GitHub (Settings → Developer settings → Personal access tokens).
 - El nombre al final es el modelo que se descarga de una vez, a toda velocidad. Puedes poner varios: `wan21_t2v_13b ltx_video cogvideox_5b hunyuan_video`.
 - Se puede volver a ejecutar cuando quieras: repara lo que falte y no borra nada.
 
