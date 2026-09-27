@@ -1020,6 +1020,7 @@ def generar_video():
             "motor": m["motor"], "carpeta_modelo": _carpeta_modelo(m), "prompt": prompt,
             "imagen": imagen, "audio": audio, "duracion": duracion,
             "resolucion": str(data.get("resolution", "1080p")),
+            "velocidad": str(data.get("velocidad", "rapido")),
             "upscale": str(data.get("upscale", "")).lower() == "true",
             "fps60": str(data.get("fps60", "")).lower() == "true",
             "salida": salida, "ffmpeg": _ffmpeg(),
