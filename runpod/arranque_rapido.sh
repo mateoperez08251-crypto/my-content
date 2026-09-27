@@ -10,6 +10,7 @@
 #    AUTOBORRAR_MIN=60                   minutos quieto (sin trabajos ni clics) para borrar el pod (0 = nunca)
 #    CONTENTAPP_CLAVE=...                contraseña de la web (si no, se genera una)
 #    DIRECTOR_IA=1                       instala Ollama + llama3 para mejorar prompts (0 = no)
+#    HF_TOKEN=hf_...                     token de Hugging Face (obligatorio para LTX-2.5)
 # ============================================================================
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

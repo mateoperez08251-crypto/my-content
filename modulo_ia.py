@@ -429,6 +429,35 @@ PATRONES_DIFFUSERS = ["model_index.json", "transformer/*", "vae/*", "text_encode
 
 AVAILABLE_MODELS = [
     {
+        "id": "ltx25_distilled",
+        "name": "LTX-2.5 22B (con audio, hasta 1536p) - calidad brutal",
+        "type": "both",
+        "motor": "ltx25",
+        "description": "El mejor abierto en una GPU: video + audio, 2 etapas (genera, sube x2 con IA y refina) "
+                       "y su propio mejorador de prompts. Hasta 20 s por clip. Necesita GPU de 80 GB (H100/A100) "
+                       "y aceptar la licencia en Hugging Face (token).",
+        "size_gb": 78,
+        "vram_gb": 76,  # una H100/A100 "80 GB" reporta ~79 GB
+        "repo": "Lightricks/LTX-2.5-Diffusers",
+        "patrones": ["model_index.json", "transformer/*", "text_encoder/*", "tokenizer/*", "connectors/*",
+                     "vae/*", "audio_vae/*", "vocoder/*", "scheduler/*", "latent_upsampler/*",
+                     "duration_head/*", "processor/*", "prompt_enhancer/*"],
+    },
+    {
+        "id": "minimax_h3",
+        "name": "MiniMax H3 (con audio estéreo, 768p) - la mejor abierta",
+        "type": "both",
+        "motor": "minimax_h3",
+        "description": "N.º 1 abierto del ranking: video + audio estéreo, 5-15 s por clip. MUY pesado: GPU de "
+                       "80 GB+ (mejor H200) y 150 GB+ de RAM; ~10-20 min por clip en 1 GPU. Licencia: solo UE, "
+                       "Reino Unido, Corea del Sur y EE. UU.",
+        "size_gb": 135,
+        "vram_gb": 76,  # una H100/A100 "80 GB" reporta ~79 GB
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "patrones": ["modular_model_index.json", "transformer/*", "text_encoder/*", "tokenizer/*",
+                     "processor/*", "vae/*", "audio_vae/*", "scheduler/*", "audio_scheduler/*"],
+    },
+    {
         "id": "wan22_ti2v_5b_turbo",
         "name": "Wan2.2 5B Turbo (720p, 4 pasos) - recomendado",
         "type": "both",
@@ -528,7 +557,37 @@ def _hay_parcial(m):
 # ---------------------------------------------------------------------------
 download_status = {}
 _dl_lock = threading.Lock()
-CABECERA = {"User-Agent": "ContentApp/2.0"}
+CABECERA_BASE = {"User-Agent": "ContentApp/2.0"}
+
+
+def _token_hf():
+    try:
+        from app_secrets import get_secret
+        return get_secret("huggingface", "token", env="HF_TOKEN") or ""
+    except Exception:
+        return os.environ.get("HF_TOKEN", "")
+
+
+def _cabecera():
+    """Cabeceras HTTP: con el token de Hugging Face si lo hay (para modelos con licencia)."""
+    h = dict(CABECERA_BASE)
+    tok = _token_hf()
+    if tok:
+        h["Authorization"] = f"Bearer {tok}"
+    return h
+
+
+CABECERA = CABECERA_BASE  # compatibilidad
+
+
+def _error_hf(e, m):
+    """Mensaje claro cuando Hugging Face pide permiso (401/403) para un modelo."""
+    codigo = getattr(e, "code", None) or getattr(getattr(e, "response", None), "status_code", None)
+    if codigo in (401, 403) and m.get("repo"):
+        return (f"{m['name']} necesita permiso: entra a https://huggingface.co/{m['repo']} , inicia sesión, "
+                "acepta la licencia y pon tu token de Hugging Face (HF_TOKEN o \"huggingface\": {\"token\"} "
+                "en secrets.json). Luego pulsa Descargar.")
+    return ""
 
 
 def _dl_get(model_id):
@@ -551,6 +610,35 @@ def _borrar_silencioso(ruta):
         pass
 
 
+def _sin_shards_repetidos(m, archivos):
+    """Algunos repos traen el mismo modelo dos veces (p. ej. en 4 y en 8 trozos): se baja solo el
+    juego de trozos que nombra el *.safetensors.index.json de cada carpeta (LTX-2.5: 35 GB menos)."""
+    usados, carpetas = set(), set()
+    m["_indices_ok"] = True
+    for ruta, _, url in archivos:
+        if not ruta.endswith(".safetensors.index.json"):
+            continue
+        try:
+            r = requests.get(url, headers=_cabecera(), timeout=30)
+            r.raise_for_status()
+            carpeta = ruta.rsplit("/", 1)[0] if "/" in ruta else ""
+            carpetas.add(carpeta)
+            for trozo in set(r.json().get("weight_map", {}).values()):
+                usados.add(f"{carpeta}/{trozo}" if carpeta else trozo)
+        except Exception:
+            m["_indices_ok"] = False  # sin permiso aún: no se guarda esta lista incompleta
+            continue
+    if not carpetas:
+        return archivos
+    resultado = []
+    for ruta, tam, url in archivos:
+        carpeta = ruta.rsplit("/", 1)[0] if "/" in ruta else ""
+        if carpeta in carpetas and ruta.endswith(".safetensors") and ruta not in usados:
+            continue  # trozo de otra versión, no lo usa el índice
+        resultado.append((ruta, tam, url))
+    return resultado
+
+
 def _manifiesto(m):
     """Lista de archivos (ruta, tamaño, url) que hay que bajar para este modelo."""
     if not m.get("repo"):
@@ -564,20 +652,22 @@ def _manifiesto(m):
         except (OSError, ValueError):
             pass
     r = requests.get(f"https://huggingface.co/api/models/{m['repo']}/tree/main",
-                     params={"recursive": "true"}, headers=CABECERA, timeout=30)
+                     params={"recursive": "true"}, headers=_cabecera(), timeout=30)
     r.raise_for_status()
     archivos = []
     for f in r.json():
-        if f.get("type") != "file" or not any(fnmatch(f["path"], p) for p in PATRONES_DIFFUSERS):
+        if f.get("type") != "file" or not any(fnmatch(f["path"], p) for p in m.get("patrones", PATRONES_DIFFUSERS)):
             continue
         tam = (f.get("lfs") or {}).get("size") or f.get("size") or 0
         url = f"https://huggingface.co/{m['repo']}/resolve/main/{urllib.parse.quote(f['path'])}"
         archivos.append((f["path"], int(tam), url))
     if not archivos:
         raise RuntimeError("El repositorio no tiene archivos en formato diffusers.")
+    archivos = _sin_shards_repetidos(m, archivos)
     os.makedirs(carpeta, exist_ok=True)
-    with open(cache, "w", encoding="utf-8") as f:
-        json.dump(archivos, f)
+    if m.pop("_indices_ok", True):
+        with open(cache, "w", encoding="utf-8") as f:
+            json.dump(archivos, f)
     return archivos
 
 
@@ -586,7 +676,7 @@ def _bajar_archivo(model_id, url, destino, acumulado, total, t_ref):
     part = destino + ".part"
     os.makedirs(os.path.dirname(destino), exist_ok=True)
     desde = os.path.getsize(part) if os.path.exists(part) else 0
-    req = urllib.request.Request(url, headers=CABECERA)
+    req = urllib.request.Request(url, headers=_cabecera())
     if desde:
         req.add_header("Range", f"bytes={desde}-")
     try:
@@ -596,7 +686,7 @@ def _bajar_archivo(model_id, url, destino, acumulado, total, t_ref):
             raise
         _borrar_silencioso(part)
         desde = 0
-        resp = urllib.request.urlopen(urllib.request.Request(url, headers=CABECERA), timeout=60)
+        resp = urllib.request.urlopen(urllib.request.Request(url, headers=_cabecera()), timeout=60)
     if desde and resp.status != 206:
         desde = 0
     bajados = desde
@@ -635,7 +725,7 @@ def real_download(model_id):
         base = _carpeta_modelo(m) if m.get("repo") else MODELS_DIR
         total = sum(t for _, t, _ in archivos)
         if not total and not m.get("repo"):
-            with urllib.request.urlopen(urllib.request.Request(m["url"], method="HEAD", headers=CABECERA), timeout=30) as r:
+            with urllib.request.urlopen(urllib.request.Request(m["url"], method="HEAD", headers=_cabecera()), timeout=30) as r:
                 total = int(r.headers.get("Content-Length", 0))
         _dl_set(model_id, total_mb=round(total / 1048576, 1))
 
@@ -670,7 +760,7 @@ def real_download(model_id):
         _dl_set(model_id, status="installed", progress=100, pause=False)
     except Exception as e:
         print(f"Error descargando modelo {model_id}: {e}")
-        msg = str(e)
+        msg = _error_hf(e, m) or str(e)
         if getattr(e, "errno", None) == 28 or "No space left" in msg:
             libre = shutil.disk_usage(MODELS_DIR).free / 1024 ** 3
             msg = (f"Disco lleno (quedan {libre:.1f} GB). Borra modelos que no uses con la papelera "
@@ -692,7 +782,7 @@ def _incompatible(m):
         return ""
     gpu = _motor_info.get("gpu") or "tu GPU"
     if _motor_info.get("formato") == "fp32" and m.get("motor") in ("cogvideox", "cogvideox_i2v", "hunyuan",
-                                                                 "wan22_turbo"):
+                                                                 "wan22_turbo", "ltx25", "minimax_h3"):
         return f"Necesita una gráfica RTX (serie 20 o más nueva). En tu {gpu} usa Wan2.1 1.3B o LTX-Video."
     vram = _motor_info.get("vram_gb") or 0
     if vram and vram + 0.5 < m.get("vram_gb", 0):

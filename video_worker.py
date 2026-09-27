@@ -72,6 +72,12 @@ def aviso(msg):
 # Perfiles por motor: resolución y frames nativos (lo que cada modelo sabe hacer)
 # ---------------------------------------------------------------------------
 PERFILES = {
+    # LTX-2.5: 2 etapas (media resolución -> x2 con su upsampler -> refinado). Tamaño final aquí.
+    "ltx25": {"w": 1536, "h": 1024, "frames": 121, "fps": 24, "pasos": 8, "cfg": 1.0, "imagen": True,
+              "destilado": True, "max_seg": 20.0},
+    # MiniMax H3: lienzo propio de 768 px de lado corto, 5-15 s por clip, 50 pasos (receta oficial).
+    "minimax_h3": {"w": 1344, "h": 768, "frames": 124, "fps": 24, "pasos": 50, "cfg": 1.0, "imagen": True,
+                   "destilado": True, "max_seg": 15.0},
     "ltx": {"w": 768, "h": 512, "frames": 121, "fps": 24, "pasos": 40, "cfg": 3.0, "imagen": True},
     "wan": {"w": 832, "h": 480, "frames": 81, "fps": 16, "pasos": 30, "cfg": 5.0, "imagen": False},
     # Wan 2.2 TI2V-5B Turbo: destilado (4 pasos, sin CFG), 720p a 24 fps. "destilado" = no se
@@ -120,6 +126,11 @@ MODELOS = {
                       "vae": "AutoencoderKLCogVideoX"},
     "hunyuan": {"clase": "HunyuanVideoPipeline", "te_gb": 16.5, "params": 12.8, "vram_min": 24, "fp32": False,
                 "trabajo": 4.0, "tr": "HunyuanVideoTransformer3DModel", "vae": "AutoencoderKLHunyuanVideo"},
+    # Los dos nuevos tienen su propio cargador (_generar_ltx25 / _generar_h3). ram_min: RAM del pod,
+    # porque los componentes que no están en la GPU esperan en la RAM.
+    "ltx25": {"clase": "LTX2Pipeline", "te_gb": 22.0, "params": 18.0, "vram_min": 44, "fp32": False, "ram_min": 70},
+    "minimax_h3": {"clase": "MiniMaxH3ModularPipeline", "te_gb": 62.0, "params": 31.0, "vram_min": 78,
+                   "fp32": False, "ram_min": 140},
 }
 COMPONENTES_TEXTO = ("text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2")
 
@@ -737,6 +748,8 @@ def generar(cfg):
     if gpu["vram"] + 0.5 < info["vram_min"]:
         raise RuntimeError(f"Este modelo necesita una GPU de {info['vram_min']} GB y la tuya tiene "
                            f"{gpu['vram']:.0f} GB. Usa Wan2.1 1.3B o LTX-Video.")
+    if motor in ("ltx25", "minimax_h3"):
+        return _generar_grande(cfg, motor, perfil, torch, gpu, salida, ffmpeg)
 
     negativo = cfg.get("negativo") or NEGATIVOS.get(motor, NEGATIVO)
     clave = (motor, cfg["carpeta_modelo"])
@@ -875,6 +888,248 @@ def generar(cfg):
     if cfg.get("audio"):
         aviso("Lip-sync real no disponible todavía: se añadió el audio al video.")
     postprocesar(crudo, salida, cfg, ffmpeg)
+    progreso(100, 4, "¡Video listo!")
+    emitir("resultado", archivo=salida, avisos=AVISOS)
+
+
+# ---------------------------------------------------------------------------
+# Modelos grandes con audio: LTX-2.5 y MiniMax H3 (código según la documentación oficial de
+# diffusers 0.40). Generan video + audio; los clips largos se encadenan desde el último cuadro.
+# ---------------------------------------------------------------------------
+def _ram_total_gb():
+    try:
+        return _memoria_linux_gb()[0] if os.name != "nt" else 0.0
+    except Exception:
+        return 0.0
+
+
+def _escribir_wav(tramos, sr, ruta):
+    """Une los tramos de audio (canales, muestras) y los guarda como WAV de 16 bits."""
+    import wave
+
+    import numpy as np
+    partes = []
+    for a in tramos:
+        if hasattr(a, "detach"):
+            a = a.detach().float().cpu().numpy()
+        a = np.asarray(a, dtype="float32")
+        while a.ndim > 2:
+            a = a[0]
+        if a.ndim == 1:
+            a = a[None]
+        if a.shape[0] > 8 and a.shape[1] <= 8:  # venía como (muestras, canales)
+            a = a.T
+        partes.append(a)
+    canales = max(p.shape[0] for p in partes)
+    partes = [np.repeat(p, canales, axis=0) if p.shape[0] == 1 and canales > 1 else p for p in partes]
+    pcm = (np.clip(np.concatenate(partes, axis=1), -1.0, 1.0) * 32767).astype("<i2").T.copy()
+    with wave.open(ruta, "wb") as w:
+        w.setnchannels(pcm.shape[1])
+        w.setsampwidth(2)
+        w.setframerate(int(sr))
+        w.writeframes(pcm.tobytes())
+
+
+def _cargar_ltx25(carpeta, torch, gpu):
+    import diffusers
+    from diffusers.pipelines.ltx2 import LTX2LatentUpsamplePipeline
+    from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
+
+    progreso(8, 1, "Cargando LTX-2.5 (22B, con audio)... la primera vez tarda unos minutos")
+    pipe = diffusers.LTX2Pipeline.from_pretrained(carpeta, torch_dtype=torch.bfloat16)
+    upsampler = LTX2LatentUpsamplerModel.from_pretrained(carpeta, subfolder="latent_upsampler",
+                                                         torch_dtype=torch.bfloat16)
+    i2v = diffusers.LTX2ImageToVideoPipeline(**pipe.components)
+    up = LTX2LatentUpsamplePipeline(vae=pipe.vae, latent_upsampler=upsampler)
+    if vram_libre_gb(torch, gpu) >= 100:  # H200/B200: todo en la GPU (lo más rápido)
+        pipe.to("cuda")
+        upsampler.to("cuda")
+        estrategia = "gpu"
+    else:  # H100/A100 80 GB: cada pieza sube a la GPU cuando se usa (receta oficial)
+        pipe.enable_model_cpu_offload(device="cuda")
+        i2v.enable_model_cpu_offload(device="cuda")
+        up.enable_model_cpu_offload(device="cuda")
+        estrategia = "offload"
+    try:
+        pipe.vae.enable_tiling()
+    except Exception:
+        pass
+    progreso(15, 1, "LTX-2.5 cargado (" + ("GPU entera" if estrategia == "gpu" else "GPU + RAM") + ").")
+    return {"t2v": pipe, "i2v": i2v, "up": up}
+
+
+def _parchear_indice_modular(carpeta, repo):
+    """modular_model_index.json apunta cada pieza al repo de internet: se apunta a la copia local
+    para que no vuelva a bajar 134 GB a la caché de Hugging Face."""
+    ruta = os.path.join(carpeta, "modular_model_index.json")
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            texto = f.read()
+    except OSError:
+        return
+    local = os.path.abspath(carpeta).replace("\\", "/")
+    nuevo = texto.replace(f'"{repo}"', json.dumps(local))
+    if nuevo != texto:
+        with open(ruta, "w", encoding="utf-8") as f:
+            f.write(nuevo)
+
+
+def _cargar_h3(carpeta, torch, gpu):
+    from diffusers import ComponentsManager, ModularPipeline
+
+    progreso(8, 1, "Cargando MiniMax H3 (62 GB + 62 GB)... la primera vez tarda bastante")
+    _parchear_indice_modular(carpeta, "MiniMaxAI/MiniMax-H3")
+    manager = ComponentsManager()
+    pipe = ModularPipeline.from_pretrained(carpeta, components_manager=manager)
+    pipe.load_components(workflow="t2va", dtype=torch.bfloat16)  # sirve t2va y fl2va (imagen)
+    manager.enable_auto_cpu_offload(device="cuda", memory_reserve_margin="12GB")
+    if gpu["cc"] >= (9, 0):  # Hopper (H100/H200): atención ~3x más rápida, si hay kernels
+        try:
+            pipe.transformer.set_attention_backend("_flash_3_hub")
+        except Exception as e:
+            print(f"[aviso] atención rápida no disponible ({type(e).__name__}); se usa la normal", flush=True)
+    progreso(15, 1, "MiniMax H3 cargado.")
+    return {"pipe": pipe, "manager": manager}
+
+
+def _generar_grande(cfg, motor, perfil, torch, gpu, salida, ffmpeg):
+    info = MODELOS[motor]
+    ram = _ram_total_gb()
+    if ram and ram + 4 < info["ram_min"] and os.environ.get("CONTENTAPP_IGNORAR_RAM") != "1":
+        raise RuntimeError(f"Este modelo necesita un pod con ~{info['ram_min']} GB de RAM y este tiene "
+                           f"{ram:.0f} GB. En RunPod elige una H100/H200 con más RAM.")
+    carpeta = cfg["carpeta_modelo"]
+    clave = (motor, carpeta)
+    if _persistente() and PERSISTENTE["clave"] not in (None, clave):
+        progreso(3, 1, "Cambiando de modelo: liberando el anterior...")
+        _vaciar_persistente(torch)
+    if _persistente() and PERSISTENTE["clave"] == clave and PERSISTENTE["pipe"] is not None:
+        piezas = PERSISTENTE["pipe"]
+        progreso(15, 1, "Modelo ya cargado.")
+    else:
+        piezas = _cargar_ltx25(carpeta, torch, gpu) if motor == "ltx25" else _cargar_h3(carpeta, torch, gpu)
+        if _persistente():
+            PERSISTENTE.update(clave=clave, pipe=piezas, pipe_img=None, txt=None)
+
+    imagen = None
+    if cfg.get("imagen"):
+        from PIL import Image
+        imagen = ajustar_imagen(Image.open(cfg["imagen"]), perfil["w"], perfil["h"])
+
+    fps = perfil["fps"]
+    duracion = max(1.0, float(cfg.get("duracion", 5)))
+    n_seg = max(1, min(8, math.ceil(duracion / perfil["max_seg"] - 1e-6)))
+    dur_seg = duracion / n_seg
+    semilla = int(cfg.get("semilla", -1))
+    if semilla < 0:
+        semilla = int(time.time()) % (2 ** 31)
+    frames_total, audios, sr = [], [], 24000
+    ultimo = imagen
+    prompt = cfg["prompt"]
+
+    if motor == "ltx25":
+        from diffusers.pipelines.ltx2.utils import (DISTILLED_SIGMA_VALUES, LTX2_5_I2V_DEFAULT_SYSTEM_PROMPT,
+                                                    LTX2_5_T2V_DEFAULT_SYSTEM_PROMPT,
+                                                    STAGE_2_DISTILLED_SIGMA_VALUES)
+        t2v, i2v, up = piezas["t2v"], piezas["i2v"], piezas["up"]
+        W, H = perfil["w"], perfil["h"]
+        n_frames = int(round(dur_seg * fps / 8)) * 8 + 1  # LTX pide 8n+1 cuadros
+        n_frames = max(25, min(n_frames, int(perfil["max_seg"] * fps) + 1))
+        # Mejorador de prompts propio de LTX-2.5 (escribe en el estilo con el que se entrenó).
+        # Se calcula UNA vez y se usa en las 2 etapas (si no, cada etapa vería un prompt distinto).
+        if cfg.get("mejorar_prompt", True) and getattr(t2v, "prompt_enhancer", None) is not None:
+            progreso(16, 1, "Mejorando el prompt con el asistente de LTX-2.5...")
+            try:
+                mejor = (i2v if imagen is not None else t2v).enhance_prompt(
+                    prompt=prompt, image=imagen,
+                    system_prompt=LTX2_5_I2V_DEFAULT_SYSTEM_PROMPT if imagen is not None
+                    else LTX2_5_T2V_DEFAULT_SYSTEM_PROMPT)
+                if mejor and mejor[0].strip():
+                    prompt = mejor[0].strip()
+                    print(f"[prompt mejorado] {prompt[:300]}", flush=True)
+            except Exception as e:
+                print(f"[aviso] mejorador de prompts no disponible ({type(e).__name__}: {e})", flush=True)
+        for i in range(n_seg):
+            base = 18 + 70 * i / n_seg
+            ancho = 70 / n_seg
+
+            def cb(p, paso, t, kw, base=base, ancho=ancho, i=i, etapa=[1]):
+                progreso(base + ancho * 0.5 * (paso + 1) / 8, 2,
+                         f"Generando clip {i + 1}/{n_seg} · etapa 1/2 · paso {paso + 1}/8")
+                return kw
+
+            def cb2(p, paso, t, kw, base=base, ancho=ancho, i=i):
+                progreso(base + ancho * (0.6 + 0.4 * (paso + 1) / 3), 2,
+                         f"Generando clip {i + 1}/{n_seg} · etapa 2/2 (alta resolución) · paso {paso + 1}/3")
+                return kw
+
+            p = i2v if ultimo is not None else t2v
+            extra = {"image": ultimo} if ultimo is not None else {}
+            gen = torch.Generator(device="cuda").manual_seed(semilla + i)
+            comun = dict(prompt=prompt, num_frames=n_frames, frame_rate=float(fps), guidance_scale=1.0,
+                         audio_guidance_scale=1.0, generator=gen, return_dict=False, **extra)
+            # Etapa 1: media resolución, 8 pasos destilados
+            lat_v, lat_a = p(width=W // 2, height=H // 2, sigmas=DISTILLED_SIGMA_VALUES, output_type="latent",
+                             callback_on_step_end=cb, **comun)
+            progreso(base + ancho * 0.55, 2, f"Clip {i + 1}/{n_seg}: subiendo resolución x2 con IA...")
+            lat_up = up(latents=lat_v, latents_normalized=False, output_type="latent", return_dict=False)[0]
+            # Etapa 2: resolución completa, 3 pasos de refinado
+            video, audio = p(width=W, height=H, latents=lat_up, audio_latents=lat_a,
+                             sigmas=STAGE_2_DISTILLED_SIGMA_VALUES, noise_scale=STAGE_2_DISTILLED_SIGMA_VALUES[0],
+                             output_type="np", callback_on_step_end=cb2, **comun)
+            cuadros = [_a_pil(f) for f in video[0]]
+            if i > 0 and ultimo is not None:
+                cuadros = cuadros[1:]
+            frames_total.extend(cuadros)
+            audios.append(audio[0])
+            sr = int(getattr(t2v.vocoder.config, "output_sampling_rate", 24000))
+            ultimo = cuadros[-1]
+            _liberar_vram(torch)
+    else:  # MiniMax H3
+        pipe = piezas["pipe"]
+        W, H = perfil["w"], perfil["h"]
+        pasos = {"calidad": 50, "rapido": 36, "turbo": 24}.get(str(cfg.get("velocidad") or "calidad"), 50)
+        dur_seg = max(5.0, min(dur_seg, perfil["max_seg"]))
+        n = int((dur_seg * fps - 5) // 17)  # H3 pide 17n+5 cuadros y 5-15 s
+        n_frames = max(17 * n + 5, 124)
+        while n_frames / fps > perfil["max_seg"]:
+            n_frames -= 17
+        for i in range(n_seg):
+            progreso(18 + 70 * i / n_seg, 2, f"Generando clip {i + 1}/{n_seg} con MiniMax H3 ({pasos} pasos, "
+                                             "varios minutos)...")
+            extra = {"image": ultimo} if ultimo is not None else {}
+            res = pipe(prompt=prompt, num_frames=n_frames, height=H, width=W, num_inference_steps=pasos,
+                       generator=torch.Generator().manual_seed(semilla + i),
+                       output=["videos", "audio", "sampling_rate"], **extra)
+            cuadros = [_a_pil(f) for f in res["videos"][0]]
+            if i > 0 and ultimo is not None:
+                cuadros = cuadros[1:]
+            frames_total.extend(cuadros)
+            audios.append(res["audio"][0])
+            sr = int(res.get("sampling_rate") or 32000)
+            ultimo = cuadros[-1]
+            _liberar_vram(torch)
+
+    progreso(89, 3, f"Uniendo {len(frames_total)} cuadros y el audio...")
+    crudo = salida + ".crudo.mp4"
+    objetivo = ALTURAS.get(str(cfg.get("resolucion", "")).lower())
+    w0, h0 = frames_total[0].size
+    alto_gpu = None
+    if cfg.get("upscale") and objetivo and objetivo > min(w0, h0):
+        alto_gpu = int(round(h0 * objetivo / min(w0, h0) / 2)) * 2
+    escribir_video(frames_total, crudo, fps, ffmpeg, alto_gpu, torch)
+    cfg2 = dict(cfg)
+    if not cfg.get("audio") and audios:
+        wav = salida + ".audio.wav"
+        _escribir_wav(audios, sr, wav)
+        cfg2["audio"] = wav
+    progreso(94, 4, "Aplicando 60 FPS / audio...")
+    postprocesar(crudo, salida, cfg2, ffmpeg)
+    if cfg2.get("audio") and cfg2["audio"] != cfg.get("audio"):
+        try:
+            os.remove(cfg2["audio"])
+        except OSError:
+            pass
     progreso(100, 4, "¡Video listo!")
     emitir("resultado", archivo=salida, avisos=AVISOS)
 

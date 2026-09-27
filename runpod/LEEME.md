@@ -18,6 +18,25 @@ MODELOS="wan22_ti2v_5b_turbo" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp
   Container Disk caben 2; para 3 o más pon 150–200 GB.
 - `AUTOBORRAR_MIN=0` desactiva el autoborrado.
 
+## Modelos de calidad máxima (con audio)
+| Modelo | GPU | RAM del pod | Container Disk | Tiempo aprox. por clip |
+|---|---|---|---|---|
+| **LTX-2.5** (`ltx25_distilled`) | H100 / A100 **80 GB** | **≥ 100 GB** | **200 GB** | 10 s a 1536p: ~1–3 min (estimado) |
+| **MiniMax H3** (`minimax_h3`) | **H200** (141 GB) o H100 80 GB | **≥ 160 GB** | **250 GB** | 5 s a 768p: ~8–20 min en 1 GPU (estimado) |
+
+Los tiempos son estimaciones y se confirman en la primera prueba. El primer video de cada pod
+tarda más, porque carga el modelo; después queda cargado en la GPU.
+
+**LTX-2.5 pide permiso:** crea una cuenta en huggingface.co, abre
+`https://huggingface.co/Lightricks/LTX-2.5-Diffusers`, acepta la licencia y crea un token en
+Settings → Access Tokens (tipo *Read*). Pásalo al instalar:
+```bash
+cd /root && git clone https://github.com/mateoperez08251-crypto/my-content.git
+HF_TOKEN=hf_tu_token MODELOS="ltx25_distilled" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp bash my-content/runpod/arranque_rapido.sh
+```
+**MiniMax H3:** su licencia de pesos abiertos solo cubre la UE, el Reino Unido, Corea del Sur y
+EE. UU. (ver `docs/QA-about-License.md` en su repo). Revísala antes de usarlo.
+
 ## Modo con disco persistente
 Útil si lo usas muchas veces al mes: los modelos quedan guardados y arranca en 1 minuto,
 pero el disco cobra aunque el pod esté apagado.

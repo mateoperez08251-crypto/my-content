@@ -9,8 +9,8 @@ imageio-ffmpeg>=0.5
 moviepy>=2.0,<3
 opencv-python-headless>=4.8
 # Motor de video
-diffusers>=0.33
-transformers>=4.48
+diffusers>=0.40  # LTX-2.5 y MiniMax H3
+transformers>=5.0  # Gemma 4 (LTX-2.5) y Qwen3-VL (MiniMax H3)
 accelerate>=1.3
 safetensors
 sentencepiece
