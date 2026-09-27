@@ -17,7 +17,9 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE="${CONTENTAPP_BASE:-/workspace/contentapp}"
 VENV="$BASE/venv"
 VPY="$VENV/bin/python"
-export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore
+export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_NO_CACHE_DIR=1
+# Xet guarda una caché de trozos (hasta 10 GB) además del modelo: en un pod no sirve y llena el disco
+export HF_XET_CHUNK_CACHE_SIZE_BYTES=0
 export CONTENTAPP_DATA_DIR="$BASE/datos" HF_HOME="$BASE/hf_cache" HF_XET_HIGH_PERFORMANCE=1
 mkdir -p "$BASE" "$CONTENTAPP_DATA_DIR/logs"
 T0=$(date +%s)
@@ -164,6 +166,7 @@ export CONTENTAPP_VIDEO_PYTHON="$VPY"
 export CONTENTAPP_SERVIDOR=1
 export HF_HOME="$BASE/hf_cache"
 export HF_XET_HIGH_PERFORMANCE=1
+export HF_XET_CHUNK_CACHE_SIZE_BYTES=0
 export PYTHONUTF8=1
 export OLLAMA_MODELS="$BASE/ollama"
 ENVEOF

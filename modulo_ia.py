@@ -646,6 +646,10 @@ def real_download(model_id):
             if os.path.exists(destino) and (not tam or os.path.getsize(destino) == tam):
                 acumulado += os.path.getsize(destino)
                 continue
+            # Antes de cada archivo grande: ¿cabe? (si no, avisar en vez de llenar el disco)
+            parcial = os.path.getsize(destino + ".part") if os.path.exists(destino + ".part") else 0
+            if tam and shutil.disk_usage(base if os.path.isdir(base) else MODELS_DIR).free < tam - parcial + 512 * 1024 ** 2:
+                raise OSError(28, "No space left on device")
             _dl_set(model_id, archivo=ruta)
             bajados = _bajar_archivo(model_id, url, destino, acumulado, total, t_ref)
             if bajados is None:  # cancelado
@@ -666,7 +670,12 @@ def real_download(model_id):
         _dl_set(model_id, status="installed", progress=100, pause=False)
     except Exception as e:
         print(f"Error descargando modelo {model_id}: {e}")
-        _dl_set(model_id, status="error", pause=True, error=str(e))
+        msg = str(e)
+        if getattr(e, "errno", None) == 28 or "No space left" in msg:
+            libre = shutil.disk_usage(MODELS_DIR).free / 1024 ** 3
+            msg = (f"Disco lleno (quedan {libre:.1f} GB). Borra modelos que no uses con la papelera "
+                   "del Gestor de Modelos y pulsa Descargar para continuar donde iba.")
+        _dl_set(model_id, status="error", pause=True, error=msg)
 
 
 def _lanzar_descarga(model_id):
