@@ -277,119 +277,243 @@ User idea: "A man discovers an abandoned room."
 
 OUTPUT ONLY THE FINAL PROMPT. NO LABELS. NO EXPLANATIONS. ENGLISH ONLY."""
 
+# ---------------------------------------------------------------------------
+# Director IA (mejora de prompts)
+# ---------------------------------------------------------------------------
+import json
+import shutil
+import socket
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from fnmatch import fnmatch
+
+import requests
+from flask import send_from_directory
+from werkzeug.utils import secure_filename
+
+import winproc
+
+SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _limpiar_prompt(texto):
+    """Quita etiquetas tipo 'Here is your prompt:' o markdown que algunos modelos añaden."""
+    texto = (texto or "").strip().strip('"').strip()
+    lineas = [l for l in texto.splitlines() if l.strip()]
+    if lineas and lineas[0].rstrip().endswith(":") and len(lineas) > 1:
+        lineas = lineas[1:]
+    return "\n".join(lineas).replace("**", "").strip()
+
+
+def _prompt_con_ollama(idea):
+    payload = {
+        "model": "llama3",
+        "messages": [
+            {"role": "system", "content": MASTER_DIRECTOR_PROMPT},
+            {"role": "user", "content": f"Transform this idea into a master prompt: {idea}"},
+        ],
+        "stream": False,
+        # keep_alive=0 descarga el modelo de la RAM al terminar (evita 0xc000012d).
+        "keep_alive": 0,
+        "options": {"num_ctx": 4096},
+    }
+    resp = requests.post("http://127.0.0.1:11434/api/chat", json=payload, timeout=(3, 300))
+    if resp.status_code == 200:
+        return _limpiar_prompt(resp.json().get("message", {}).get("content", ""))
+    return ""
+
+
+def _puerto_libre():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _prompt_con_gguf(idea):
+    """Usa el modelo 'Director IA' descargado (GGUF) con llama-server en un proceso aparte.
+    Antes se descargaba pero nunca se usaba. Se apaga al terminar para liberar la RAM."""
+    gguf = os.path.join(MODELS_DIR, "llama-3-8b-instruct.Q8_0.gguf")
+    if not os.path.exists(gguf):
+        return ""
+    if estado_memoria()["commit_libre_gb"] < 10:
+        raise RuntimeError("No hay memoria libre suficiente (se necesitan ~10 GB) para el Director IA local.")
+    try:
+        from api_clonador_flask import buscar_binario
+        tts = buscar_binario()
+    except Exception:
+        tts = ""
+    carpeta = os.path.dirname(tts) if tts else ""
+    servidor = ""
+    for nombre in ("llama-server.exe", "llama-server"):
+        cand = os.path.join(carpeta, nombre) if carpeta else ""
+        if cand and os.path.exists(cand):
+            servidor = cand
+            break
+    servidor = servidor or shutil.which("llama-server") or ""
+    if not servidor:
+        return ""
+
+    puerto = _puerto_libre()
+    proc = subprocess.Popen([servidor, "-m", gguf, "--port", str(puerto), "-c", "4096", "-ngl", "99"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=SIN_VENTANA)
+    winproc.adjuntar_a_job(proc)
+    try:
+        base = f"http://127.0.0.1:{puerto}"
+        for _ in range(240):  # hasta 2 min cargando el modelo
+            if proc.poll() is not None:
+                return ""
+            try:
+                if requests.get(base + "/health", timeout=1).status_code == 200:
+                    break
+            except requests.RequestException:
+                pass
+            time.sleep(0.5)
+        r = requests.post(base + "/v1/chat/completions", timeout=(5, 300), json={
+            "messages": [
+                {"role": "system", "content": MASTER_DIRECTOR_PROMPT},
+                {"role": "user", "content": f"Transform this idea into a master prompt: {idea}"},
+            ],
+            "max_tokens": 400, "temperature": 0.7,
+        })
+        if r.status_code == 200:
+            return _limpiar_prompt(r.json()["choices"][0]["message"]["content"])
+        return ""
+    finally:
+        winproc.matar_arbol(proc)
+
+
 @ia_bp.route('/generar_prompt', methods=['POST'])
 def generar_prompt():
-    """Recibe la configuración del frontend y pronto llamará a la IA local."""
-    try:
-        data = request.json or {}
-        idea = data.get("prompt", data.get("idea", ""))
+    """Mejora la idea del usuario: Ollama -> Director IA local (GGUF) -> aviso."""
+    data = request.get_json(silent=True) or {}
+    idea = str(data.get("prompt", data.get("idea", ""))).strip()
+    if not idea:
+        return jsonify({"success": False, "error": "La idea base está vacía"}), 400
+    if "[SIMULADO" in idea:
+        idea = idea.split("Idea: ")[-1].strip()
 
-        if not idea:
-            return jsonify({"error": "La idea base está vacía"}), 400
-
-        # Limpiar mensajes simulados previos para no crear un bucle
-        if "[SIMULADO" in idea:
-            idea = idea.split("Idea: ")[-1].strip()
-
-        # Ollama con rol de sistema. keep_alive=0 descarga el modelo de la RAM al
-        # terminar: antes llama3 (~5 GB) se quedaba cargado y, al generar el video
-        # justo después, Windows agotaba la memoria (0xc000012d).
+    errores = []
+    for nombre, funcion in (("Ollama", _prompt_con_ollama), ("Director IA local", _prompt_con_gguf)):
         try:
-            import requests
-            payload = {
-                "model": "llama3",
-                "messages": [
-                    {"role": "system", "content": MASTER_DIRECTOR_PROMPT},
-                    {"role": "user", "content": f"Transform this idea into a master prompt: {idea}"},
-                ],
-                "stream": False,
-                "keep_alive": 0,
-                "options": {"num_ctx": 4096},
-            }
-            resp = requests.post("http://127.0.0.1:11434/api/chat", json=payload, timeout=(5, 300))
-            if resp.status_code == 200:
-                prompt_real = resp.json().get("message", {}).get("content", "").strip()
-                if prompt_real:
-                    return jsonify({"success": True, "prompt": prompt_real})
-        except Exception:
-            pass  # Ollama no disponible: simulación segura
+            texto = funcion(idea)
+            if texto:
+                return jsonify({"success": True, "prompt": texto, "motor": nombre})
+        except requests.ConnectionError:
+            pass
+        except Exception as e:
+            errores.append(f"{nombre}: {e}")
 
-        # Nunca se carga llama_cpp dentro de Flask (causa 0xc000012d por falta de memoria).
+    detalle = (" Detalle: " + " | ".join(errores)) if errores else ""
+    return jsonify({
+        "success": False,
+        "error": ("No hay ningún Director IA disponible. Instala Ollama (ollama.com) y ejecuta "
+                  "'ollama pull llama3', o descarga 'Director IA' en el Gestor de Modelos." + detalle),
+    })
 
-        # Intento 3: Simulación si no hay Ollama ni modelo local funcional
-        return jsonify({"success": True, "prompt": "[SIMULADO - Instala Ollama (ollama.com) y ejecuta 'ollama pull llama3' para prompts reales]\n\nIdea: " + idea})
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# ---------------------------------------------------------------------------
+# Catálogo de modelos (formato diffusers = modelo completo y listo para usar).
+# Antes se descargaban archivos sueltos (formato ComfyUI) que la app no podía usar.
+# Tamaños verificados en HuggingFace.
+# ---------------------------------------------------------------------------
+PATRONES_DIFFUSERS = ["model_index.json", "transformer/*", "vae/*", "text_encoder/*",
+                      "text_encoder_2/*", "tokenizer/*", "tokenizer_2/*", "scheduler/*",
+                      "image_encoder/*", "image_processor/*"]
 
-# Catálogo de modelos disponibles para descarga (URLs verificadas)
 AVAILABLE_MODELS = [
+    {
+        "id": "wan21_t2v_13b",
+        "name": "Wan2.1 1.3B (Texto a Video)",
+        "type": "t2v",
+        "motor": "wan",
+        "description": "El más ligero y estable. Recomendado para empezar. GPU de 8 GB.",
+        "size_gb": 26.9,
+        "vram_gb": 8,
+        "repo": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    },
+    {
+        "id": "ltx_video",
+        "name": "LTX-Video (Texto e Imagen a Video)",
+        "type": "both",
+        "motor": "ltx",
+        "description": "Rápido. Anima fotos y encadena clips largos. GPU de 8-12 GB.",
+        "size_gb": 26.5,
+        "vram_gb": 8,
+        "repo": "Lightricks/LTX-Video",
+    },
+    {
+        "id": "cogvideox_5b",
+        "name": "CogVideoX-5B (Texto a Video)",
+        "type": "t2v",
+        "motor": "cogvideox",
+        "description": "Buena calidad con poca VRAM (más lento). GPU de 6 GB+.",
+        "size_gb": 20.1,
+        "vram_gb": 6,
+        "repo": "zai-org/CogVideoX-5b",
+    },
+    {
+        "id": "cogvideox_5b_i2v",
+        "name": "CogVideoX-5B (Imagen a Video)",
+        "type": "i2v",
+        "motor": "cogvideox_i2v",
+        "description": "Anima una imagen base. GPU de 6 GB+.",
+        "size_gb": 20.2,
+        "vram_gb": 6,
+        "repo": "zai-org/CogVideoX-5b-I2V",
+    },
     {
         "id": "hunyuan_video",
         "name": "HunyuanVideo (Calidad Alta)",
         "type": "t2v",
-        "description": "Generación de la más alta calidad. Recomendado para RTX A5000.",
-        "size_gb": 12.3,
-        "filename": "hunyuan_video_720_cfgdistill_fp8_e4m3fn.safetensors",
-        "url": "https://huggingface.co/Kijai/HunyuanVideo_comfy/resolve/main/hunyuan_video_720_cfgdistill_fp8_e4m3fn.safetensors"
-    },
-    {
-        "id": "wan2_1",
-        "name": "Wan2.1 (Image-to-Video)",
-        "type": "i2v",
-        "description": "El mejor modelo para animar imágenes estáticas de novelas.",
-        "size_gb": 15.3,
-        "filename": "wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors"
-    },
-    {
-        "id": "cogvideox_5b",
-        "name": "CogVideoX-5B",
-        "type": "t2v",
-        "description": "Excelente balance calidad/velocidad. Para PCs medianas (12-16GB VRAM).",
-        "size_gb": 10.4,
-        "filename": "CogVideoX_1_5_5b_T2V_bf16.safetensors",
-        "url": "https://huggingface.co/Kijai/CogVideoX-comfy/resolve/main/CogVideoX_1_5_5b_T2V_bf16.safetensors"
-    },
-    {
-        "id": "ltx_video",
-        "name": "LTX-Video (Texto/Imagen a Video)",
-        "type": "both",
-        "description": "Modelo liviano para generar videos rápidos desde texto o imágenes. 8GB VRAM.",
-        "size_gb": 5.3,
-        "filename": "ltx-video-2b-v0.9.1.safetensors",
-        "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.1.safetensors"
-    },
-    {
-        "id": "flux1_schnell",
-        "name": "FLUX.1 Schnell (Generador Imágenes)",
-        "type": "t2i",
-        "description": "Uno de los mejores modelos open-source para creación de imágenes hiperrealistas.",
-        "size_gb": 16.1,
-        "filename": "flux1-schnell-fp8.safetensors",
-        "url": "https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell-fp8.safetensors"
+        "motor": "hunyuan",
+        "description": "Máxima calidad. Necesita GPU de 24 GB (RTX A5000 / 3090 / 4090).",
+        "size_gb": 39.0,
+        "vram_gb": 24,
+        "repo": "hunyuanvideo-community/HunyuanVideo",
     },
     {
         "id": "director_ia_prompts",
         "type": "other",
         "name": "Director IA (Llama 3 8B)",
-        "description": "Modelo especial entrenado para redactar Prompts ultra-detallados automáticamente.",
+        "description": "Mejora los prompts sin Ollama (usa llama.cpp).",
         "size_gb": 8.0,
         "filename": "llama-3-8b-instruct.Q8_0.gguf",
-        "url": "https://huggingface.co/MaziyarPanahi/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q8_0.gguf"
-    }
+        "url": "https://huggingface.co/MaziyarPanahi/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q8_0.gguf",
+    },
 ]
+MODELOS_POR_ID = {m["id"]: m for m in AVAILABLE_MODELS}
 
-# Estado de descargas compartido entre hilos: SIEMPRE bajo _dl_lock.
+
+def _modelo(model_id):
+    return MODELOS_POR_ID.get(model_id)
+
+
+def _carpeta_modelo(m):
+    return os.path.join(MODELS_DIR, m["id"])
+
+
+def _instalado(m):
+    if m.get("repo"):
+        return os.path.exists(os.path.join(_carpeta_modelo(m), ".completo"))
+    return os.path.exists(os.path.join(MODELS_DIR, m["filename"]))
+
+
+def _hay_parcial(m):
+    if m.get("repo"):
+        carpeta = _carpeta_modelo(m)
+        return os.path.isdir(carpeta) and not _instalado(m)
+    return os.path.exists(os.path.join(MODELS_DIR, m["filename"]) + ".part")
+
+
+# ---------------------------------------------------------------------------
+# Descargas (con pausa, reanudación y progreso). Estado bajo _dl_lock.
+# ---------------------------------------------------------------------------
 download_status = {}
 _dl_lock = threading.Lock()
-
-import urllib.request
-import urllib.error
-import shutil
-
-from flask import send_from_directory
-from werkzeug.utils import secure_filename
+CABECERA = {"User-Agent": "ContentApp/2.0"}
 
 
 def _dl_get(model_id):
@@ -404,108 +528,153 @@ def _dl_set(model_id, **campos):
 
 def _borrar_silencioso(ruta):
     try:
-        if os.path.exists(ruta):
+        if os.path.isdir(ruta):
+            shutil.rmtree(ruta, ignore_errors=True)
+        elif os.path.exists(ruta):
             os.remove(ruta)
     except OSError:
         pass
 
 
-def real_download(model_id, filename, url, models_dir):
-    """Descarga con pausa/reanudación. El hilo es el único que borra sus archivos."""
-    part_path = os.path.join(models_dir, filename + ".part")
-    final_path = os.path.join(models_dir, filename)
-    _dl_set(model_id, status="downloading", cancel=False, pause=False, speed_mbps=0,
-            progress=_dl_get(model_id).get("progress", 0),
-            downloaded_mb=_dl_get(model_id).get("downloaded_mb", 0),
-            total_mb=_dl_get(model_id).get("total_mb", 0))
-    # Nota: ya no se ejecuta "pip install" aquí. En el .exe relanzaba la propia app
-    # y en desarrollo instalaba torch (~2.5 GB) en cada clic.
-
-    def _cancelada():
-        return _dl_get(model_id).get("cancel", False)
-
-    try:
-        desde = os.path.getsize(part_path) if os.path.exists(part_path) else 0
-        cabecera = {"User-Agent": "AuraStudio/1.0"}
-        with urllib.request.urlopen(urllib.request.Request(url, method="HEAD", headers=cabecera), timeout=30) as r:
-            total_size = int(r.headers.get("Content-Length", 0))
-
-        if total_size > 0 and desde >= total_size:
-            desde = 0
-            _borrar_silencioso(part_path)
-
-        req = urllib.request.Request(url, headers=cabecera)
-        if desde > 0:
-            req.add_header("Range", f"bytes={desde}-")
+def _manifiesto(m):
+    """Lista de archivos (ruta, tamaño, url) que hay que bajar para este modelo."""
+    if not m.get("repo"):
+        return [(m["filename"], 0, m["url"])]
+    carpeta = _carpeta_modelo(m)
+    cache = os.path.join(carpeta, ".manifiesto.json")
+    if os.path.exists(cache):
         try:
-            resp = urllib.request.urlopen(req, timeout=60)
-        except urllib.error.HTTPError as e:
-            if e.code != 416:
-                raise
-            desde = 0
-            _borrar_silencioso(part_path)
-            resp = urllib.request.urlopen(urllib.request.Request(url, headers=cabecera), timeout=60)
+            with open(cache, "r", encoding="utf-8") as f:
+                return [tuple(x) for x in json.load(f)]
+        except (OSError, ValueError):
+            pass
+    r = requests.get(f"https://huggingface.co/api/models/{m['repo']}/tree/main",
+                     params={"recursive": "true"}, headers=CABECERA, timeout=30)
+    r.raise_for_status()
+    archivos = []
+    for f in r.json():
+        if f.get("type") != "file" or not any(fnmatch(f["path"], p) for p in PATRONES_DIFFUSERS):
+            continue
+        tam = (f.get("lfs") or {}).get("size") or f.get("size") or 0
+        url = f"https://huggingface.co/{m['repo']}/resolve/main/{urllib.parse.quote(f['path'])}"
+        archivos.append((f["path"], int(tam), url))
+    if not archivos:
+        raise RuntimeError("El repositorio no tiene archivos en formato diffusers.")
+    os.makedirs(carpeta, exist_ok=True)
+    with open(cache, "w", encoding="utf-8") as f:
+        json.dump(archivos, f)
+    return archivos
 
-        if desde > 0 and resp.status != 206:
-            desde = 0
-        if total_size == 0:
-            total_size = int(resp.headers.get("Content-Length", 0)) + desde
 
-        downloaded = desde
-        t0, bytes0 = time.time(), downloaded
-        with resp, open(part_path, "ab" if desde > 0 else "wb") as f:
-            while True:
-                if _cancelada():
-                    break
-                while _dl_get(model_id).get("pause") and not _cancelada():
-                    time.sleep(0.5)
-                if _cancelada():
-                    break
-                chunk = resp.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                downloaded += len(chunk)
-                ahora = time.time()
-                campos = {"downloaded_mb": round(downloaded / 1048576, 1),
-                          "total_mb": round(total_size / 1048576, 1) if total_size else 0}
-                if ahora - t0 > 0.5:
-                    campos["speed_mbps"] = round((downloaded - bytes0) / (ahora - t0) / 1048576, 1)
-                    t0, bytes0 = ahora, downloaded
-                if total_size:
-                    campos["progress"] = min(int(downloaded * 100 / total_size), 100)
-                _dl_set(model_id, **campos)
+def _bajar_archivo(model_id, url, destino, acumulado, total, t_ref):
+    """Descarga un archivo con reanudación. Devuelve bytes bajados o None si se canceló."""
+    part = destino + ".part"
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    desde = os.path.getsize(part) if os.path.exists(part) else 0
+    req = urllib.request.Request(url, headers=CABECERA)
+    if desde:
+        req.add_header("Range", f"bytes={desde}-")
+    try:
+        resp = urllib.request.urlopen(req, timeout=60)
+    except urllib.error.HTTPError as e:
+        if e.code != 416:
+            raise
+        _borrar_silencioso(part)
+        desde = 0
+        resp = urllib.request.urlopen(urllib.request.Request(url, headers=CABECERA), timeout=60)
+    if desde and resp.status != 206:
+        desde = 0
+    bajados = desde
+    with resp, open(part, "ab" if desde else "wb") as f:
+        while True:
+            estado = _dl_get(model_id)
+            if estado.get("cancel"):
+                return None
+            while estado.get("pause") and not estado.get("cancel"):
+                time.sleep(0.5)
+                estado = _dl_get(model_id)
+            if estado.get("cancel"):
+                return None
+            bloque = resp.read(1024 * 1024)
+            if not bloque:
+                break
+            f.write(bloque)
+            bajados += len(bloque)
+            ahora = time.time()
+            campos = {"downloaded_mb": round((acumulado + bajados) / 1048576, 1)}
+            if ahora - t_ref[0] > 0.5:
+                campos["speed_mbps"] = round((acumulado + bajados - t_ref[1]) / (ahora - t_ref[0]) / 1048576, 1)
+                t_ref[0], t_ref[1] = ahora, acumulado + bajados
+            if total:
+                campos["progress"] = min(int((acumulado + bajados) * 100 / total), 99)
+            _dl_set(model_id, **campos)
+    os.replace(part, destino)
+    return bajados
 
-        if _cancelada():
-            # El archivo ya está cerrado: en Windows ahora sí se puede borrar.
-            _borrar_silencioso(part_path)
-            with _dl_lock:
-                download_status.pop(model_id, None)
-            return
 
-        if total_size and downloaded < total_size:
-            raise IOError(f"Descarga incompleta ({downloaded} de {total_size} bytes)")
-        os.replace(part_path, final_path)
+def real_download(model_id):
+    m = _modelo(model_id)
+    _dl_set(model_id, status="downloading", cancel=False, pause=False, error="", speed_mbps=0)
+    try:
+        archivos = _manifiesto(m)
+        base = _carpeta_modelo(m) if m.get("repo") else MODELS_DIR
+        total = sum(t for _, t, _ in archivos)
+        if not total and not m.get("repo"):
+            with urllib.request.urlopen(urllib.request.Request(m["url"], method="HEAD", headers=CABECERA), timeout=30) as r:
+                total = int(r.headers.get("Content-Length", 0))
+        _dl_set(model_id, total_mb=round(total / 1048576, 1))
+
+        acumulado = 0
+        t_ref = [time.time(), 0]
+        for ruta, tam, url in archivos:
+            destino = os.path.join(base, *ruta.split("/"))
+            if os.path.exists(destino) and (not tam or os.path.getsize(destino) == tam):
+                acumulado += os.path.getsize(destino)
+                continue
+            _dl_set(model_id, archivo=ruta)
+            bajados = _bajar_archivo(model_id, url, destino, acumulado, total, t_ref)
+            if bajados is None:  # cancelado
+                if m.get("repo"):
+                    _borrar_silencioso(_carpeta_modelo(m))
+                else:
+                    _borrar_silencioso(destino + ".part")
+                with _dl_lock:
+                    download_status.pop(model_id, None)
+                return
+            if tam and bajados != tam:
+                raise IOError(f"{ruta}: descarga incompleta ({bajados} de {tam} bytes)")
+            acumulado += bajados
+
+        if m.get("repo"):
+            with open(os.path.join(_carpeta_modelo(m), ".completo"), "w", encoding="utf-8") as f:
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S"))
         _dl_set(model_id, status="installed", progress=100, pause=False)
     except Exception as e:
         print(f"Error descargando modelo {model_id}: {e}")
         _dl_set(model_id, status="error", pause=True, error=str(e))
 
 
+def _lanzar_descarga(model_id):
+    with _dl_lock:
+        if download_status.get(model_id, {}).get("status") == "downloading":
+            return
+        download_status.setdefault(model_id, {}).update(status="downloading", pause=False, error="")
+    threading.Thread(target=real_download, args=(model_id,), daemon=True).start()
+
+
 @ia_bp.route('/modelos', methods=['GET'])
 def get_modelos():
-    """Devuelve la lista de modelos y su estado de instalación."""
+    """Lista de modelos con su estado."""
     os.makedirs(MODELS_DIR, exist_ok=True)
     lista = []
     for m in AVAILABLE_MODELS:
-        file_path = os.path.join(MODELS_DIR, m["filename"])
         info = _dl_get(m["id"])
         lista.append({
-            **m,
-            "installed": os.path.exists(file_path),
-            "downloading": info.get("status") == "downloading" or os.path.exists(file_path + ".part"),
+            **{k: v for k, v in m.items() if k not in ("url",)},
+            "installed": _instalado(m),
+            "downloading": info.get("status") == "downloading" or (_hay_parcial(m) and info.get("status") != "error"),
             "progress": info.get("progress", 0),
-            "paused": info.get("pause", False),
+            "paused": info.get("pause", False) or (_hay_parcial(m) and not info),
             "error": info.get("error", ""),
             "downloaded_mb": info.get("downloaded_mb", 0),
             "total_mb": info.get("total_mb", 0),
@@ -516,72 +685,135 @@ def get_modelos():
 
 @ia_bp.route('/descargar_modelo', methods=['POST'])
 def descargar_modelo():
-    """Inicia (o reanuda) la descarga de un modelo."""
-    data = request.json or {}
-    model_id = data.get("id")
-    m = next((mod for mod in AVAILABLE_MODELS if mod["id"] == model_id), None)
+    data = request.get_json(silent=True) or {}
+    m = _modelo(data.get("id"))
     if not m:
         return jsonify({"success": False, "error": "Modelo no encontrado"}), 404
-
     os.makedirs(MODELS_DIR, exist_ok=True)
-    free_space = shutil.disk_usage(MODELS_DIR).free
-    if free_space < m["size_gb"] * 1024 ** 3:
-        return jsonify({
-            "success": False,
-            "error": f"Espacio insuficiente en disco. Tienes {free_space / 1024 ** 3:.1f} GB libres, "
-                     f"pero el modelo requiere {m['size_gb']} GB."
-        }), 400
-
-    file_path = os.path.join(MODELS_DIR, m["filename"])
-    with _dl_lock:
-        activo = download_status.get(model_id, {}).get("status") == "downloading"
-        if not activo and not os.path.exists(file_path):
-            download_status.setdefault(model_id, {})["status"] = "downloading"
-            threading.Thread(target=real_download, daemon=True,
-                             args=(model_id, m["filename"], m["url"], MODELS_DIR)).start()
-
+    libre = shutil.disk_usage(MODELS_DIR).free
+    if libre < m["size_gb"] * 1024 ** 3:
+        return jsonify({"success": False, "error":
+                        f"Espacio insuficiente en disco. Tienes {libre / 1024 ** 3:.1f} GB libres, "
+                        f"pero el modelo requiere {m['size_gb']} GB."}), 400
+    if not _instalado(m):
+        _lanzar_descarga(m["id"])
     return jsonify({"success": True, "mensaje": f"Iniciando descarga de {m['name']}..."})
 
 
 @ia_bp.route('/modelo_accion', methods=['POST'])
 def modelo_accion():
     """Pausar, reanudar, cancelar o borrar."""
-    data = request.json or {}
-    model_id = data.get("id")
+    data = request.get_json(silent=True) or {}
+    m = _modelo(data.get("id"))
     action = data.get("action")
-    m = next((mod for mod in AVAILABLE_MODELS if mod["id"] == model_id), None)
     if not m:
         return jsonify({"success": False})
-
-    file_path = os.path.join(MODELS_DIR, m["filename"])
-    part_path = file_path + ".part"
-    info = _dl_get(model_id)
-    descargando = info.get("status") == "downloading"
+    descargando = _dl_get(m["id"]).get("status") == "downloading"
 
     if action in ("cancel", "delete"):
         if descargando:
-            # El hilo cierra el archivo y lo borra él mismo (Windows no deja borrar
-            # un archivo abierto).
-            _dl_set(model_id, cancel=True, pause=False)
+            _dl_set(m["id"], cancel=True, pause=False)  # el hilo borra sus archivos al salir
         else:
-            _borrar_silencioso(part_path)
             with _dl_lock:
-                download_status.pop(model_id, None)
-        if action == "delete" or not descargando:
-            _borrar_silencioso(file_path)
+                download_status.pop(m["id"], None)
+            if m.get("repo"):
+                _borrar_silencioso(_carpeta_modelo(m))
+            else:
+                _borrar_silencioso(os.path.join(MODELS_DIR, m["filename"]))
+                _borrar_silencioso(os.path.join(MODELS_DIR, m["filename"]) + ".part")
     elif action == "pause" and descargando:
-        _dl_set(model_id, pause=True)
+        _dl_set(m["id"], pause=True)
     elif action == "resume":
         if descargando:
-            _dl_set(model_id, pause=False)
-        elif not os.path.exists(file_path):
-            # Tras un error, reanudar = relanzar el hilo desde el .part
-            with _dl_lock:
-                download_status.setdefault(model_id, {}).update(status="downloading", pause=False, error="")
-            threading.Thread(target=real_download, daemon=True,
-                             args=(model_id, m["filename"], m["url"], MODELS_DIR)).start()
-
+            _dl_set(m["id"], pause=False)
+        elif not _instalado(m):
+            _lanzar_descarga(m["id"])
     return jsonify({"success": True})
+
+
+# ---------------------------------------------------------------------------
+# Motor de video: Python con torch + diffusers (proceso aparte)
+# ---------------------------------------------------------------------------
+_motor_lock = threading.Lock()
+_motor_info = {"estado": "sin_detectar"}
+
+
+def _candidatos_python():
+    cands = []
+    if os.environ.get("CONTENTAPP_VIDEO_PYTHON"):
+        cands.append(os.environ["CONTENTAPP_VIDEO_PYTHON"])
+    for base in (paths.EXEC_DIR, paths.DATA_DIR, paths.RES_DIR):
+        for sub in ((".venv_video", "Scripts", "python.exe"), (".venv_video", "bin", "python"),
+                    ("VideoAI", ".venv", "Scripts", "python.exe"), ("VideoAI", ".venv", "bin", "python")):
+            cands.append(os.path.join(base, *sub))
+    if not paths.FROZEN:
+        cands.append(sys.executable)
+    for nombre in ("python", "python3", "py"):
+        encontrado = shutil.which(nombre)
+        if encontrado:
+            cands.append(encontrado)
+    vistos, unicos = set(), []
+    for c in cands:
+        clave = os.path.normcase(os.path.abspath(c)) if os.path.sep in c else c
+        if clave not in vistos and (os.path.sep not in c or os.path.exists(c)):
+            vistos.add(clave)
+            unicos.append(c)
+    return unicos
+
+
+def _detectar_motor():
+    worker = paths.res_path("video_worker.py")
+    if not os.path.exists(worker):
+        worker = os.path.join(paths.EXEC_DIR, "video_worker.py")
+    mejor = None
+    for py in _candidatos_python():
+        try:
+            r = subprocess.run([py, worker, "--diagnostico"], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=180, creationflags=SIN_VENTANA)
+            linea = [l for l in (r.stdout or "").splitlines() if l.startswith("{")]
+            if not linea:
+                continue
+            info = json.loads(linea[-1])
+        except Exception:
+            continue
+        info["python_cmd"] = py
+        info["worker"] = worker
+        listo = bool(info.get("torch") and info.get("diffusers") and not info.get("error"))
+        info["listo"] = listo and info.get("cuda")
+        if info["listo"]:
+            mejor = info
+            break
+        if listo and mejor is None:
+            mejor = info  # tiene librerías pero sin GPU
+    with _motor_lock:
+        if mejor:
+            _motor_info.clear()
+            _motor_info.update(mejor, estado="listo" if mejor.get("listo") else "sin_gpu")
+        else:
+            _motor_info.clear()
+            _motor_info.update(estado="no_instalado")
+        _motor_info["detectado"] = time.time()
+
+
+def _motor(forzar=False):
+    with _motor_lock:
+        estado = _motor_info.get("estado")
+        if estado == "detectando":
+            return dict(_motor_info)
+        if forzar or estado == "sin_detectar":
+            _motor_info.clear()
+            _motor_info["estado"] = "detectando"
+            threading.Thread(target=_detectar_motor, daemon=True).start()
+        return dict(_motor_info)
+
+
+@ia_bp.route('/motor_estado', methods=['GET'])
+def motor_estado():
+    info = _motor(forzar=request.args.get("refrescar") == "1")
+    mem = estado_memoria()
+    info["ram_libre_gb"] = round(mem["commit_libre_gb"], 1)
+    info["instalador"] = "instalar_motor_video.bat"
+    return jsonify({"success": True, **{k: v for k, v in info.items() if k != "worker"}})
 
 
 # ---------------------------------------------------------------------------
@@ -589,113 +821,176 @@ def modelo_accion():
 # ---------------------------------------------------------------------------
 tareas_video = {}
 _tareas_lock = threading.Lock()
+_gpu_lock = threading.Lock()  # una generación a la vez (una sola GPU)
 
 
-def simulate_generation(task_id, prompt, out_path):
-    """Placeholder: no hay motor de video real integrado todavía (ComfyUI pendiente)."""
-    def _estado(**c):
-        with _tareas_lock:
-            tareas_video.setdefault(task_id, {}).update(c)
-
-    try:
-        import requests
-        requests.get("http://127.0.0.1:8188/system/stats", timeout=2)
-        print(">> [INFO] ComfyUI detectado. Falta vincular el workflow API.")
-    except Exception:
-        pass
-
-    print(">> Usando simulación de generación (no hay motor de video integrado)")
-    try:
-        import cv2
-        import numpy as np
-        fps, duracion, ancho, alto = 15, 3, 640, 360
-        out = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (ancho, alto))
-        try:
-            for i in range(fps * duracion):
-                img = np.full((alto, ancho, 3), (40, 40, 80), dtype=np.uint8)
-                cv2.putText(img, "Video Generado (SIMULACION)", (50, alto // 2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-                cv2.putText(img, f"Frame: {i}", (50, alto // 2 + 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2, cv2.LINE_AA)
-                out.write(img)
-        finally:
-            out.release()
-        _estado(estado="terminado", archivo=os.path.basename(out_path), simulado=True)
-    except Exception as e:
-        print(">> Error creando video de simulación:", e)
-        _estado(estado="error", error=str(e))
+def _set_tarea(task_id, **campos):
+    with _tareas_lock:
+        tareas_video.setdefault(task_id, {}).update(campos)
 
 
 def _guardar_upload(archivo, prefijo):
     """Guarda un archivo subido con nombre seguro (sin rutas '..\\')."""
     os.makedirs(UPLOADS_DIR, exist_ok=True)
     nombre = secure_filename(archivo.filename or "") or "archivo"
-    final = f"{prefijo}_{int(time.time())}_{nombre}"
-    archivo.save(os.path.join(UPLOADS_DIR, final))
+    final = os.path.join(UPLOADS_DIR, f"{prefijo}_{int(time.time())}_{nombre}")
+    archivo.save(final)
     return final
+
+
+def _ffmpeg():
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return shutil.which("ffmpeg") or "ffmpeg"
+
+
+def _ejecutar_worker(task_id, motor, cfg_path):
+    proc = None
+    try:
+        proc = subprocess.Popen([motor["python_cmd"], motor["worker"], "--config", cfg_path],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace", cwd=paths.RES_DIR,
+                                creationflags=SIN_VENTANA)
+        winproc.adjuntar_a_job(proc)  # muere con la app aunque esta crashee
+        _set_tarea(task_id, proceso=proc)
+        ultimas = []
+        for linea in proc.stdout:
+            linea = linea.strip()
+            if not linea:
+                continue
+            try:
+                ev = json.loads(linea) if linea.startswith("{") else None
+            except ValueError:
+                ev = None
+            if not ev:
+                ultimas = (ultimas + [linea])[-8:]
+                continue
+            tipo = ev.get("tipo")
+            if tipo == "progreso":
+                _set_tarea(task_id, progreso=ev.get("pct", 0), paso=ev.get("paso", 1), mensaje=ev.get("msg", ""))
+            elif tipo == "aviso":
+                with _tareas_lock:
+                    tareas_video[task_id].setdefault("avisos", []).append(ev.get("msg", ""))
+            elif tipo == "resultado":
+                _set_tarea(task_id, estado="terminado", progreso=100, paso=4,
+                           archivo=os.path.basename(ev.get("archivo", "")), mensaje="¡Video listo!")
+            elif tipo == "error":
+                _set_tarea(task_id, estado="error", error=ev.get("msg", "Error desconocido"))
+        codigo = proc.wait()
+        with _tareas_lock:
+            t = tareas_video.get(task_id, {})
+            if t.get("estado") == "en_curso":
+                if t.get("cancelada"):
+                    t.update(estado="cancelada", error="Generación cancelada.")
+                else:
+                    detalle = " | ".join(ultimas[-3:])
+                    t.update(estado="error", error=f"El motor de video se cerró (código {codigo}). {detalle}".strip())
+    except Exception as e:
+        _set_tarea(task_id, estado="error", error=str(e))
+    finally:
+        with _tareas_lock:
+            tareas_video.get(task_id, {}).pop("proceso", None)
+        try:
+            os.remove(cfg_path)
+        except OSError:
+            pass
+        _gpu_lock.release()
 
 
 @ia_bp.route('/generar_video', methods=['POST'])
 def generar_video():
-    data = request.json if request.is_json else request.form
-    data = data or {}
+    data = (request.get_json(silent=True) if request.is_json else request.form) or {}
+    prompt = str(data.get("prompt", "")).strip()
+    if not prompt:
+        return jsonify({"success": False, "error": "Escribe un prompt."}), 400
 
-    # Protección contra 0xc000012d: no lanzar trabajo si no queda memoria de commit.
+    m = _modelo(data.get("model_id", ""))
+    if not m or m.get("type") == "other":
+        return jsonify({"success": False, "error": "Selecciona un modelo de video en 'Modelo Activo'."}), 400
+    if not _instalado(m):
+        return jsonify({"success": False, "error": f"{m['name']} no está descargado. Ábrelo en el Gestor de Modelos."}), 400
+
+    motor = _motor()
+    if motor.get("estado") == "detectando":
+        return jsonify({"success": False, "error": "Comprobando el motor de video... espera unos segundos y vuelve a intentarlo."}), 409
+    if motor.get("estado") == "no_instalado":
+        return jsonify({"success": False, "error": "Falta el motor de video (Python con torch + diffusers). "
+                                                    "Ejecuta 'instalar_motor_video.bat' en la carpeta de la app y reinicia."}), 400
+    if motor.get("estado") == "sin_gpu":
+        return jsonify({"success": False, "error": "El motor está instalado pero no ve una GPU NVIDIA con CUDA. "
+                                                    "Actualiza los drivers de NVIDIA o reinstala el motor."}), 400
+    if motor.get("vram_gb") and motor["vram_gb"] + 0.5 < m.get("vram_gb", 0):
+        return jsonify({"success": False, "error": f"{m['name']} necesita ~{m['vram_gb']} GB de VRAM y tu GPU tiene "
+                                                    f"{motor['vram_gb']} GB. Usa Wan2.1 1.3B o CogVideoX."}), 400
+
+    # Protección contra 0xc000012d (sin memoria de commit en Windows).
     mem = estado_memoria()
     if mem["commit_libre_gb"] < MIN_COMMIT_GB:
-        return jsonify({
-            "success": False,
-            "error": (f"Memoria insuficiente: quedan {mem['commit_libre_gb']:.1f} GB libres "
-                      f"(RAM + paginación). Cierra programas (Ollama, navegador) o aumenta la "
-                      f"memoria virtual de Windows y vuelve a intentarlo.")
-        }), 503
+        return jsonify({"success": False, "error":
+                        f"Memoria insuficiente: quedan {mem['commit_libre_gb']:.1f} GB libres (RAM + paginación). "
+                        "Cierra programas (Ollama, navegador) o aumenta la memoria virtual de Windows."}), 503
 
-    prompt = data.get("prompt", "Prompt vacío")
-    resolution = data.get("resolution", "1080p")
-    duration = data.get("duration", "10")
-    upscale = str(data.get("upscale", "")).lower() == "true"
-    fps60 = str(data.get("fps60", "")).lower() == "true"
-    lipsync = str(data.get("lipsync", "")).lower() == "true"
+    if not _gpu_lock.acquire(blocking=False):
+        return jsonify({"success": False, "error": "Ya hay un video generándose. Espera a que termine o cancélalo."}), 409
 
-    audio_filename = None
-    if lipsync and request.files.get("audio"):
-        audio_filename = _guardar_upload(request.files["audio"], "audio")
-    base_image_filename = None
-    if request.files.get("base_image"):
-        base_image_filename = _guardar_upload(request.files["base_image"], "img")
+    try:
+        imagen = _guardar_upload(request.files["base_image"], "img") if request.files.get("base_image") else ""
+        audio = ""
+        if str(data.get("lipsync", "")).lower() == "true" and request.files.get("audio"):
+            audio = _guardar_upload(request.files["audio"], "audio")
+        try:
+            duracion = float(data.get("duration", 5))
+        except (TypeError, ValueError):
+            duracion = 5.0
 
-    os.makedirs(VIDEOS_DIR, exist_ok=True)
-    task_id = uuid.uuid4().hex[:12]
-    out_path = os.path.join(VIDEOS_DIR, f"vid_{int(time.time())}_{task_id}.mp4")
+        os.makedirs(VIDEOS_DIR, exist_ok=True)
+        task_id = uuid.uuid4().hex[:12]
+        salida = os.path.join(VIDEOS_DIR, f"vid_{time.strftime('%Y%m%d_%H%M%S')}_{task_id}.mp4")
+        cfg = {
+            "motor": m["motor"], "carpeta_modelo": _carpeta_modelo(m), "prompt": prompt,
+            "imagen": imagen, "audio": audio, "duracion": duracion,
+            "resolucion": str(data.get("resolution", "1080p")),
+            "upscale": str(data.get("upscale", "")).lower() == "true",
+            "fps60": str(data.get("fps60", "")).lower() == "true",
+            "salida": salida, "ffmpeg": _ffmpeg(),
+        }
+        cfg_path = os.path.join(paths.TEMP_DIR, f"video_{task_id}.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False)
+        with _tareas_lock:
+            tareas_video[task_id] = {"estado": "en_curso", "progreso": 0, "paso": 1,
+                                     "mensaje": "Iniciando motor de video...", "modelo": m["name"]}
+        threading.Thread(target=_ejecutar_worker, args=(task_id, motor, cfg_path), daemon=True).start()
+    except Exception as e:
+        _gpu_lock.release()
+        return jsonify({"success": False, "error": str(e)}), 500
 
-    ops = []
-    if upscale: ops.append("Upscale 4K")
-    if fps60: ops.append("60FPS")
-    if lipsync:
-        ops.append("Lip-Sync")
-        if audio_filename: ops.append(f"(Audio: {audio_filename})")
-    if base_image_filename: ops.append(f"(Img: {base_image_filename})")
-    ops_str = f" con {', '.join(ops)}" if ops else ""
-
-    with _tareas_lock:
-        tareas_video[task_id] = {"estado": "en_curso"}
-    threading.Thread(target=simulate_generation, args=(task_id, prompt, out_path), daemon=True).start()
-
-    return jsonify({
-        "success": True,
-        "task_id": task_id,
-        "mensaje": f"Generando video ({duration}s, {resolution}{ops_str}) para: {prompt}",
-        "estado": "pendiente",
-    })
+    return jsonify({"success": True, "task_id": task_id, "estado": "en_curso",
+                    "mensaje": f"Generando video de {duracion:.0f}s con {m['name']}..."})
 
 
 @ia_bp.route('/tarea_video/<task_id>', methods=['GET'])
 def estado_tarea_video(task_id):
     with _tareas_lock:
-        t = dict(tareas_video.get(task_id, {}))
+        t = {k: v for k, v in tareas_video.get(task_id, {}).items() if k != "proceso"}
     if not t:
         return jsonify({"success": False, "error": "Tarea no encontrada"}), 404
     return jsonify({"success": True, **t})
+
+
+@ia_bp.route('/cancelar_video/<task_id>', methods=['POST'])
+def cancelar_video(task_id):
+    with _tareas_lock:
+        t = tareas_video.get(task_id)
+        proc = t.get("proceso") if t else None
+        if t:
+            t["cancelada"] = True
+    if not t:
+        return jsonify({"success": False, "error": "Tarea no encontrada"}), 404
+    winproc.matar_arbol(proc)
+    return jsonify({"success": True})
 
 
 @ia_bp.route('/historial', methods=['GET'])

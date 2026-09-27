@@ -46,6 +46,15 @@
                             <option value="">Ningún modelo instalado</option>
                         </select>
                     </div>
+
+                    <div class="ai-feature" style="margin-top: 20px;">
+                        <div class="ai-feature-title" style="margin-bottom: 8px;">Motor de Video (GPU)</div>
+                        <div id="estado-motor-video" style="font-size: 0.8rem; color: #94a3b8; line-height: 1.5;">Comprobando...</div>
+                        <button onclick="comprobarMotorVideo(true)"
+                            style="margin-top: 10px; width: 100%; padding: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); color: #fff; border-radius: 8px; cursor: pointer; font-family: 'Outfit';">
+                            <i class="ph-bold ph-arrows-clockwise"></i> Comprobar motor
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -359,22 +368,22 @@
             
             <div class="timeline-step" id="step-1" style="display: flex; gap: 15px; align-items: center; position: relative; z-index: 2;">
                 <div class="step-icon" style="width: 24px; height: 24px; border-radius: 50%; background: #334155; border: 2px solid #0f172a; display: flex; justify-content: center; align-items: center; transition: 0.3s;"><i class="ph-bold ph-text-aa" style="color: transparent; font-size: 12px;"></i></div>
-                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Mejorando el Prompt</div>
+                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Cargando modelo en la GPU</div>
             </div>
             
             <div class="timeline-step" id="step-2" style="display: flex; gap: 15px; align-items: center; position: relative; z-index: 2;">
                 <div class="step-icon" style="width: 24px; height: 24px; border-radius: 50%; background: #334155; border: 2px solid #0f172a; display: flex; justify-content: center; align-items: center; transition: 0.3s;"><i class="ph-bold ph-image" style="color: transparent; font-size: 12px;"></i></div>
-                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Generando Escenas Base</div>
+                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Generando el video</div>
             </div>
             
             <div class="timeline-step" id="step-3" style="display: flex; gap: 15px; align-items: center; position: relative; z-index: 2;">
                 <div class="step-icon" style="width: 24px; height: 24px; border-radius: 50%; background: #334155; border: 2px solid #0f172a; display: flex; justify-content: center; align-items: center; transition: 0.3s;"><i class="ph-bold ph-video-camera" style="color: transparent; font-size: 12px;"></i></div>
-                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Animando con IA</div>
+                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Uniendo segmentos</div>
             </div>
             
             <div class="timeline-step" id="step-4" style="display: flex; gap: 15px; align-items: center; position: relative; z-index: 2;">
                 <div class="step-icon" style="width: 24px; height: 24px; border-radius: 50%; background: #334155; border: 2px solid #0f172a; display: flex; justify-content: center; align-items: center; transition: 0.3s;"><i class="ph-bold ph-magic-wand" style="color: transparent; font-size: 12px;"></i></div>
-                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Aplicando Upscale & Pulido</div>
+                <div class="step-text" style="color: #94a3b8; font-weight: bold; transition: 0.3s;">Upscale, 60 FPS y audio</div>
             </div>
         </div>
         
@@ -382,5 +391,12 @@
             <div id="timeline-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #00f2fe, #a855f7); transition: width 0.5s ease-out;"></div>
         </div>
         <p id="timeline-status-text" style="color: #94a3b8; font-size: 0.8rem; margin-top: 10px;">Iniciando proceso...</p>
+        <p id="timeline-avisos" style="color: #fbbf24; font-size: 0.75rem; margin-top: 8px; display: none;"></p>
+        <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+            <button id="btn-cancelar-video" onclick="cancelarVideoActual()"
+                style="padding: 8px 18px; background: rgba(255,77,95,0.15); border: 1px solid #ff4d5f; color: #ff4d5f; border-radius: 8px; cursor: pointer; font-family: 'Outfit';">Cancelar</button>
+            <button id="btn-cerrar-timeline" onclick="cerrarTimelineVideo()"
+                style="padding: 8px 18px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 8px; cursor: pointer; font-family: 'Outfit';">Seguir en segundo plano</button>
+        </div>
     </div>
 </div>
