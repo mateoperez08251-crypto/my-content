@@ -885,8 +885,17 @@ def _ejecutar_worker(task_id, motor, cfg_path):
                 if t.get("cancelada"):
                     t.update(estado="cancelada", error="Generación cancelada.")
                 else:
-                    detalle = " | ".join(ultimas[-3:])
-                    t.update(estado="error", error=f"El motor de video se cerró (código {codigo}). {detalle}".strip())
+                    texto = " ".join(ultimas).lower()
+                    if "memory allocation" in texto or "memoryerror" in texto or codigo in (3221226505, 3221225495):
+                        msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Cierra otros programas, "
+                               "vuelve a ejecutar 'instalar_motor_video.bat' (activa el modo de bajo consumo) "
+                               "y aumenta la memoria virtual de Windows a 32 GB o más.")
+                    elif codigo == 3221225477:
+                        msg = "El motor de video falló (acceso a memoria). Actualiza los drivers de NVIDIA y reintenta."
+                    else:
+                        detalle = " | ".join(l for l in ultimas[-3:] if "Loading" not in l)
+                        msg = f"El motor de video se cerró (código {codigo}). {detalle}".strip()
+                    t.update(estado="error", error=msg)
     except Exception as e:
         _set_tarea(task_id, estado="error", error=str(e))
     finally:
