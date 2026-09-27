@@ -438,6 +438,15 @@ async function generar() {
       $("descargar").innerHTML = "📁 Abrir ubicación";
       $("info-resultado").textContent =
         `${dato.archivo} · ${dato.duracion} s · generado en ${dato.segundos} s`;
+      const btnSrt = $("descargar-srt");
+      if (btnSrt) {
+        if (dato.srt) {
+          btnSrt.href = `/api/salidas/${encodeURIComponent(dato.archivo)}/srt`;
+          btnSrt.classList.remove("oculto");
+        } else {
+          btnSrt.classList.add("oculto");
+        }
+      }
       $("resultado").classList.remove("oculto");
       $("reproductor").play().catch(() => { /* autoplay bloqueado */ });
       cerrarFlujo();
@@ -495,6 +504,7 @@ async function cargarHistorial() {
       <div class="item-cabecera">
         <span>${s.fecha.replace("T", " ")} · ${s.duracion} s</span>
         <span>
+          ${s.srt ? `<a class="icono-btn" href="/api/salidas/${encodeURIComponent(s.archivo)}/srt" download title="Descargar subtítulos SRT">CC</a>` : ""}
           <button class="icono-btn abrir-carpeta" data-archivo="${s.archivo}" title="Abrir ubicación de archivo">📁</button>
           <button class="icono-btn borrar" data-archivo="${s.archivo}" title="Eliminar">✕</button>
         </span>
