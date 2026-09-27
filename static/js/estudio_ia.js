@@ -57,10 +57,81 @@ window.switchEstudioView = function(viewId) {
     });
 }
 
+// Modo del Estudio: video, imágenes o audio -> imágenes (muestra solo las opciones que aplican)
+window.cambiarModoEstudio = function (modo) {
+    const esVideo = modo === 'video';
+    const mostrar = (id, si) => { const el = document.getElementById(id); if (el) el.style.display = si ? 'block' : 'none'; };
+    mostrar('opciones-imagen', modo === 'imagen');
+    mostrar('opciones-audio-img', modo === 'audio_imagenes');
+    ['select-duration-gen', 'toggle-upscale-gen', 'toggle-60fps-gen', 'toggle-lipsync-gen', 'select-resolution-gen'].forEach(id => {
+        const el = document.getElementById(id);
+        const caja = el && el.closest('.ai-feature');
+        if (caja) caja.style.display = esVideo ? '' : 'none';
+    });
+    const prompt = document.getElementById('prompt-input-gen');
+    if (prompt) prompt.placeholder = modo === 'audio_imagenes'
+        ? 'Estilo visual (opcional). Ej: acuarela de cuento infantil, colores pastel...'
+        : (modo === 'imagen' ? 'Describe la imagen que quieres...' : 'Escribe aquí tu idea básica y deja que la IA la convierta en un prompt detallado...');
+    const btn = document.getElementById('btn-process-gen');
+    if (btn && !btn.disabled) btn.innerHTML = textoBotonGenerar();
+};
+
+function textoBotonGenerar() {
+    const modo = document.getElementById('select-modo-gen')?.value || 'video';
+    if (modo === 'imagen') return '<i class="ph-fill ph-image"></i> Generar Imágenes';
+    if (modo === 'audio_imagenes') return '<i class="ph-fill ph-microphone"></i> Crear Imágenes desde el Audio';
+    return "Generar Video Ahora";
+}
+
+function generarImagenesEstudio(modo) {
+    const modelId = document.getElementById('select-active-model')?.value || '';
+    const info = (window.modelosPorId || {})[modelId];
+    if (!modelId || !info || info.type !== 't2i') {
+        mostrarToast("Modelo de imagen", "Elige un modelo de IMAGEN en 'Modelo Activo' (Z-Image-Turbo o Qwen-Image-2512). Descárgalo en el Gestor de Modelos.", true);
+        return;
+    }
+    const prompt = document.getElementById('prompt-input-gen').value.trim();
+    const fd = new FormData();
+    fd.append('modo', modo);
+    fd.append('model_id', modelId);
+    fd.append('prompt', prompt);
+    fd.append('formato', document.getElementById('select-formato-gen')?.value || 'vertical');
+    fd.append('velocidad', document.getElementById('select-velocidad-gen')?.value || 'calidad');
+    if (modo === 'imagen') {
+        if (!prompt) { mostrarToast("Falta el texto", "Describe la imagen que quieres.", true); return; }
+        fd.append('cantidad', document.getElementById('select-cantidad-img')?.value || '1');
+    } else {
+        const audio = document.getElementById('audio-secuencia-file')?.files[0];
+        if (!audio) { mostrarToast("Falta el audio", "Selecciona el audio con el que se crearán las imágenes.", true); return; }
+        fd.append('audio', audio);
+        fd.append('escena_seg', document.getElementById('select-escena-seg')?.value || '5');
+        fd.append('transcripcion', document.getElementById('select-transcripcion-img')?.value || 'local');
+    }
+    ponerBotonGenerando(true);
+    fetch('/api/ia/generar_imagenes', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                ponerBotonGenerando(false);
+                mostrarToast("No se pudo generar", data.error || "Error desconocido", true);
+                return;
+            }
+            window.videoTareaActual = data.task_id;
+            abrirTimelineVideo();
+            esperarTareaVideo(data.task_id);
+        })
+        .catch(() => {
+            ponerBotonGenerando(false);
+            mostrarToast("Error de conexión", "No se pudo comunicar con el backend.", true);
+        });
+}
+
 function initEstudioEventHandlers() {
     const btnProcessGen = document.getElementById('btn-process-gen');
     if (btnProcessGen) {
         btnProcessGen.addEventListener('click', () => {
+            const modoGen = document.getElementById('select-modo-gen')?.value || 'video';
+            if (modoGen !== 'video') { generarImagenesEstudio(modoGen); return; }
             const promptValue = document.getElementById('prompt-input-gen').value.trim();
             if (!promptValue) {
                 mostrarToast("Falta el Prompt", "Por favor ingresa un Prompt de Video antes de generar.", true);
@@ -489,8 +560,10 @@ function renderizarModelos(modelos) {
         groupT2I.label = "Generación de Imágenes";
     }
 
+    window.modelosPorId = {};
     modelos.forEach(m => {
-        if (selectActivo && m.installed && m.type !== "other") {
+        window.modelosPorId[m.id] = m;
+        if (selectActivo && m.installed && m.type !== "other" && m.type !== "stt" && m.type !== "tts") {
             modelosInstalados++;
             const opt = document.createElement('option');
             opt.value = m.id;
@@ -760,8 +833,8 @@ function ponerBotonGenerando(activo) {
     btn.style.opacity = activo ? "0.8" : "1";
     btn.style.boxShadow = activo ? "0 0 20px var(--accent-primary)" : "none";
     btn.innerHTML = activo
-        ? '<i class="ph-bold ph-spinner ph-spin"></i> Generando video...'
-        : "Generar Video Ahora";
+        ? '<i class="ph-bold ph-spinner ph-spin"></i> Generando...'
+        : textoBotonGenerar();
 }
 
 function abrirTimelineVideo() {
@@ -829,7 +902,11 @@ function esperarTareaVideo(taskId, intentos) {
             actualizarTimeline(t);
             if (t.estado === 'terminado') {
                 finTimeline('Ver mis videos');
-                mostrarToast("¡Video Completado!", "Tu video está en 'Mis Videos Generados'.", false);
+                const modoFin = document.getElementById('select-modo-gen')?.value || 'video';
+                mostrarToast(modoFin === 'imagen' ? "¡Imágenes listas!" : "¡Video Completado!",
+                    modoFin === 'imagen' ? "Tus imágenes están en 'Mis Videos Generados' → Imágenes."
+                        : (modoFin === 'audio_imagenes' ? "El video está en 'Mis Videos Generados' y las imágenes en la pestaña Imágenes."
+                            : "Tu video está en 'Mis Videos Generados'."), false);
                 cargarHistorial();
                 const cerrar = document.getElementById('btn-cerrar-timeline');
                 if (cerrar) cerrar.onclick = () => { cerrarTimelineVideo(); switchEstudioView('edicion'); cerrar.onclick = cerrarTimelineVideo; };

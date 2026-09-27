@@ -1115,9 +1115,26 @@ def _dialogo_nativo(carpeta=False, filtro=None):
             root.destroy()
 
 
+@app.route("/api/subir_archivo", methods=["POST"])
+def subir_archivo():
+    """Modo servidor (RunPod): no hay explorador de archivos, el navegador sube el archivo."""
+    archivo = request.files.get("archivo")
+    if not archivo or not archivo.filename:
+        return jsonify({"success": False, "error": "No llegó ningún archivo."}), 400
+    from werkzeug.utils import secure_filename
+    carpeta = paths.data_path("subidas")
+    os.makedirs(carpeta, exist_ok=True)
+    nombre = secure_filename(archivo.filename) or "archivo"
+    destino = os.path.join(carpeta, f"{int(time.time())}_{nombre}")
+    archivo.save(destino)
+    return jsonify({"success": True, "path": destino})
+
+
 @app.route("/api/browse", methods=["GET"])
 def browse():
     type_file = request.args.get('type')
+    if MODO_SERVIDOR:  # sin pantalla: el navegador elige y sube el archivo
+        return jsonify({"path": "", "subir": True})
     if type_file in ('video', 'media'):
         filtro = _FILTROS["media"]
     elif type_file in ('audio', 'bg_music_smart'):
@@ -1132,6 +1149,9 @@ def browse():
 
 @app.route("/api/select-folder", methods=["GET"])
 def select_folder():
+    if MODO_SERVIDOR:
+        return jsonify({"success": False, "error": "En el servidor los resultados se guardan en su carpeta; "
+                                                   "descárgalos desde Estudio IA → Mis Videos Generados."})
     try:
         folder_path = _dialogo_nativo(carpeta=True)
     except Exception as e:
@@ -1369,7 +1389,26 @@ def run_smart_split_thread(data):
             "show_progress_bar": data.get('show_progress_bar', True),
             "motor_ia": data.get('motor_ia', 'pro'),
             "emojis": data.get('emojis', True),
+            "titulo_en_video": bool(data.get('titulo_en_video', False)),
+            "transcripcion": "local" if data.get('transcripcion') == "local" else "groq",
+            "whisper_local": str(data.get('whisper_local', 'auto')),
         }
+        if cfg_datos["transcripcion"] == "local":
+            # Whisper local corre con el Python del motor de video (torch + GPU)
+            from modulo_ia import _motor
+            motor_ia_local = _motor()
+            if not motor_ia_local.get("listo") or not motor_ia_local.get("python_cmd"):
+                raise RuntimeError("La transcripción local necesita el motor de video instalado y con GPU "
+                                   "(ver 'Estado del motor' en el Estudio IA). Elige Groq o instala el motor.")
+            from modulo_ia import whisper_instalado
+            carpeta_whisper = whisper_instalado(cfg_datos["whisper_local"])
+            if not carpeta_whisper:
+                raise RuntimeError("Para transcribir en tu GPU descarga un modelo Whisper en el Gestor de "
+                                   "Modelos (Estudio IA): 'Whisper large-v3' o 'Whisper large-v3-turbo'.")
+            cfg_datos["whisper_local"] = carpeta_whisper
+            cfg_datos["python_motor"] = motor_ia_local["python_cmd"]
+            cfg_datos["script_local"] = os.path.join(os.path.dirname(motor_ia_local["worker"]),
+                                                     "transcripcion_local.py")
         log(f"Iniciando procesamiento de Smart Split (Escala: {cfg_datos['subtitle_scale']}%, "
             f"Estilo: {cfg_datos['subtitle_style']})...")
         log_telemetry("Iniciando Smart Split", f"Origen: {source}")

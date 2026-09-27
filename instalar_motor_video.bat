@@ -205,6 +205,11 @@ set /p TORCH_VER=<"%WHEELS%\torch_version.txt"
 "%VPY%" -m pip install demucs soundfile "torch==%TORCH_VER%" --extra-index-url https://download.pytorch.org/whl/cu126 --retries 10 --timeout 120
 if errorlevel 1 echo  [!] Demucs no se pudo instalar: "Separar Musica" no funcionara. El video si.
 
+:: --- VoxCPM2 (clonador de voz de maxima calidad). Opcional ---
+echo  [*] Instalando VoxCPM2 para el clonador de voz (opcional)...
+"%VPY%" "%APP_DIR%tts_worker.py" --instalar
+if errorlevel 1 echo  [!] VoxCPM2 no se pudo instalar ahora: el clonador lo instalara al generar.
+
 echo.
 echo  [*] Comprobando...
 "%VPY%" "%APP_DIR%video_worker.py" --diagnostico

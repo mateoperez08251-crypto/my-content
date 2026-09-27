@@ -423,6 +423,9 @@ def generar_prompt():
 # Antes se descargaban archivos sueltos (formato ComfyUI) que la app no podía usar.
 # Tamaños verificados en HuggingFace.
 # ---------------------------------------------------------------------------
+PATRONES_WHISPER = ["config.json", "generation_config.json", "model.safetensors", "preprocessor_config.json",
+                    "tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "normalizer.json",
+                    "added_tokens.json", "special_tokens_map.json"]
 PATRONES_DIFFUSERS = ["model_index.json", "transformer/*", "vae/*", "text_encoder/*",
                       "text_encoder_2/*", "tokenizer/*", "tokenizer_2/*", "scheduler/*",
                       "image_encoder/*", "image_processor/*"]
@@ -517,6 +520,65 @@ AVAILABLE_MODELS = [
         "size_gb": 39.0,
         "vram_gb": 24,
         "repo": "hunyuanvideo-community/HunyuanVideo",
+    },
+    {
+        "id": "zimage_turbo",
+        "name": "Z-Image-Turbo (imágenes, 8 pasos) - rápido",
+        "type": "t2i",
+        "motor": "zimage",
+        "description": "Imágenes fotorrealistas en segundos (6B, 8 pasos). Apache 2.0: uso comercial libre. "
+                       "Cabe en GPUs de 16 GB+ (A40, RTX 5000, 4090...).",
+        "size_gb": 30.6,
+        "vram_gb": 16,
+        "repo": "Tongyi-MAI/Z-Image-Turbo",
+    },
+    {
+        "id": "qwen_image_2512",
+        "name": "Qwen-Image-2512 (imágenes) - máxima calidad",
+        "type": "t2i",
+        "motor": "qwenimage",
+        "description": "Calidad top y muy bueno escribiendo TEXTO dentro de la imagen (20B, 50 pasos). "
+                       "Apache 2.0. Recomendado: H100 80 GB (en 48 GB va más lento).",
+        "size_gb": 53.7,
+        "vram_gb": 44,
+        "repo": "Qwen/Qwen-Image-2512",
+    },
+    {
+        "id": "whisper_large_v3",
+        "name": "Whisper large-v3 (transcripción local) - el más preciso",
+        "type": "stt",
+        "motor": "whisper",
+        "description": "Transcribe en tu GPU para Smart Split y Audio a imágenes, sin Groq. Ideal para RTX 5000, "
+                       "A40, 4090, H100 (16 GB+).",
+        "size_gb": 3.0,
+        "vram_gb": 6,
+        "repo": "openai/whisper-large-v3",
+        "patrones": PATRONES_WHISPER,
+    },
+    {
+        "id": "whisper_large_v3_turbo",
+        "name": "Whisper large-v3-turbo (transcripción local) - rápido",
+        "type": "stt",
+        "motor": "whisper",
+        "description": "Casi igual de preciso y ~5x más rápido. Para gráficas de 8-12 GB (TITAN Xp, RTX 3060...).",
+        "size_gb": 1.6,
+        "vram_gb": 4,
+        "repo": "openai/whisper-large-v3-turbo",
+        "patrones": PATRONES_WHISPER,
+    },
+    {
+        "id": "voxcpm2",
+        "name": "VoxCPM2 2B (clonador de voz) - máxima calidad",
+        "type": "tts",
+        "motor": "voxcpm2",
+        "description": "Clona voces con audio de 48 kHz en 30 idiomas (español incluido). Con la transcripción "
+                       "de la referencia copia timbre, ritmo y emoción. Licencia Apache 2.0 (uso comercial). "
+                       "Se usa en el Clonador de voz.",
+        "size_gb": 5.0,
+        "vram_gb": 8,
+        "repo": "openbmb/VoxCPM2",
+        "patrones": ["config.json", "model.safetensors", "audiovae.pth", "tokenizer.json",
+                     "tokenizer_config.json", "special_tokens_map.json", "tokenization_voxcpm2.py"],
     },
     {
         "id": "director_ia_prompts",
@@ -776,13 +838,31 @@ def _lanzar_descarga(model_id):
     threading.Thread(target=real_download, args=(model_id,), daemon=True).start()
 
 
+def whisper_instalado(preferido="auto"):
+    """Carpeta del modelo Whisper descargado en el Gestor ('' si no hay ninguno).
+    auto: large-v3 si la GPU tiene 16 GB+, si no turbo (o el que esté descargado)."""
+    grande, turbo = _modelo("whisper_large_v3"), _modelo("whisper_large_v3_turbo")
+    if preferido == "large-v3":
+        orden = [grande, turbo]
+    elif preferido == "turbo":
+        orden = [turbo, grande]
+    else:
+        vram = _motor_info.get("vram_gb") or 0
+        orden = [grande, turbo] if vram >= 15.5 and _motor_info.get("formato") != "fp32" else [turbo, grande]
+    for m in orden:
+        if m and _instalado(m):
+            return _carpeta_modelo(m)
+    return ""
+
+
 def _incompatible(m):
     """Motivo por el que el modelo no sirve en la GPU detectada ('' si sirve o no se sabe)."""
     if m.get("type") == "other" or _motor_info.get("estado") != "listo":
         return ""
     gpu = _motor_info.get("gpu") or "tu GPU"
     if _motor_info.get("formato") == "fp32" and m.get("motor") in ("cogvideox", "cogvideox_i2v", "hunyuan",
-                                                                 "wan22_turbo", "ltx25", "minimax_h3"):
+                                                                 "wan22_turbo", "ltx25", "minimax_h3",
+                                                                 "zimage", "qwenimage"):
         return f"Necesita una gráfica RTX (serie 20 o más nueva). En tu {gpu} usa Wan2.1 1.3B o LTX-Video."
     vram = _motor_info.get("vram_gb") or 0
     if vram and vram + 0.5 < m.get("vram_gb", 0):
@@ -1118,39 +1198,11 @@ def generar_video():
         return jsonify({"success": False, "error": "Escribe un prompt."}), 400
 
     m = _modelo(data.get("model_id", ""))
-    if not m or m.get("type") == "other":
+    if not m or m.get("type") in ("other", "stt", "tts", "t2i"):
         return jsonify({"success": False, "error": "Selecciona un modelo de video en 'Modelo Activo'."}), 400
-    if not _instalado(m):
-        return jsonify({"success": False, "error": f"{m['name']} no está descargado. Ábrelo en el Gestor de Modelos."}), 400
-
-    motor = _motor()
-    if motor.get("estado") == "detectando":
-        return jsonify({"success": False, "error": "Comprobando el motor de video... espera unos segundos y vuelve a intentarlo."}), 409
-    if motor.get("estado") == "no_instalado":
-        return jsonify({"success": False, "error": "Falta el motor de video (Python con torch + diffusers). "
-                                                    f"Ejecuta '{INSTALADOR}' en la carpeta de la app y reinicia."}), 400
-    if motor.get("estado") == "error":
-        return jsonify({"success": False, "error": f"El motor de video no funciona con tu GPU: {motor.get('error')}. "
-                                                    f"Vuelve a ejecutar '{INSTALADOR}'."}), 400
-    if motor.get("estado") == "sin_gpu":
-        return jsonify({"success": False, "error": "El motor está instalado pero no ve una GPU NVIDIA con CUDA. "
-                                                    "Actualiza los drivers de NVIDIA o reinstala el motor."}), 400
-    if motor.get("vram_gb") and motor["vram_gb"] + 0.5 < m.get("vram_gb", 0):
-        return jsonify({"success": False, "error": f"{m['name']} necesita ~{m['vram_gb']} GB de VRAM y tu GPU tiene "
-                                                    f"{motor['vram_gb']} GB. Usa Wan2.1 1.3B o CogVideoX."}), 400
-
-    if _incompatible(m):
-        return jsonify({"success": False, "error": f"{m['name']}: {_incompatible(m)}"}), 400
-
-    # Protección contra 0xc000012d (sin memoria de commit en Windows).
-    mem = estado_memoria()
-    if mem["commit_libre_gb"] < MIN_COMMIT_GB:
-        return jsonify({"success": False, "error":
-                        f"Memoria insuficiente: quedan {mem['commit_libre_gb']:.1f} GB libres (RAM + paginación). "
-                        "Cierra programas (Ollama, navegador) o aumenta la memoria virtual de Windows."}), 503
-
-    if not _gpu_lock.acquire(blocking=False):
-        return jsonify({"success": False, "error": "Ya hay un video generándose. Espera a que termine o cancélalo."}), 409
+    motor, error = _comprobar_generacion(m)
+    if error:
+        return error
 
     try:
         imagen = _guardar_upload(request.files["base_image"], "img") if request.files.get("base_image") else ""
@@ -1161,10 +1213,7 @@ def generar_video():
             duracion = float(data.get("duration", 5))
         except (TypeError, ValueError):
             duracion = 5.0
-
-        os.makedirs(VIDEOS_DIR, exist_ok=True)
         task_id = uuid.uuid4().hex[:12]
-        salida = os.path.join(VIDEOS_DIR, f"vid_{time.strftime('%Y%m%d_%H%M%S')}_{task_id}.mp4")
         cfg = {
             "motor": m["motor"], "carpeta_modelo": _carpeta_modelo(m), "prompt": prompt,
             "imagen": imagen, "audio": audio, "duracion": duracion,
@@ -1173,21 +1222,125 @@ def generar_video():
             "formato": str(data.get("formato", "vertical")),
             "upscale": str(data.get("upscale", "")).lower() == "true",
             "fps60": str(data.get("fps60", "")).lower() == "true",
-            "salida": salida, "ffmpeg": _ffmpeg(),
+            "salida": _salida_video(task_id), "ffmpeg": _ffmpeg(),
         }
-        cfg_path = os.path.join(paths.TEMP_DIR, f"video_{task_id}.json")
-        with open(cfg_path, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False)
-        with _tareas_lock:
-            tareas_video[task_id] = {"estado": "en_curso", "progreso": 0, "paso": 1,
-                                     "mensaje": "Iniciando motor de video...", "modelo": m["name"]}
-        threading.Thread(target=_ejecutar_worker, args=(task_id, motor, cfg_path), daemon=True).start()
+        _lanzar_tarea(task_id, m, motor, cfg)
     except Exception as e:
         _gpu_lock.release()
         return jsonify({"success": False, "error": str(e)}), 500
-
     return jsonify({"success": True, "task_id": task_id, "estado": "en_curso",
-                    "mensaje": f"Generando video de {duracion:.0f}s con {m['name']}..."})
+                    "mensaje": f"Generando con {m['name']}..."})
+
+
+def _salida_video(task_id):
+    os.makedirs(VIDEOS_DIR, exist_ok=True)
+    return os.path.join(VIDEOS_DIR, f"vid_{time.strftime('%Y%m%d_%H%M%S')}_{task_id}.mp4")
+
+
+def _lanzar_tarea(task_id, m, motor, cfg):
+    """Guarda la config y lanza el motor en un hilo (el _gpu_lock ya está tomado)."""
+    cfg_path = os.path.join(paths.TEMP_DIR, f"video_{task_id}.json")
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False)
+    with _tareas_lock:
+        tareas_video[task_id] = {"estado": "en_curso", "progreso": 0, "paso": 1,
+                                 "mensaje": "Iniciando motor de IA...", "modelo": m["name"]}
+    threading.Thread(target=_ejecutar_worker, args=(task_id, motor, cfg_path), daemon=True).start()
+
+
+def _comprobar_generacion(m):
+    """Comprobaciones comunes (modelo, motor, GPU, memoria) y toma el _gpu_lock.
+    Devuelve (motor, None) si se puede generar o (None, respuesta_de_error)."""
+    if not _instalado(m):
+        return None, (jsonify({"success": False, "error": f"{m['name']} no está descargado. Ábrelo en el Gestor de Modelos."}), 400)
+
+    motor = _motor()
+    if motor.get("estado") == "detectando":
+        return None, (jsonify({"success": False, "error": "Comprobando el motor de video... espera unos segundos y vuelve a intentarlo."}), 409)
+    if motor.get("estado") == "no_instalado":
+        return None, (jsonify({"success": False, "error": "Falta el motor de video (Python con torch + diffusers). "
+                                                    f"Ejecuta '{INSTALADOR}' en la carpeta de la app y reinicia."}), 400)
+    if motor.get("estado") == "error":
+        return None, (jsonify({"success": False, "error": f"El motor de video no funciona con tu GPU: {motor.get('error')}. "
+                                                    f"Vuelve a ejecutar '{INSTALADOR}'."}), 400)
+    if motor.get("estado") == "sin_gpu":
+        return None, (jsonify({"success": False, "error": "El motor está instalado pero no ve una GPU NVIDIA con CUDA. "
+                                                    "Actualiza los drivers de NVIDIA o reinstala el motor."}), 400)
+    if motor.get("vram_gb") and motor["vram_gb"] + 0.5 < m.get("vram_gb", 0):
+        return None, (jsonify({"success": False, "error": f"{m['name']} necesita ~{m['vram_gb']} GB de VRAM y tu GPU tiene "
+                                                    f"{motor['vram_gb']} GB. Usa Wan2.1 1.3B o CogVideoX."}), 400)
+
+    if _incompatible(m):
+        return None, (jsonify({"success": False, "error": f"{m['name']}: {_incompatible(m)}"}), 400)
+
+    # Protección contra 0xc000012d (sin memoria de commit en Windows).
+    mem = estado_memoria()
+    if mem["commit_libre_gb"] < MIN_COMMIT_GB:
+        return None, (jsonify({"success": False, "error":
+                        f"Memoria insuficiente: quedan {mem['commit_libre_gb']:.1f} GB libres (RAM + paginación). "
+                        "Cierra programas (Ollama, navegador) o aumenta la memoria virtual de Windows."}), 503)
+
+    if not _gpu_lock.acquire(blocking=False):
+        return None, (jsonify({"success": False, "error": "Ya hay una generación en curso. Espera a que termine o cancélala."}), 409)
+    return motor, None
+
+
+
+@ia_bp.route('/generar_imagenes', methods=['POST'])
+def generar_imagenes():
+    """Texto -> imágenes, o AUDIO -> imágenes secuenciales (+ video con el audio)."""
+    data = (request.get_json(silent=True) if request.is_json else request.form) or {}
+    modo = "audio_imagenes" if data.get("modo") == "audio_imagenes" else "imagen"
+    prompt = str(data.get("prompt", "")).strip()
+    if modo == "imagen" and not prompt:
+        return jsonify({"success": False, "error": "Escribe qué imagen quieres."}), 400
+    if modo == "audio_imagenes" and not request.files.get("audio"):
+        return jsonify({"success": False, "error": "Sube el audio (MP3/WAV/M4A) para crear las imágenes."}), 400
+    m = _modelo(data.get("model_id", ""))
+    if not m or m.get("type") != "t2i":
+        return jsonify({"success": False, "error": "Elige un modelo de IMAGEN en 'Modelo Activo' "
+                                                   "(Z-Image-Turbo o Qwen-Image-2512)."}), 400
+    transcripcion = "local" if data.get("transcripcion") == "local" else "groq"
+    whisper = ""
+    groq_key = ""
+    try:
+        from app_secrets import get_secret
+        groq_key = get_secret("groq", "api_key", env="GROQ_API_KEY") or ""
+    except Exception:
+        pass
+    if modo == "audio_imagenes":
+        if transcripcion == "local":
+            whisper = whisper_instalado(str(data.get("whisper_local", "auto")))
+            if not whisper:
+                return jsonify({"success": False, "error": "Para transcribir en tu GPU descarga 'Whisper large-v3' "
+                                                           "o 'Whisper large-v3-turbo' en el Gestor de Modelos."}), 400
+        elif not groq_key:
+            return jsonify({"success": False, "error": "Falta la API key de Groq para transcribir. Ponla en "
+                                                       "secrets.json o elige transcripción Local (Whisper)."}), 400
+    motor, error = _comprobar_generacion(m)
+    if error:
+        return error
+    try:
+        task_id = uuid.uuid4().hex[:12]
+        audio = _guardar_upload(request.files["audio"], "audio") if modo == "audio_imagenes" else ""
+        try:
+            escena = float(data.get("escena_seg", 5))
+        except (TypeError, ValueError):
+            escena = 5.0
+        cfg = {
+            "tarea": modo, "motor": m["motor"], "carpeta_modelo": _carpeta_modelo(m), "prompt": prompt,
+            "formato": str(data.get("formato", "vertical")), "velocidad": str(data.get("velocidad", "calidad")),
+            "cantidad": int(data.get("cantidad", 1) or 1), "audio": audio, "escena_seg": escena,
+            "transcripcion": transcripcion, "whisper_local": whisper, "idioma": str(data.get("idioma", "es")),
+            "groq_key": groq_key, "carpeta_imagenes": ASSETS_DIR, "salida": _salida_video(task_id),
+            "ffmpeg": _ffmpeg(),
+        }
+        _lanzar_tarea(task_id, m, motor, cfg)
+    except Exception as e:
+        _gpu_lock.release()
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, "task_id": task_id, "estado": "en_curso",
+                    "mensaje": f"Generando con {m['name']}..."})
 
 
 @ia_bp.route('/tarea_video/<task_id>', methods=['GET'])
@@ -1227,9 +1380,12 @@ def get_assets_library():
     Antes solo listaba los subidos: los videos generados no aparecían en ningún lado."""
     os.makedirs(ASSETS_DIR, exist_ok=True)
     os.makedirs(VIDEOS_DIR, exist_ok=True)
-    items = [{"url": f"/api/ia/video/{f}", "name": f, "type": "video", "origen": "generado"}
-             for f in sorted(os.listdir(VIDEOS_DIR), reverse=True)
-             if f.startswith("vid_") and f.endswith(".mp4")]
+    # generados (vid_*) y resultados del Smart Split / editor que viven en la misma carpeta
+    items = [{"url": f"/api/ia/video/{f}", "name": f, "type": "video",
+              "origen": "generado" if f.startswith("vid_") else "editado"}
+             for f in sorted(os.listdir(VIDEOS_DIR), key=lambda x: os.path.getmtime(os.path.join(VIDEOS_DIR, x)),
+                             reverse=True)
+             if f.endswith(".mp4") and ".crudo." not in f and os.path.isfile(os.path.join(VIDEOS_DIR, f))]
     for f in sorted(os.listdir(ASSETS_DIR), reverse=True):
         low = f.lower()
         if low.endswith(('.mp4', '.webm', '.mov')):

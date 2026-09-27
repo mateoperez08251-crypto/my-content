@@ -14,17 +14,37 @@
     <span class="logo">🎙️</span>
     <div>
       <h1>Clonador de voz local</h1>
-      <p class="sub">Qwen3-TTS 1.7B · llama.cpp · CPU y GPU · sin conexión</p>
+      <p class="sub">Qwen3-TTS 1.7B · VoxCPM2 2B · CPU y GPU · sin conexión</p>
     </div>
   </div>
   <div id="pastillas" class="pastillas"></div>
+  <button id="btn-modelos" class="btn btn-sec" title="Descargar o cambiar los modelos de voz">📦 Modelos</button>
 </header>
 
 <div id="aviso" class="aviso oculto"></div>
 
 <!-- ========== Primer arranque: descarga de los modelos ========== -->
 <section id="panel-modelo" class="tarjeta panel-modelo oculto">
-  <h2>Primer arranque · descargar el modelo</h2>
+  <h2>Modelos de voz</h2>
+
+  <h3 class="sub-modelo">⭐ VoxCPM2 2B · máxima calidad (recomendado con GPU)</h3>
+  <p class="ayuda">
+    Voz a <b>48 kHz</b>, 30 idiomas (español incluido) y la clonación más fiel: si la voz de la
+    biblioteca tiene su <b>transcripción exacta</b>, copia timbre, ritmo y emoción. Usa la GPU del
+    motor de video (8 GB de VRAM o más). Licencia Apache 2.0: se puede usar en videos con
+    monetización. Ocupa ~5 GB.
+  </p>
+  <div class="acciones">
+    <button id="btn-descargar-voxcpm" class="btn btn-primario">Descargar VoxCPM2</button>
+    <button id="btn-cancelar-voxcpm" class="btn btn-peligro oculto">Cancelar</button>
+    <a class="btn btn-sec" href="https://huggingface.co/openbmb/VoxCPM2" target="_blank" rel="noopener">Ver en Hugging Face</a>
+  </div>
+  <div id="progreso-voxcpm" class="progreso oculto">
+    <div class="barra"><div id="barra-voxcpm"></div></div>
+    <span id="texto-voxcpm"></span>
+  </div>
+
+  <h3 class="sub-modelo">Qwen3-TTS 1.7B · llama.cpp (ligero, también en CPU)</h3>
   <p class="ayuda">
     La aplicación no incluye los pesos del modelo. Hacen falta <b>dos archivos</b>
     del repositorio oficial en Hugging Face: el modelo principal y su
@@ -36,7 +56,7 @@
     <label>
       <span>Modelo principal</span>
       <select id="quant-modelo"></select>
-      <small>Q4_K_M va de sobra para la mayoría de equipos</small>
+      <small>BF16 = la mejor voz (3,5 GB) · Q8_0 casi igual · Q4_K_M para equipos modestos</small>
     </label>
     <label>
       <span>Proyector / vocoder (mmproj)</span>
@@ -68,8 +88,9 @@
   <section class="tarjeta">
     <h2>1 · Voz de referencia</h2>
     <p class="ayuda">
-      Sube o graba entre 5 y 15 segundos de voz limpia. Sin referencia, el modelo
-      usa su voz por defecto.
+      Sube o graba entre 8 y 20 segundos de voz limpia (sin música ni eco) y escribe
+      su transcripción exacta: la voz sale mucho más parecida. Sin referencia, el primer
+      bloque elige la voz y el resto la mantiene.
     </p>
 
     <div class="pestanas" role="tablist">
@@ -121,6 +142,13 @@
 
     <div class="campos">
       <label>
+        <span>Motor de voz</span>
+        <select id="motor">
+          <option value="qwen3">Qwen3-TTS · llama.cpp (rápido, ligero)</option>
+          <option value="voxcpm2">VoxCPM2 · máxima calidad (GPU)</option>
+        </select>
+      </label>
+      <label>
         <span>Idioma</span>
         <select id="idioma"></select>
       </label>
@@ -134,9 +162,9 @@
       <summary>Ajustes avanzados</summary>
       <div class="campos campos-avanzados">
         <label>
-          <span>Temperatura <b id="v-temp">0.80</b></span>
-          <input id="temp" type="range" min="0.1" max="1.5" step="0.05" value="0.8">
-          <small>Baja = estable · Alta = expresiva</small>
+          <span>Temperatura <b id="v-temp">0.70</b></span>
+          <input id="temp" type="range" min="0.1" max="1.5" step="0.05" value="0.7">
+          <small>Qwen3 · baja = voz estable · alta = expresiva (más de 0.8 hace variar la voz)</small>
         </label>
         <label>
           <span>Top-P <b id="v-top_p">0.95</b></span>
@@ -151,7 +179,7 @@
         <label>
           <span>Semilla</span>
           <input id="semilla" type="number" min="-1" value="-1">
-          <small>-1 = aleatoria en cada intento</small>
+          <small>-1 = aleatoria en cada intento (la misma para todo el audio)</small>
         </label>
         <label>
           <span>Caracteres por bloque</span>
@@ -167,6 +195,16 @@
           <span>Máx. frames por bloque</span>
           <input id="max_frames" type="number" min="120" max="6000" step="60" value="1200">
           <small>12 frames = 1 segundo de audio</small>
+        </label>
+        <label>
+          <span>Pasos VoxCPM2</span>
+          <input id="voxcpm_pasos" type="number" min="4" max="30" value="10">
+          <small>10 normal · 16-20 más calidad (más lento)</small>
+        </label>
+        <label>
+          <span>Guía VoxCPM2 <b id="v-voxcpm_cfg">2.0</b></span>
+          <input id="voxcpm_cfg" type="range" min="1" max="3.5" step="0.1" value="2.0">
+          <small>Más alta = más fiel a la voz y al texto</small>
         </label>
         <label>
           <span>Hilos de CPU</span>

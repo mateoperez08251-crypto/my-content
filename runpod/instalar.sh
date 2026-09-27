@@ -5,7 +5,8 @@
 #
 #  Uso:   bash runpod/instalar.sh                      (solo instala)
 #         bash runpod/instalar.sh wan21_t2v_13b        (instala y baja el modelo)
-#  Modelos: ltx25_distilled minimax_h3 wan22_ti2v_5b_turbo wan21_t2v_13b  ltx_video  cogvideox_5b  cogvideox_5b_i2v  hunyuan_video
+#  Modelos: ltx25_distilled minimax_h3 wan22_ti2v_5b_turbo zimage_turbo qwen_image_2512 voxcpm2
+#           whisper_large_v3 whisper_large_v3_turbo wan21_t2v_13b  ltx_video  cogvideox_5b  cogvideox_5b_i2v  hunyuan_video
 #
 #  Rápido a propósito (en RunPod el tiempo de instalación también se paga):
 #  - reutiliza el torch de la plantilla PyTorch (evita bajar ~2.5 GB),
@@ -159,6 +160,9 @@ instalar -r "$APP_DIR/runpod/requirements-runpod.txt" -c "$BASE/constraints.txt"
     || falla "No se pudieron instalar las dependencias."
 # Opcional: kernels de atención rápida (FlashAttention 3) para MiniMax H3 en H100/H200
 "$VPY" -m pip install -q kernels -c "$BASE/constraints.txt" 2>/dev/null || echo "[!] kernels no disponible (opcional)."
+# Clonador de voz de máxima calidad (VoxCPM2): sin tocar torch/transformers
+"$VPY" "$APP_DIR/tts_worker.py" --instalar > "$CONTENTAPP_DATA_DIR/logs/voxcpm_instalar.log" 2>&1 \
+    || echo "[!] VoxCPM2 no se pudo instalar ahora (opcional; el clonador lo reintenta al generar)."
 
 # Variables que usan iniciar.sh y la app
 cat > "$BASE/entorno.sh" <<ENVEOF

@@ -131,7 +131,19 @@ MODELOS = {
     "ltx25": {"clase": "LTX2Pipeline", "te_gb": 22.0, "params": 18.0, "vram_min": 44, "fp32": False, "ram_min": 70},
     "minimax_h3": {"clase": "MiniMaxH3ModularPipeline", "te_gb": 62.0, "params": 31.0, "vram_min": 78,
                    "fp32": False, "ram_min": 140},
+    # Imágenes (recetas oficiales de sus model cards). peso_gb: VRAM para tenerlo entero en la GPU.
+    "zimage": {"clase": "ZImagePipeline", "te_gb": 8.0, "params": 6.0, "vram_min": 14, "fp32": False,
+               "ram_min": 0, "peso_gb": 24},
+    "qwenimage": {"clase": "QwenImagePipeline", "te_gb": 15.4, "params": 20.0, "vram_min": 40, "fp32": False,
+                  "ram_min": 60, "peso_gb": 60},
 }
+
+TAMANOS_IMAGEN = {
+    "zimage": {"vertical": (864, 1536), "horizontal": (1536, 864), "cuadrado": (1024, 1024)},
+    "qwenimage": {"vertical": (928, 1664), "horizontal": (1664, 928), "cuadrado": (1328, 1328)},
+}
+NEGATIVO_QWEN = ("低分辨率，低画质，肢体畸形，手指畸形，画面过饱和，蜡像感，人脸无细节，过度光滑，画面具有AI感。"
+                 "构图混乱。文字模糊，扭曲。")
 COMPONENTES_TEXTO = ("text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2")
 
 # Velocidad: menos pasos + First Block Cache (si el primer bloque del transformer apenas
@@ -710,6 +722,8 @@ def postprocesar(entrada, salida, cfg, ffmpeg):
 
 
 def generar(cfg):
+    if cfg.get("tarea") in ("imagen", "audio_imagenes"):
+        return generar_imagenes(cfg)
     ffmpeg = cfg.get("ffmpeg") or "ffmpeg"
     motor = cfg["motor"]
     perfil = dict(PERFILES[motor])
@@ -1132,6 +1146,239 @@ def _generar_grande(cfg, motor, perfil, torch, gpu, salida, ffmpeg):
             pass
     progreso(100, 4, "¡Video listo!")
     emitir("resultado", archivo=salida, avisos=AVISOS)
+
+
+# ---------------------------------------------------------------------------
+# Imágenes: texto -> imagen y AUDIO -> imágenes secuenciales (+ video con el audio)
+# ---------------------------------------------------------------------------
+def _pipe_imagen(motor, carpeta, torch, gpu):
+    clave = ("img", motor, carpeta)
+    if _persistente() and PERSISTENTE["clave"] not in (None, clave):
+        _vaciar_persistente(torch)
+    if _persistente() and PERSISTENTE["clave"] == clave and PERSISTENTE["pipe"] is not None:
+        progreso(20, 1, "Modelo de imagen ya cargado.")
+        return PERSISTENTE["pipe"]
+    import diffusers
+    info = MODELOS[motor]
+    progreso(12, 1, "Cargando el modelo de imagen...")
+    extra = {"low_cpu_mem_usage": False} if motor == "zimage" else {}  # como en su model card
+    pipe = getattr(diffusers, info["clase"]).from_pretrained(carpeta, torch_dtype=torch.bfloat16, **extra)
+    if vram_libre_gb(torch, gpu) >= info["peso_gb"]:
+        pipe.to("cuda")
+    else:
+        pipe.enable_model_cpu_offload(device="cuda")
+        aviso("El modelo de imagen no cabe entero en la VRAM: va por partes (más lento).")
+    if _persistente():
+        PERSISTENTE.update(clave=clave, pipe=pipe, pipe_img=None, txt=None)
+    progreso(20, 1, "Modelo de imagen cargado.")
+    return pipe
+
+
+def _una_imagen(pipe, motor, prompt, w, h, semilla, pasos, torch):
+    gen = torch.Generator(device="cuda").manual_seed(semilla)
+    if motor == "zimage":  # Turbo: 9 pasos (8 pasadas) y guidance 0, según su model card
+        return pipe(prompt=prompt, height=h, width=w, num_inference_steps=9, guidance_scale=0.0,
+                    generator=gen).images[0]
+    return pipe(prompt=prompt, negative_prompt=NEGATIVO_QWEN, width=w, height=h,
+                num_inference_steps=pasos, true_cfg_scale=4.0, generator=gen).images[0]
+
+
+def _escenas_desde_audio(cfg, torch):
+    """Transcribe el audio y lo reparte en escenas de ~N segundos que cubren todo el audio."""
+    import clips_virales as cv
+    audio = cfg["audio"]
+    total = cv._duracion(audio) or 0.0
+    if total <= 0:
+        raise RuntimeError("No se pudo leer el audio (¿archivo dañado?).")
+    objetivo = max(2.0, float(cfg.get("escena_seg") or 5))
+    proveedor = "local" if cfg.get("transcripcion") == "local" else "groq"
+    progreso(4, 1, "Transcribiendo el audio en tu GPU (Whisper)..." if proveedor == "local"
+             else "Transcribiendo el audio (Groq)...")
+    if proveedor == "groq" and cfg.get("groq_key"):
+        os.environ["GROQ_API_KEY"] = cfg["groq_key"]
+    palabras, segmentos = cv.transcribir(audio, idioma=cfg.get("idioma") or "es", proveedor=proveedor,
+                                         modelo_local=cfg.get("whisper_local") or "auto")
+    _liberar_vram(torch)
+    frs = cv.frases(palabras, segmentos, max_seg=max(objetivo * 1.5, 6.0)) if palabras or segmentos else []
+    while True:
+        escenas, actual = [], []
+        for f in frs:
+            actual.append(f)
+            if actual[-1]["end"] - actual[0]["start"] >= objetivo:
+                escenas.append(actual)
+                actual = []
+        if actual:
+            if escenas and actual[-1]["end"] - actual[0]["start"] < objetivo / 2:
+                escenas[-1].extend(actual)
+            else:
+                escenas.append(actual)
+        if len(escenas) <= 60:
+            break
+        objetivo *= 1.5  # audios muy largos: escenas más largas (máx. 60 imágenes)
+    if not escenas:  # música sin voz: escenas por tiempo
+        n = max(1, min(60, int(math.ceil(total / objetivo))))
+        return [{"texto": "", "inicio": total * i / n, "fin": total * (i + 1) / n} for i in range(n)]
+    res = [{"texto": " ".join(f["text"] for f in e).strip(), "inicio": e[0]["start"], "fin": e[-1]["end"]}
+           for e in escenas]
+    res[0]["inicio"] = 0.0
+    for i in range(len(res) - 1):
+        res[i]["fin"] = res[i + 1]["inicio"]
+    res[-1]["fin"] = max(total, res[-1]["fin"])
+    return res
+
+
+def _prompts_escenas(escenas, cfg):
+    """Un prompt visual por escena, coherente entre sí (mismo estilo y personajes). Usa el Director
+    IA local (Ollama) si está; si no, Groq; si no, el texto de la escena con el estilo."""
+    import clips_virales as cv
+    import requests
+    estilo = (cfg.get("prompt") or "").strip() or "cinematic, photorealistic, dramatic lighting, high detail"
+    sistema = (
+        "You are an art director turning a narrated audio into a sequence of images, one per scene. "
+        "For EACH scene write one English image prompt that clearly shows what that part of the audio says: "
+        "subject, action, setting, lighting and camera framing, 40-80 words. Keep the whole sequence coherent: "
+        "the same visual style and, if there are recurring characters, describe them identically every time. "
+        f"Requested style: {estilo}. Never put text or letters in the images unless the audio asks for it. "
+        'Reply ONLY with JSON: {"style": "short shared style description", '
+        '"scenes": [{"n": 1, "prompt": "..."}]}')
+    lineas = "\n".join(f"{i + 1}. [{e['inicio']:.1f}-{e['fin']:.1f}s] {e['texto'] or '(music, no speech)'}"
+                        for i, e in enumerate(escenas))
+    mensajes = [{"role": "system", "content": sistema}, {"role": "user", "content": lineas}]
+    datos = {}
+    try:  # Director IA local (Ollama), si está corriendo
+        r = requests.post("http://127.0.0.1:11434/api/chat", timeout=(3, 600), json={
+            "model": cfg.get("ollama_modelo") or "llama3", "messages": mensajes, "stream": False,
+            "format": "json", "keep_alive": 0, "options": {"num_ctx": 8192, "temperature": 0.6}})
+        if r.status_code == 200:
+            datos = cv._leer_json(r.json().get("message", {}).get("content", ""))
+    except Exception:
+        datos = {}
+    if not datos.get("scenes") and cfg.get("groq_key"):
+        try:
+            os.environ["GROQ_API_KEY"] = cfg["groq_key"]
+            texto, _ = cv.chat(mensajes, cv.MOTORES["pro"]["llm"], json_mode=True, temperatura=0.6)
+            datos = cv._leer_json(texto)
+        except Exception as e:
+            print(f"[aviso] Groq no pudo escribir los prompts ({e})", flush=True)
+    estilo_global = str(datos.get("style") or estilo).strip()
+    por_n = {}
+    for sc in datos.get("scenes") or []:
+        try:
+            por_n[int(sc.get("n"))] = str(sc.get("prompt") or "").strip()
+        except (TypeError, ValueError):
+            continue
+    if not por_n:
+        aviso("No hay Director IA (Ollama/Groq): cada imagen usa el texto de su escena con tu estilo.")
+    prompts = []
+    for i, e in enumerate(escenas):
+        base = (por_n.get(i + 1) or e["texto"] or estilo).strip().rstrip(".")
+        prompts.append(f"{base}. Style: {estilo_global}")
+    return prompts
+
+
+def _video_secuencia(imgs, escenas, audio, salida, w, h, ffmpeg, fps=30):
+    """Video con las imágenes (zoom suave, cada una lo que dura su escena) y el audio original."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    tmp = salida + ".partes"
+    os.makedirs(tmp, exist_ok=True)
+    partes = []
+    try:
+        for i, (img, e) in enumerate(zip(imgs, escenas)):
+            progreso(86 + 8 * i / max(1, len(imgs)), 3, f"Armando el video · escena {i + 1}/{len(imgs)}")
+            n = max(1, int(round(max(0.3, e["fin"] - e["inicio"]) * fps)))
+            z = f"min(1+0.08*on/{n}\\,1.08)" if i % 2 == 0 else f"max(1.08-0.08*on/{n}\\,1.0)"
+            vf = (f"scale={w * 2}:{h * 2}:flags=lanczos,zoompan=z='{z}':x='iw/2-(iw/zoom/2)':"
+                  f"y='ih/2-(ih/zoom/2)':d={n}:s={w}x{h}:fps={fps},format=yuv420p")
+            parte = os.path.join(tmp, f"p{i:03d}.mp4")
+            r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", img, "-vf", vf, "-frames:v", str(n),
+                                *_codificador(ffmpeg, 18), "-pix_fmt", "yuv420p", "-r", str(fps), parte],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=flags)
+            if r.returncode != 0:
+                raise RuntimeError(f"ffmpeg no pudo animar la imagen {i + 1}: {r.stderr[:300]}")
+            partes.append(parte)
+        lista = os.path.join(tmp, "lista.txt")
+        with open(lista, "w", encoding="utf-8") as f:
+            for parte in partes:
+                f.write("file '" + parte.replace("\\", "/").replace("'", "'\\''") + "'\n")
+        solo_video = os.path.join(tmp, "video.mp4")
+        progreso(95, 4, "Uniendo las escenas con el audio...")
+        for cmd in ([ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lista, "-c", "copy",
+                     solo_video],
+                    [ffmpeg, "-y", "-loglevel", "error", "-i", solo_video, "-i", audio, "-map", "0:v:0",
+                     "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", salida]):
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               creationflags=flags)
+            if r.returncode != 0:
+                raise RuntimeError(f"ffmpeg falló al unir el video: {r.stderr[:300]}")
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def generar_imagenes(cfg):
+    progreso(1, 1, "Cargando librerías de IA...")
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("No se detectó una GPU NVIDIA con CUDA.")
+    gpu = info_gpu(torch)
+    if gpu["cc"] >= (8, 0):
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
+    motor, tarea = cfg["motor"], cfg["tarea"]
+    info = MODELOS[motor]
+    print(f"[modelo] {motor} · {tarea} · {cfg['carpeta_modelo']}", flush=True)
+    if gpu["dtype"] == torch.float32 and not info.get("fp32", True):
+        raise RuntimeError(f"Este modelo necesita una gráfica RTX (serie 20 o más nueva). Tu {gpu['nombre']} "
+                           "no la soporta.")
+    if gpu["vram"] + 0.5 < info["vram_min"]:
+        raise RuntimeError(f"Este modelo necesita una GPU de {info['vram_min']} GB y la tuya tiene "
+                           f"{gpu['vram']:.0f} GB. Usa Z-Image-Turbo.")
+    ram = _ram_total_gb()
+    if info.get("ram_min") and ram and ram + 4 < info["ram_min"] and os.environ.get("CONTENTAPP_IGNORAR_RAM") != "1":
+        raise RuntimeError(f"Este modelo necesita un pod con ~{info['ram_min']} GB de RAM y este tiene "
+                           f"{ram:.0f} GB. Usa Z-Image-Turbo o un pod con más RAM (H100).")
+    ffmpeg = cfg.get("ffmpeg") or "ffmpeg"
+    formato = str(cfg.get("formato") or "vertical").lower()
+    w, h = TAMANOS_IMAGEN[motor].get(formato, TAMANOS_IMAGEN[motor]["vertical"])
+    pasos = {"calidad": 50, "rapido": 30, "turbo": 20}.get(str(cfg.get("velocidad") or "calidad"), 50)
+    semilla = int(cfg.get("semilla", -1))
+    if semilla < 0:
+        semilla = int(time.time()) % (2 ** 31)
+    carpeta_img = cfg.get("carpeta_imagenes") or os.path.dirname(cfg.get("salida") or ".")
+    os.makedirs(carpeta_img, exist_ok=True)
+
+    escenas = None
+    if tarea == "audio_imagenes":
+        escenas = _escenas_desde_audio(cfg, torch)
+        progreso(12, 1, f"Escribiendo {len(escenas)} prompts visuales (Director IA)...")
+        prompts = _prompts_escenas(escenas, cfg)
+        for i, (e, pr) in enumerate(zip(escenas, prompts)):
+            print(f"[escena {i + 1}] {e['inicio']:.1f}-{e['fin']:.1f}s | {e['texto'][:80]} -> {pr[:160]}", flush=True)
+    else:
+        prompts = [cfg["prompt"]] * max(1, min(8, int(cfg.get("cantidad") or 1)))
+
+    pipe = _pipe_imagen(motor, cfg["carpeta_modelo"], torch, gpu)
+    sello = time.strftime("%Y%m%d_%H%M%S")
+    imgs = []
+    for i, pr in enumerate(prompts):
+        progreso(22 + 62 * i / len(prompts), 2, f"Generando imagen {i + 1}/{len(prompts)}...")
+        img = _una_imagen(pipe, motor, pr, w, h, semilla + i, pasos, torch)
+        ruta = os.path.join(carpeta_img, f"img_{sello}_{i + 1:02d}.png")
+        img.save(ruta)
+        imgs.append(ruta)
+    _liberar_vram(torch)
+
+    if tarea == "imagen":
+        progreso(100, 4, "¡Imágenes listas!")
+        emitir("resultado", archivo=imgs[0], imagenes=imgs, avisos=AVISOS)
+        return
+    _video_secuencia(imgs, escenas, cfg["audio"], cfg["salida"], w, h, ffmpeg)
+    progreso(100, 4, "¡Video listo!")
+    emitir("resultado", archivo=cfg["salida"], imagenes=imgs, avisos=AVISOS)
 
 
 def diagnostico():

@@ -81,12 +81,17 @@ CONFIG_POR_DEFECTO: dict[str, Any] = {
     "idioma": "es",
     "top_k": 40,
     "top_p": 0.95,
-    "temp": 0.8,
-    "semilla": -1,           # -1 = aleatoria
+    "temp": 0.7,             # 0.8 cambiaba la voz entre bloques; 0.7 es estable y natural
+    "semilla": -1,           # -1 = aleatoria (una sola para todos los bloques del audio)
     "max_frames": 1200,      # -n : el modelo genera 12 frames por segundo de audio
     "chars_por_bloque": 280,
     "pausa_ms": 150,         # silencio insertado entre bloques
+    "motor": "qwen3",        # qwen3 (llama.cpp, GGUF) | voxcpm2 (Python en la GPU, máxima calidad)
+    "voxcpm_cfg": 2.0,       # guía de VoxCPM2: más alto = más fiel al texto y a la voz
+    "voxcpm_pasos": 10,      # pasos de difusión de VoxCPM2: 10 normal, 16-20 más calidad
+    "version_cfg": 2,
 }
+MAX_SEG_REFERENCIA = 20.0     # la voz se toma de los primeros 20 s de la referencia
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +103,9 @@ def cargar_config() -> dict[str, Any]:
         try:
             guardada = json.loads(ARCHIVO_CONFIG.read_text("utf-8"))
             cfg.update({k: v for k, v in guardada.items() if k in CONFIG_POR_DEFECTO})
+            if int(guardada.get("version_cfg", 1)) < 2 and float(cfg.get("temp", 0.7)) == 0.8:
+                cfg["temp"] = 0.7  # la temperatura antigua por defecto hacía variar la voz
+            cfg["version_cfg"] = CONFIG_POR_DEFECTO["version_cfg"]
         except (OSError, ValueError):
             pass
     return cfg
@@ -239,30 +247,64 @@ def soporta_qwen3tts(binario: str) -> bool:
     return _cache[clave]
 
 
+def ruta_ffmpeg() -> str:
+    """ffmpeg del sistema o el que trae imageio-ffmpeg (RunPod, instalaciones sin PATH)."""
+    encontrado = shutil.which("ffmpeg")
+    if encontrado:
+        return encontrado
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return ""
+
+
 def hay_ffmpeg() -> bool:
-    return bool(shutil.which("ffmpeg"))
+    return bool(ruta_ffmpeg())
 
 
 # ---------------------------------------------------------------------------
 # Audio
 # ---------------------------------------------------------------------------
-def convertir_a_wav(origen: Path, destino: Path, hz: int = 16000) -> None:
-    """Normaliza cualquier audio a WAV PCM mono, que es lo que espera el modelo."""
-    if not hay_ffmpeg():
-        if origen.suffix.lower() in (".wav", ".mp3"):
+def convertir_a_wav(origen: Path, destino: Path, hz: int = 24000) -> None:
+    """Normaliza cualquier audio a WAV PCM mono a 24 kHz (la frecuencia de Qwen3-TTS: a 16 kHz
+    se perdían los agudos y la voz clonada salía menos parecida)."""
+    ffmpeg = ruta_ffmpeg()
+    if not ffmpeg:
+        if origen.suffix.lower() == ".wav":
             shutil.copyfile(origen, destino)
             return
-        return jsonify({"error": "Se necesita ffmpeg para convertir este formato de audio."}), 500
+        raise RuntimeError("Se necesita ffmpeg para convertir este formato de audio. Sube un .wav.")
 
     r = subprocess.run(
-        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
          "-i", str(origen), "-ac", "1", "-ar", str(hz),
          "-c:a", "pcm_s16le", str(destino)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         creationflags=SIN_VENTANA,
     )
     if r.returncode != 0 or not destino.exists():
-        return jsonify({"error": f"ffmpeg no pudo convertir el audio: {r.stderr[:400]}"}), 500
+        raise RuntimeError(f"ffmpeg no pudo convertir el audio: {r.stderr[:400]}")
+
+
+def referencia_util(ref: Path) -> Path:
+    """Los primeros 20 s de la referencia (una muestra larga no mejora la voz, la hace inestable
+    y más lenta). Se guarda junto a la original para no recortarla cada vez."""
+    try:
+        with wave.open(str(ref), "rb") as w:
+            if w.getnframes() / float(w.getframerate()) <= MAX_SEG_REFERENCIA + 0.5:
+                return ref
+            corta = ref.with_name("referencia_20s.wav")
+            if corta.is_file() and corta.stat().st_mtime >= ref.stat().st_mtime:
+                return corta
+            parametros = w.getparams()
+            datos = w.readframes(int(w.getframerate() * MAX_SEG_REFERENCIA))
+        with wave.open(str(corta), "wb") as salida:
+            salida.setparams(parametros)
+            salida.writeframes(datos)
+        return corta
+    except (OSError, wave.Error, EOFError):
+        return ref
 
 
 def duracion_wav(ruta: Path) -> float:
@@ -444,6 +486,7 @@ class Tarea:
         self.proceso: subprocess.Popen[str] | None = None
         self.cancelada = False
         self.total_bloques = total_bloques
+        self.textos: list[str] = []
         self.fin: float | None = None
 
     def emitir(self, tipo: str, **datos: Any) -> None:
@@ -499,6 +542,7 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
                       ref: Path | None, dispositivo: str, destino: Path) -> None:
     """Hilo de trabajo: sintetiza bloque a bloque y une los resultados."""
     partes: list[Path] = []
+    ancla: Path | None = None
     inicio = time.time()
     if not CERROJO_SINTESIS.acquire(blocking=False):
         tarea.emitir("log", linea="Hay otra síntesis en curso; esperando turno…")
@@ -510,7 +554,9 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
             parcial = DIR_TMP / f"{tarea.id}_{i:03d}.wav"
             tarea.emitir("bloque", indice=i, total=len(bloques), texto=bloque)
 
-            cmd = construir_comando(cfg, bloque, parcial, ref, dispositivo)
+            # Sin voz de referencia el modelo inventa una voz distinta en cada bloque: el primero
+            # fija la voz y los demás la copian.
+            cmd = construir_comando(cfg, bloque, parcial, ref or ancla, dispositivo)
             tarea.proceso = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
@@ -531,6 +577,9 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
             if codigo != 0 or not parcial.exists():
                 raise RuntimeError(f"llama-tts terminó con código {codigo} en el bloque {i}.")
             partes.append(parcial)
+            if ref is None and ancla is None and len(bloques) > 1:
+                ancla = DIR_TMP / f"{tarea.id}_voz.wav"
+                shutil.copyfile(parcial, ancla)
 
         if tarea.cancelada:
             tarea.estado = "cancelada"
@@ -549,6 +598,131 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
     finally:
         CERROJO_SINTESIS.release()
         for p in partes:
+            p.unlink(missing_ok=True)
+        if ancla:
+            ancla.unlink(missing_ok=True)
+        podar_tareas()
+
+
+# ---------------------------------------------------------------------------
+# Motor VoxCPM2 (Python del motor de video, en la GPU)
+# ---------------------------------------------------------------------------
+def estado_voxcpm() -> dict[str, Any]:
+    """¿Está descargado VoxCPM2 y hay un Python con torch para ejecutarlo?"""
+    try:
+        import modulo_ia
+    except Exception as exc:  # noqa: BLE001
+        return {"disponible": False, "instalado": False, "motor": "error", "error": str(exc)}
+    m = modulo_ia._modelo("voxcpm2")
+    motor = modulo_ia._motor()
+    return {
+        "disponible": True,
+        "id": "voxcpm2",
+        "nombre": m["name"] if m else "VoxCPM2",
+        "tamano_gb": m["size_gb"] if m else 5,
+        "instalado": bool(m and modulo_ia._instalado(m)),
+        "carpeta": modulo_ia._carpeta_modelo(m) if m else "",
+        "motor": motor.get("estado", "sin_detectar"),
+        "python": motor.get("python_cmd", ""),
+        "gpu": motor.get("gpu", ""),
+        "vram_gb": motor.get("vram_gb", 0),
+        "worker": motor.get("worker", ""),
+        "instalador": getattr(modulo_ia, "INSTALADOR", ""),
+    }
+
+
+def _correr_worker(tarea: Tarea, cmd: list[str]) -> tuple[int, str]:
+    """Ejecuta tts_worker.py mostrando su salida; devuelve (código, último error)."""
+    entorno = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8", TQDM_DISABLE="1")
+    tarea.proceso = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+        errors="replace", bufsize=1, creationflags=SIN_VENTANA, env=entorno,
+    )
+    winproc.adjuntar_a_job(tarea.proceso)
+    error = ""
+    assert tarea.proceso.stdout is not None
+    for linea in tarea.proceso.stdout:
+        linea = linea.rstrip()
+        if not linea:
+            continue
+        if linea.startswith("{"):
+            try:
+                dato = json.loads(linea)
+            except ValueError:
+                dato = None
+            if isinstance(dato, dict):
+                if "bloque" in dato:
+                    i = int(dato["bloque"])
+                    texto = tarea.textos[i - 1] if i - 1 < len(tarea.textos) else ""
+                    tarea.emitir("bloque", indice=i, total=int(dato.get("total", 0)), texto=texto)
+                elif dato.get("error"):
+                    error = str(dato["error"])
+                continue
+        tarea.emitir("log", linea=linea)
+    codigo = tarea.proceso.wait()
+    tarea.proceso = None
+    return codigo, error
+
+
+def ejecutar_sintesis_voxcpm(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
+                             ref: Path | None, ref_texto: str, info: dict[str, Any],
+                             destino: Path) -> None:
+    """Hilo de trabajo: VoxCPM2 carga el modelo una vez y hace todos los bloques con la misma voz."""
+    inicio = time.time()
+    salidas = [DIR_TMP / f"{tarea.id}_{i:03d}.wav" for i in range(1, len(bloques) + 1)]
+    trabajo = DIR_TMP / f"{tarea.id}_trabajo.json"
+    tarea.textos = bloques
+    if not CERROJO_SINTESIS.acquire(blocking=False):
+        tarea.emitir("log", linea="Hay otra síntesis en curso; esperando turno…")
+        CERROJO_SINTESIS.acquire()
+    try:
+        py, worker = info["python"], str(Path(info["worker"]).with_name("tts_worker.py"))
+        if not Path(worker).is_file():
+            worker = str(BASE / "tts_worker.py")
+        # --comprobar dice ok=false si falta algo: se instala una sola vez (~2-5 min)
+        r = subprocess.run([py, worker, "--comprobar"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", creationflags=SIN_VENTANA, timeout=120)
+        if '"ok": true' not in (r.stdout or ""):
+            tarea.emitir("log", linea="Instalando VoxCPM2 en el motor (solo la primera vez, 2-5 min)…")
+            tarea.emitir("bloque", indice=1, total=len(bloques), texto="Instalando VoxCPM2 (solo la primera vez)…")
+            codigo, error = _correr_worker(tarea, [py, worker, "--instalar"])
+            if tarea.cancelada:
+                raise InterruptedError
+            if codigo != 0:
+                raise RuntimeError(error or "No se pudo instalar VoxCPM2.")
+
+        trabajo.write_text(json.dumps({
+            "modelo": info["carpeta"],
+            "bloques": bloques,
+            "salidas": [str(s) for s in salidas],
+            "ref": str(ref) if ref else None,
+            "ref_texto": ref_texto,
+            "semilla": int(cfg["semilla"]),
+            "cfg": float(cfg.get("voxcpm_cfg") or 2.0),
+            "pasos": int(cfg.get("voxcpm_pasos") or 10),
+        }, ensure_ascii=False), "utf-8")
+        codigo, error = _correr_worker(tarea, [py, worker, str(trabajo)])
+        if tarea.cancelada:
+            raise InterruptedError
+        if codigo != 0 or error:
+            raise RuntimeError(error or f"VoxCPM2 terminó con código {codigo}.")
+
+        unir_wavs(salidas, destino, int(cfg["pausa_ms"]), bloques)
+        tarea.estado = "terminada"
+        srt = destino.with_suffix(".srt")
+        tarea.emitir("fin", archivo=destino.name, srt=srt.name if srt.exists() else "",
+                     tiempo=round(time.time() - inicio, 2),
+                     duracion=round(duracion_wav(destino), 2),
+                     segundos=round(time.time() - inicio, 1))
+    except InterruptedError:
+        tarea.estado = "cancelada"
+        tarea.emitir("cancelada")
+    except Exception as exc:  # noqa: BLE001 — el mensaje se muestra íntegro en la web
+        tarea.estado = "error"
+        tarea.emitir("error", mensaje=str(exc))
+    finally:
+        CERROJO_SINTESIS.release()
+        for p in salidas + [trabajo]:
             p.unlink(missing_ok=True)
         podar_tareas()
 
@@ -584,6 +758,8 @@ def estado() -> dict[str, Any]:
         "idiomas": IDIOMAS,
         "cpus": os.cpu_count() or 4,
         "config": cfg,
+        "voxcpm": estado_voxcpm(),
+        "servidor": os.environ.get("CONTENTAPP_SERVIDOR") == "1",
     }
 
 
@@ -715,9 +891,13 @@ def crear_voz() -> dict[str, Any]:
     try:
         datos_audio = audio.read()
         if len(datos_audio) > MAX_BYTES_REFERENCIA:
+            shutil.rmtree(carpeta, ignore_errors=True)
             return jsonify({"error": "El audio de referencia no puede pasar de 60 MB. Con 10-15 segundos de voz es más que suficiente."}), 413
         bruto.write_bytes(datos_audio)
         convertir_a_wav(bruto, carpeta / "referencia.wav")
+    except RuntimeError as exc:
+        shutil.rmtree(carpeta, ignore_errors=True)
+        return jsonify({"error": str(exc)}), 400
     except Exception:
         shutil.rmtree(carpeta, ignore_errors=True)
         raise
@@ -753,7 +933,7 @@ def generar():
     datos = request.get_json(silent=True) or {}
     cfg = cargar_config()
     for clave in ("idioma", "top_k", "top_p", "temp", "semilla", "max_frames",
-                  "chars_por_bloque", "pausa_ms", "capas_gpu", "hilos"):
+                  "chars_por_bloque", "pausa_ms", "capas_gpu", "hilos", "voxcpm_cfg", "voxcpm_pasos"):
         if datos.get(clave) not in (None, ""):
             cfg[clave] = datos[clave]
 
@@ -762,17 +942,21 @@ def generar():
         import random
         cfg["semilla"] = random.randint(1, 9999999)
 
+    motor_voz = str(datos.get("motor") or cfg.get("motor") or "qwen3")
+    texto = str(datos.get("texto", "")).strip()
+    if not texto:
+        return jsonify({"error": "Escribe el texto que quieres sintetizar."}), 400
+    if motor_voz == "voxcpm2":
+        return _generar_voxcpm(datos, cfg, texto)
+
     binario, modelo, mmproj = rutas_efectivas(cfg)
     for ruta, etiqueta in ((binario, "binario llama-tts"), (modelo, "modelo"),
                            (mmproj, "mmproj")):
         if not ruta or not Path(ruta).is_file():
-            return jsonify({"error": f"No se encuentra el {etiqueta}. Revisa los ajustes."}), 400
+            return jsonify({"error": f"No se encuentra el {etiqueta} de Qwen3-TTS. Elige el motor "
+                                     "«VoxCPM2» (no necesita llama-tts) o revisa los ajustes."}), 400
     if not soporta_qwen3tts(binario):
         return jsonify({"error": "Tu llama.cpp no admite Qwen3-TTS (falta --mmproj en llama-tts). Actualízalo: winget upgrade ggml.llamacpp"}), 400
-
-    texto = str(datos.get("texto", "")).strip()
-    if not texto:
-        return jsonify({"error": "Escribe el texto que quieres sintetizar."}), 400
 
     # ----- OPCION 2: INTERCEPTOR DE EMOCIONES LLAMA 3 -----
     # Se eliminó la importación de llama_cpp aquí porque cargar modelos 
@@ -790,6 +974,7 @@ def generar():
         ref = DIR_VOCES / Path(str(datos["voz"])).name / "referencia.wav"
         if not ref.is_file():
             return jsonify({"error": "La voz de referencia no existe."}), 400
+        ref = referencia_util(ref)
 
     modo = str(datos.get("dispositivo") or cfg.get("dispositivo") or "auto")
     if modo == "cpu":
@@ -810,6 +995,46 @@ def generar():
 
     return {"id": id_tarea, "bloques": len(bloques),
             "dispositivo": dispositivo or "CPU", "archivo": destino.name}
+
+
+def _generar_voxcpm(datos: dict[str, Any], cfg: dict[str, Any], texto: str):
+    info = estado_voxcpm()
+    if not info.get("instalado"):
+        return jsonify({"error": "Falta descargar VoxCPM2: pulsa 'Modelos' arriba y descárgalo "
+                                 f"(~{info.get('tamano_gb', 5)} GB)."}), 400
+    if info.get("motor") in ("detectando", "sin_detectar"):
+        return jsonify({"error": "Detectando el motor de la GPU… vuelve a pulsar Generar en unos segundos."}), 409
+    if info.get("motor") != "listo" or not info.get("python") or not info.get("worker"):
+        return jsonify({"error": "VoxCPM2 necesita el motor de video con GPU (el mismo del Estudio IA). "
+                                 f"Instálalo con '{info.get('instalador') or 'instalar_motor_video.bat'}' "
+                                 "y reinicia la app, o usa Qwen3-TTS."}), 400
+
+    # Las etiquetas [emoción] o (acotación) se quitan: el modelo las leería en voz alta
+    texto = re.sub(r"[\[\(].*?[\]\)]", "", texto).strip()
+    if not texto:
+        return jsonify({"error": "Escribe el texto que quieres sintetizar."}), 400
+
+    ref: Path | None = None
+    ref_texto = ""
+    if datos.get("voz"):
+        carpeta = DIR_VOCES / Path(str(datos["voz"])).name
+        original = carpeta / "referencia.wav"
+        if not original.is_file():
+            return jsonify({"error": "La voz de referencia no existe."}), 400
+        ref = referencia_util(original)
+        if ref == original:  # recortada, la transcripción ya no coincide con el audio
+            ref_texto = str((meta_voz(carpeta) or {}).get("transcripcion") or "")
+
+    # Bloques más largos = menos uniones = voz más uniforme (VoxCPM2 aguanta ~1 min por bloque)
+    bloques = trocear_texto(texto, max(int(cfg["chars_por_bloque"]), 450))
+    id_tarea = uuid.uuid4().hex[:12]
+    destino = DIR_SALIDAS / f"{datetime.now():%Y%m%d-%H%M%S}-{id_tarea}.wav"
+    tarea = Tarea(id_tarea, len(bloques))
+    TAREAS[id_tarea] = tarea
+    threading.Thread(target=ejecutar_sintesis_voxcpm, daemon=True,
+                     args=(tarea, cfg, bloques, ref, ref_texto, info, destino)).start()
+    return {"id": id_tarea, "bloques": len(bloques),
+            "dispositivo": f"VoxCPM2 · {info.get('gpu') or 'GPU'}", "archivo": destino.name}
 
 
 @clonador_bp.route("/api/tarea/<id_tarea>/eventos", methods=["GET"])

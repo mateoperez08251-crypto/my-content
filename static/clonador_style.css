@@ -385,3 +385,6 @@ a.btn { text-decoration: none; display: inline-block; }
 
 .item-historial audio { width: 100%; height: 36px; margin-bottom: 8px; }
 .item-cabecera { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--texto-2); }
+
+.sub-modelo { margin: 18px 0 6px; font-size: 1rem; }
+.cabecera #btn-modelos { margin-left: 10px; white-space: nowrap; }

@@ -98,7 +98,7 @@ def _ajustar_titulo(draw, texto, ancho_max, tam_inicial):
     fuentes = ("impact.ttf", "arialbd.ttf")
     palabras = texto.split()
     tam = tam_inicial
-    while tam >= 24:
+    while tam >= 20:
         fuente = _fuente(fuentes, tam)
         ancho = lambda t: draw.textbbox((0, 0), t, font=fuente)[2]
         if ancho(texto) <= ancho_max:
@@ -113,7 +113,7 @@ def _ajustar_titulo(draw, texto, ancho_max, tam_inicial):
             if mejor[0] <= ancho_max and tam >= tam_inicial * 0.7:
                 return mejor[1], fuente
         tam -= 4
-    return [texto], _fuente(fuentes, 24)
+    return [texto], _fuente(fuentes, 20)
 
 
 def group_words_into_phrases(words, max_words=5):
@@ -134,9 +134,9 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
     
     # Dibujar titulo corto arriba (se ajusta al ancho: 1 o 2 líneas, nunca se sale)
     if gen_title:
-        lineas, title_font = _ajustar_titulo(draw, gen_title, int(w * 0.9), int(h * 0.06))
+        lineas, title_font = _ajustar_titulo(draw, gen_title, int(w * 0.84), int(h * 0.034))
         t_stroke = max(2, int(title_font.size * 0.1)) if hasattr(title_font, "size") else 3
-        ty = int(h * 0.15)
+        ty = int(h * 0.12)
         for linea in lineas:
             bbox = draw.textbbox((0, 0), linea, font=title_font, stroke_width=t_stroke)
             tx = (w - (bbox[2] - bbox[0])) / 2 - bbox[0]
@@ -297,7 +297,8 @@ def parse_time(ts):
 def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, start_time="", end_time="",
                         subtitle_scale=100, subtitle_style="style5", anti_copyright_filter=True,
                         anti_copyright_audio=True, bg_music="", show_progress_bar=True,
-                        motor_ia="pro", emojis=True, meta_salida=None):
+                        motor_ia="pro", emojis=True, meta_salida=None, titulo_en_video=False,
+                        transcripcion="groq", whisper_local="auto", python_motor="", script_local=""):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import json
@@ -313,10 +314,15 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     e_time = parse_time(end_time)
 
     # 1. Transcripción (por trozos: sin límite de duración)
-    write_progress("Transcribiendo el audio con IA...", 8)
+    local = transcripcion == "local"
+    write_progress("Transcribiendo el audio en tu GPU (Whisper local)..." if local
+                   else "Transcribiendo el audio con IA (Groq)...", 8)
     words, segmentos = cv.transcribir(
         video_path, s_time, e_time, modelo=motor["whisper"],
-        progreso=lambda n, total: write_progress(f"Transcribiendo audio ({n + 1}/{total})...", 8 + int(12 * n / max(total, 1))))
+        progreso=lambda n, total: write_progress(
+            "Transcribiendo en tu GPU (Whisper local)..." if local else f"Transcribiendo audio ({n + 1}/{total})...",
+            8 + int(12 * n / max(total, 1))),
+        proveedor=transcripcion, python_local=python_motor, script_local=script_local, modelo_local=whisper_local)
     phrases = group_words_into_phrases(words, max_words=3)  # subtítulos de 3 palabras
     print("Transcripción completada. Total palabras:", len(words))
 
@@ -355,6 +361,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
     for idx, info in enumerate(seleccion):
         st, et, gen_title = info["inicio"], info["fin"], info["titulo"]
+        if not titulo_en_video:  # el título va en la descripción; dentro del video es opcional
+            gen_title = ""
         parte_num = idx + 1
         tramo = 70 / max(len(seleccion), 1)
         p0 = 25 + int(idx * tramo)
@@ -468,7 +476,9 @@ def main(argv):
                 cfg.get("subtitle_scale", 100), cfg.get("subtitle_style", "style5"),
                 cfg.get("anti_copyright_filter", True), cfg.get("anti_copyright_audio", True),
                 cfg.get("bg_music", ""), cfg.get("show_progress_bar", True),
-                cfg.get("motor_ia", "pro"), cfg.get("emojis", True), meta)
+                cfg.get("motor_ia", "pro"), cfg.get("emojis", True), meta,
+                cfg.get("titulo_en_video", False), cfg.get("transcripcion", "groq"),
+                cfg.get("whisper_local", "auto"), cfg.get("python_motor", ""), cfg.get("script_local", ""))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)
