@@ -36,6 +36,13 @@ if errorlevel 1 (
 for /f "tokens=*" %%i in ('nvidia-smi --query-gpu^=name^,memory.total --format^=csv^,noheader') do echo  [OK] GPU: %%i
 
 :: 3. Entorno aislado (no toca el Python del sistema)
+tasklist /fi "imagename eq ContentAppPro.exe" 2>nul | find /i "ContentAppPro.exe" >nul
+if not errorlevel 1 (
+    echo  [!] Content App esta abierta. Cierrala ^(tambien desde la bandeja junto al reloj^)
+    echo      y pulsa una tecla para seguir.
+    pause >nul
+)
+call :liberar_venv
 :: No usar paquetes del Python del usuario (evita que un torch viejo "se cuele")
 set "PYTHONNOUSERSITE=1"
 set "VPY=%APP_DIR%.venv_video\Scripts\python.exe"
@@ -60,6 +67,7 @@ if exist ".venv_video\descargas" (
     if exist "_descargas_motor" rmdir /s /q "_descargas_motor" >nul 2>&1
     move ".venv_video\descargas" "_descargas_motor" >nul 2>&1
 )
+call :liberar_venv
 rmdir /s /q ".venv_video" >nul 2>&1
 if exist ".venv_video" (
     echo  [X] No se pudo borrar .venv_video porque algun programa lo esta usando.
@@ -98,6 +106,7 @@ if not errorlevel 1 (
 "%VPY%" -c "import torch" >nul 2>&1
 if not errorlevel 1 (
     echo  [!] El PyTorch instalado no sirve para tu GPU: se reinstala.
+    call :liberar_venv
     "%VPY%" -m pip uninstall -y torch torchvision torchaudio >nul 2>&1
 )
 
@@ -138,12 +147,14 @@ goto descarga_torch
 set INTENTO=0
 :reintento_instalar_torch
 set /a INTENTO+=1
+call :liberar_venv
+if %INTENTO% gtr 1 if exist ".venv_video\Lib\site-packages\torch" rmdir /s /q ".venv_video\Lib\site-packages\torch" >nul 2>&1
 echo  [*] Instalando PyTorch desde el archivo descargado (intento %INTENTO% de 3)...
 "%VPY%" -m pip install "%TORCH_FILE%" --retries 10 --timeout 120
 if not errorlevel 1 goto diffusers
 if %INTENTO% geq 3 (
-    echo  [X] No se pudo instalar PyTorch. Si el error dice "WinError 32", pausa el antivirus
-    echo      un momento o agrega esta carpeta como exclusion, y vuelve a ejecutar.
+    echo  [X] No se pudo instalar PyTorch. Si dice "Acceso denegado" o "WinError 32":
+    echo      cierra Content App ^(tambien desde la bandeja^), reinicia el PC y vuelve a ejecutar.
     echo      Si dice que el archivo esta dañado, borra la carpeta .venv_video\descargas.
     pause
     exit /b 1
@@ -185,3 +196,14 @@ echo   Listo. Abre Content App, entra al Estudio IA y pulsa
 echo   "Comprobar motor". Luego descarga un modelo en el Gestor.
 echo  ============================================================
 pause
+exit /b 0
+
+:: ------------------------------------------------------------------
+:: Cierra los procesos que usan el Python de .venv_video (el motor de video
+:: o su diagnóstico). Mientras están abiertos, Windows bloquea los archivos
+:: de PyTorch y da "Acceso denegado" (WinError 5) al instalar o borrar.
+:: ------------------------------------------------------------------
+:liberar_venv
+powershell -NoProfile -Command "$d = (Resolve-Path '.venv_video' -ErrorAction SilentlyContinue).Path; if ($d) { $p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID -and ( $_.Path -like ($d + '*') -or ( $_.Modules -and ($_.Modules | Where-Object { $_.FileName -like ($d + '*') }) ) ) }; foreach ($x in $p) { Write-Host ('  [*] Cerrando ' + $x.ProcessName + ' (PID ' + $x.Id + ') que bloqueaba archivos de .venv_video'); Stop-Process -Id $x.Id -Force -ErrorAction SilentlyContinue }; if ($p) { Start-Sleep -Seconds 2 } }"
+exit /b 0
+
