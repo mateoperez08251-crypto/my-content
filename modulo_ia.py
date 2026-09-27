@@ -1073,9 +1073,13 @@ def get_historial():
 
 @ia_bp.route('/assets_library', methods=['GET'])
 def get_assets_library():
-    """Devuelve los assets subidos para usar como input (videos e imágenes)."""
+    """Biblioteca del Estudio: videos GENERADOS (primero, los más nuevos) y archivos subidos.
+    Antes solo listaba los subidos: los videos generados no aparecían en ningún lado."""
     os.makedirs(ASSETS_DIR, exist_ok=True)
-    items = []
+    os.makedirs(VIDEOS_DIR, exist_ok=True)
+    items = [{"url": f"/api/ia/video/{f}", "name": f, "type": "video", "origen": "generado"}
+             for f in sorted(os.listdir(VIDEOS_DIR), reverse=True)
+             if f.startswith("vid_") and f.endswith(".mp4")]
     for f in sorted(os.listdir(ASSETS_DIR), reverse=True):
         low = f.lower()
         if low.endswith(('.mp4', '.webm', '.mov')):
@@ -1093,12 +1097,16 @@ def serve_video(filename):
 @ia_bp.route('/abrir_video/<filename>', methods=['POST'])
 def abrir_video(filename):
     """Abre el Explorador con el video generado seleccionado (Mis Videos Generados)."""
-    ruta = os.path.join(VIDEOS_DIR, os.path.basename(filename))
+    nombre = os.path.basename(filename)
+    ruta = os.path.join(VIDEOS_DIR, nombre)
+    base_url = "/api/ia/video/"
+    if not os.path.isfile(ruta):  # también los archivos subidos a la biblioteca
+        ruta, base_url = os.path.join(ASSETS_DIR, nombre), "/api/ia/asset/"
     if not os.path.isfile(ruta):
         return jsonify({"success": False, "error": "Archivo no encontrado"}), 404
     if os.environ.get("CONTENTAPP_SERVIDOR") == "1":
         # En RunPod no hay Explorador: el navegador descarga el video.
-        return jsonify({"success": True, "descargar": "/api/ia/video/" + urllib.parse.quote(os.path.basename(ruta))})
+        return jsonify({"success": True, "descargar": base_url + urllib.parse.quote(nombre)})
     try:
         if os.name == "nt":
             subprocess.Popen(["explorer", "/select,", ruta])
