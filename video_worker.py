@@ -1497,9 +1497,26 @@ def _mensaje_error(e):
         msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Usa Wan2.1 1.3B, cierra "
                "otros programas y aumenta la memoria virtual de Windows a 32 GB o más.")
     if "out of memory" in msg.lower():
-        msg = ("La GPU se quedó sin memoria (VRAM) incluso tras liberarla y reintentar. Prueba con "
-               "menos duración, formato más pequeño o un modelo más ligero (Wan2.2 Turbo, Z-Image).")
+        ajena = _vram_ajena_gb()
+        if ajena >= 2:
+            msg = (f"La GPU se quedó sin memoria: OTRO programa ocupa {ajena:.0f} GB de la VRAM "
+                   "(p. ej. un motor anterior que siguió vivo tras reiniciar). Reinicia con "
+                   "'bash runpod/iniciar.sh' (cierra los motores viejos) o mira 'nvidia-smi'.")
+        else:
+            msg = ("La GPU se quedó sin memoria (VRAM) incluso tras liberarla y reintentar. Prueba con "
+                   "menos duración, formato más pequeño o un modelo más ligero (Wan2.2 Turbo, Z-Image).")
     return msg
+
+
+def _vram_ajena_gb():
+    """GB de VRAM ocupados por otros procesos (no por este motor)."""
+    try:
+        import torch
+        libre, total = torch.cuda.mem_get_info()
+        propia = torch.cuda.memory_reserved()
+        return max(0.0, (total - libre - propia) / 1024 ** 3 - 0.6)  # 0.6 GB: contexto CUDA propio
+    except Exception:
+        return 0.0
 
 
 if __name__ == "__main__":
