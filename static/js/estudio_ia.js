@@ -485,7 +485,13 @@ function renderizarModelos(modelos) {
             modelosInstalados++;
             const opt = document.createElement('option');
             opt.value = m.id;
-            opt.textContent = `${m.name} (${m.description})`;
+            if (m.compatible === false) {
+                opt.textContent = `⛔ ${m.name} (no compatible con tu GPU)`;
+                opt.disabled = true;
+                opt.title = m.motivo || '';
+            } else {
+                opt.textContent = `${m.name} (${m.description})`;
+            }
             
             if (m.type === "t2v") {
                 groupT2V.appendChild(opt);
@@ -552,6 +558,7 @@ function renderizarModelos(modelos) {
             <div style="flex: 1;">
                 <h4 style="margin: 0; color: #fff; font-size: 0.9rem;">${m.name} <span style="font-size: 0.7rem; color: #94a3b8; margin-left: 8px;">(${m.size_gb} GB)</span></h4>
                 <p style="margin: 5px 0 0 0; color: #94a3b8; font-size: 0.75rem; line-height: 1.4;">${escEstudio(m.description)}${m.vram_gb ? ` · VRAM: ${escEstudio(m.vram_gb)} GB` : ''}</p>
+                ${m.compatible === false ? `<p style="margin: 4px 0 0 0; color: #ff4d5f; font-size: 0.75rem;">⛔ ${escEstudio(m.motivo)}</p>` : ''}
                 ${m.error ? `<p style="margin: 5px 0 0 0; color: #ff4d5f; font-size: 0.72rem;">Error: ${escEstudio(m.error)} (pulsa Descargar para reintentar)</p>` : ''}
             </div>
             <div style="margin-left: 15px;">
@@ -573,12 +580,13 @@ function renderizarModelos(modelos) {
             if (groupT2I.children.length > 0) selectActivo.appendChild(groupT2I);
         }
         
-        // Restore value if it still exists in the new options
-        if (selectVal) {
-            const hasOption = Array.from(selectActivo.options).some(o => o.value === selectVal);
-            if (hasOption) {
-                selectActivo.value = selectVal;
-            }
+        // Recuperar la elección del usuario si sigue disponible; si no, el primer modelo compatible
+        const opciones = Array.from(selectActivo.options);
+        if (selectVal && opciones.some(o => o.value === selectVal && !o.disabled)) {
+            selectActivo.value = selectVal;
+        } else {
+            const primera = opciones.find(o => o.value && !o.disabled);
+            if (primera) selectActivo.value = primera.value;
         }
     }
 }
@@ -843,6 +851,7 @@ window.comprobarMotorVideo = function (refrescar) {
                 box.textContent = 'Comprobando el motor de video...';
                 setTimeout(() => comprobarMotorVideo(false), 3000);
             } else if (m.estado === 'listo') {
+                if (typeof cargarModelos === 'function') cargarModelos();  // marca los modelos no compatibles
                 box.innerHTML = `<span style="color:#2dcc70; font-weight:bold;">● Listo</span><br>` +
                     `${escEstudio(m.gpu)} · ${escEstudio(m.vram_gb)} GB VRAM<br>` +
                     (m.formato ? `<span style="opacity:0.7">Arquitectura ${escEstudio(m.arquitectura)} · formato ${escEstudio(m.formato)}</span><br>` : '') +

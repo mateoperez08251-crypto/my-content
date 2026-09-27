@@ -468,6 +468,7 @@ def generar(cfg):
         raise RuntimeError("No se detectó una GPU NVIDIA con CUDA. La generación de video "
                            "necesita GPU (en CPU tardaría horas).")
     gpu = info_gpu(torch)
+    print(f"[modelo] {motor} · {cfg['carpeta_modelo']}", flush=True)  # queda en motor_video.log
     if gpu["cc"] >= (8, 0):
         try:
             torch.backends.cuda.matmul.allow_tf32 = True
