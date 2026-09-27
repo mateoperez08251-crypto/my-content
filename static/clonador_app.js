@@ -20,7 +20,8 @@ const estado = {
 };
 
 const CAMPOS_AJUSTES = ["temp", "top_p", "top_k", "semilla",
-                        "chars_por_bloque", "pausa_ms", "max_frames", "hilos"];
+                        "chars_por_bloque", "pausa_ms", "max_frames", "hilos",
+                        "voxcpm_pasos", "voxcpm_cfg"];
 
 /* ======================= Estado del sistema ======================= */
 function pastilla(punto, etiqueta, valor, titulo = "") {
@@ -32,6 +33,15 @@ function pastilla(punto, etiqueta, valor, titulo = "") {
 async function cargarEstado() {
   const s = await api("/api/estado");
   estado.sistema = s;
+  const vox = s.voxcpm || {};
+  if (!estado.motorElegido) {
+    // La primera vez: VoxCPM2 si ya está listo (mejor calidad), si no el guardado
+    estado.motorElegido = true;
+    // Sin llama-tts (RunPod, o no instalado) solo funciona VoxCPM2
+    $("motor").value = s.config.motor === "voxcpm2" || !s.binario_ok ? "voxcpm2" : "qwen3";
+  }
+  estado.voxcpm = vox;
+  pintarVoxcpm();
 
   const modelo = s.modelo ? s.modelo.split(/[\\/]/).pop() : "no encontrado";
   const gpus = s.dispositivos.filter((d) => !d.id.toLowerCase().startsWith("cpu"));
@@ -45,20 +55,32 @@ async function cargarEstado() {
              gpus.length ? `${gpus.length} GPU · CPU` : "solo CPU",
              gpus.map((g) => `${g.id}: ${g.nombre}`).join("\n")),
     pastilla(s.ffmpeg ? "ok" : "medio", "ffmpeg", s.ffmpeg ? "sí" : "no"),
+    pastilla(vox.instalado && vox.motor === "listo" ? "ok" : (vox.instalado ? "medio" : "mal"), "VoxCPM2",
+             vox.instalado ? (vox.motor === "listo" ? "listo" : "sin motor GPU") : "no descargado",
+             vox.gpu || ""),
   ].join("");
 
+  const usaVox = $("motor").value === "voxcpm2";
   const problemas = [];
-  if (!s.binario_ok) {
+  if (usaVox) {
+    if (!vox.instalado) {
+      problemas.push("VoxCPM2 no está descargado: pulsa <b>📦 Modelos</b> y descárgalo.");
+    } else if (vox.motor !== "listo" && vox.motor !== "detectando" && vox.motor !== "sin_detectar") {
+      problemas.push("VoxCPM2 necesita el motor de video con GPU (el del Estudio IA). Instálalo con " +
+                     `<code>${escapar(vox.instalador || "instalar_motor_video.bat")}</code> y reinicia la app.`);
+    }
+  } else if (!s.binario_ok) {
     problemas.push("No se encuentra <code>llama-tts</code>. Instálalo con " +
-                   "<code>winget install ggml.llamacpp</code> o indica su ruta en config.json.");
+                   "<code>winget install ggml.llamacpp</code> o indica su ruta en config.json" +
+                   (vox.instalado ? ", o elige el motor <b>VoxCPM2</b>." : "."));
   } else if (!s.soporta_qwen3tts) {
     problemas.push("Tu build de llama.cpp es anterior al soporte de Qwen3-TTS. " +
                    "Actualiza con <code>winget upgrade ggml.llamacpp</code>.");
   }
   // Si falta el modelo, el panel de descarga ya lo explica: no duplicamos el aviso.
-  const faltaModelo = !s.modelo_ok || !s.mmproj_ok;
-  $("panel-modelo").classList.toggle("oculto", !faltaModelo);
-  if (faltaModelo) await cargarCatalogoModelo();
+  const faltaModelo = usaVox ? !vox.instalado : (!s.modelo_ok || !s.mmproj_ok);
+  if (faltaModelo) $("panel-modelo").classList.remove("oculto");
+  await cargarCatalogoModelo();
   if (!s.ffmpeg) {
     problemas.push("Sin <code>ffmpeg</code> solo podrás subir referencias en wav o mp3, " +
                    "y la grabación desde el navegador no funcionará.");
@@ -157,6 +179,66 @@ async function descargarModelo() {
   };
 
   fuente.onerror = () => { fuente.close(); descargaEnCurso(false); };
+}
+
+/* ======================= VoxCPM2 (Gestor de modelos del Estudio IA) ======================= */
+let sondeoVox = null;
+
+function pintarVoxcpm(m) {
+  const vox = estado.voxcpm || {};
+  const boton = $("btn-descargar-voxcpm");
+  const bajando = m ? m.downloading && !m.paused : false;
+  $("btn-cancelar-voxcpm").classList.toggle("oculto", !bajando);
+  if (vox.instalado || (m && m.installed)) {
+    boton.disabled = true;
+    boton.textContent = "✓ VoxCPM2 descargado";
+  } else {
+    boton.disabled = bajando;
+    boton.textContent = bajando ? "Descargando…" : (m && m.paused ? "Reanudar descarga" : "Descargar VoxCPM2");
+  }
+  if (m && (m.downloading || m.error)) {
+    $("progreso-voxcpm").classList.remove("oculto");
+    $("barra-voxcpm").style.width = (m.progress || 0) + "%";
+    $("texto-voxcpm").textContent = m.error ? "✕ " + m.error :
+      `${m.progress || 0}% · ${m.downloaded_mb || 0} de ${m.total_mb || "?"} MB` +
+      (m.speed_mbps ? ` · ${m.speed_mbps} MB/s` : "");
+  }
+}
+
+async function sondearVoxcpm() {
+  try {
+    const r = await api("/api/ia/modelos?t=" + Date.now());
+    const m = (r.modelos || []).find((x) => x.id === "voxcpm2");
+    if (!m) return;
+    if (m.installed) {
+      clearInterval(sondeoVox); sondeoVox = null;
+      $("barra-voxcpm").style.width = "100%";
+      $("texto-voxcpm").textContent = "✓ VoxCPM2 listo. Elige «VoxCPM2» en Motor de voz.";
+      $("motor").value = "voxcpm2";
+      await cargarEstado();
+      return;
+    }
+    pintarVoxcpm(m);
+    if (!m.downloading && sondeoVox) { clearInterval(sondeoVox); sondeoVox = null; }
+  } catch { /* se reintenta en el siguiente sondeo */ }
+}
+
+async function descargarVoxcpm() {
+  $("progreso-voxcpm").classList.remove("oculto");
+  $("texto-voxcpm").textContent = "Conectando con Hugging Face…";
+  try {
+    const r = await api("/api/ia/descargar_modelo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "voxcpm2" }),
+    });
+    if (r && r.success === false) throw new Error(r.error || "No se pudo iniciar la descarga.");
+  } catch (err) {
+    $("texto-voxcpm").textContent = "✕ " + err.message;
+    return;
+  }
+  if (!sondeoVox) sondeoVox = setInterval(sondearVoxcpm, 1000);
+  sondearVoxcpm();
 }
 
 /* ======================= Voces ======================= */
@@ -357,12 +439,14 @@ function actualizarContador() {
 function actualizarEtiquetasRango() {
   $("v-temp").textContent = parseFloat($("temp").value).toFixed(2);
   $("v-top_p").textContent = parseFloat($("top_p").value).toFixed(2);
+  $("v-voxcpm_cfg").textContent = parseFloat($("voxcpm_cfg").value).toFixed(1);
 }
 
 function ajustesActuales() {
   const cfg = {
     idioma: $("idioma").value,
     dispositivo: $("dispositivo").value,
+    motor: $("motor").value,
   };
   for (const campo of CAMPOS_AJUSTES) cfg[campo] = parseFloat($(campo).value);
   return cfg;
@@ -429,13 +513,21 @@ async function generar() {
         `✓ Listo en ${dato.segundos} s · ${dato.duracion} s de audio`;
       const url = `/api/salidas/${dato.archivo}`;
       $("reproductor").src = url;
-      $("descargar").href = "#";
-      $("descargar").onclick = async (e) => {
-          e.preventDefault();
-          await api(`/api/salidas/${dato.archivo}/abrir`, { method: "POST" });
-      };
-      $("descargar").title = "Abrir ubicación de archivo";
-      $("descargar").innerHTML = "📁 Abrir ubicación";
+      if (estado.sistema && estado.sistema.servidor) {
+        // En RunPod no hay carpeta que abrir: se descarga al navegador
+        $("descargar").href = url;
+        $("descargar").onclick = null;
+        $("descargar").title = "Descargar WAV";
+        $("descargar").innerHTML = "⬇ Descargar WAV";
+      } else {
+        $("descargar").href = "#";
+        $("descargar").onclick = async (e) => {
+            e.preventDefault();
+            await api(`/api/salidas/${dato.archivo}/abrir`, { method: "POST" });
+        };
+        $("descargar").title = "Abrir ubicación de archivo";
+        $("descargar").innerHTML = "📁 Abrir ubicación";
+      }
       $("info-resultado").textContent =
         `${dato.archivo} · ${dato.duracion} s · generado en ${dato.segundos} s`;
       const btnSrt = $("descargar-srt");
@@ -505,7 +597,9 @@ async function cargarHistorial() {
         <span>${s.fecha.replace("T", " ")} · ${s.duracion} s</span>
         <span>
           ${s.srt ? `<a class="icono-btn" href="/api/salidas/${encodeURIComponent(s.archivo)}/srt" download title="Descargar subtítulos SRT">CC</a>` : ""}
-          <button class="icono-btn abrir-carpeta" data-archivo="${s.archivo}" title="Abrir ubicación de archivo">📁</button>
+          ${estado.sistema && estado.sistema.servidor
+            ? `<a class="icono-btn" href="/api/salidas/${encodeURIComponent(s.archivo)}" download title="Descargar WAV">⬇</a>`
+            : `<button class="icono-btn abrir-carpeta" data-archivo="${s.archivo}" title="Abrir ubicación de archivo">📁</button>`}
           <button class="icono-btn borrar" data-archivo="${s.archivo}" title="Eliminar">✕</button>
         </span>
       </div>
@@ -625,13 +719,28 @@ function conectarEventos() {
   $("texto").addEventListener("input", actualizarContador);
   $("chars_por_bloque").addEventListener("input", actualizarContador);
   $("temp").addEventListener("input", actualizarEtiquetasRango);
+  $("voxcpm_cfg").addEventListener("input", actualizarEtiquetasRango);
+  $("motor").addEventListener("change", () => cargarEstado().catch(() => {}));
+  $("btn-modelos").addEventListener("click", () => {
+    $("panel-modelo").classList.toggle("oculto");
+    if (!$("panel-modelo").classList.contains("oculto")) sondearVoxcpm();
+  });
+  $("btn-descargar-voxcpm").addEventListener("click", descargarVoxcpm);
+  $("btn-cancelar-voxcpm").addEventListener("click", async () => {
+    await api("/api/ia/modelo_accion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "voxcpm2", action: "pause" }),
+    });
+    setTimeout(sondearVoxcpm, 600);
+  });
   $("top_p").addEventListener("input", actualizarEtiquetasRango);
 
   $("btn-ejemplo").addEventListener("click", () => {
     $("texto").value =
       "Hola, esta es una prueba de clonación de voz ejecutándose por completo en " +
-      "mi propio ordenador. El modelo Qwen3 TTS funciona tanto en procesador como " +
-      "en tarjeta gráfica, sin enviar nada a internet.";
+      "mi propio ordenador. La voz se mantiene igual de principio a fin, " +
+      "sin enviar nada a internet.";
     actualizarContador();
   });
 
@@ -677,4 +786,7 @@ function conectarEventos() {
   }
   await cargarVoces();
   await cargarHistorial();
+  sondearVoxcpm();
+  // El motor de la GPU se detecta en segundo plano: se refresca el estado cuando termine
+  setTimeout(() => cargarEstado().catch(() => {}), 8000);
 })();

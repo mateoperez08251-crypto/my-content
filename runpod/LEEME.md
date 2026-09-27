@@ -22,7 +22,7 @@ MODELOS="wan22_ti2v_5b_turbo" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp
 | Modelo | GPU | RAM del pod | Container Disk | Tiempo aprox. por clip |
 |---|---|---|---|---|
 | **LTX-2.5** (`ltx25_distilled`) | H100 / A100 **80 GB** | **≥ 100 GB** | **200 GB** | 10 s a 1536p: ~1–3 min (estimado) |
-| **MiniMax H3** (`minimax_h3`) | **H200** (141 GB) o H100 80 GB | **≥ 160 GB** | **250 GB** | 5 s a 768p: ~8–20 min en 1 GPU (estimado) |
+| **MiniMax H3** (`minimax_h3`) | **H200** (141 GB) o H100 80 GB | **≥ 160 GB** | **250 GB** | 5 s a 768p: ~15–35 min en 1 GPU (estimado) |
 
 Los tiempos son estimaciones y se confirman en la primera prueba. El primer video de cada pod
 tarda más, porque carga el modelo; después queda cargado en la GPU.
@@ -44,6 +44,10 @@ EE. UU. (ver `docs/QA-about-License.md` en su repo). Revísala antes de usarlo.
 | `qwen_image_2512` | Imágenes de máxima calidad, buen texto dentro de la imagen | H100 (en 48 GB va por partes) |
 | `whisper_large_v3` | Transcripción local (Smart Split y Audio a imágenes) | 16 GB+ |
 | `whisper_large_v3_turbo` | Transcripción local rápida | 8 GB+ |
+| `voxcpm2` | Clonador de voz de máxima calidad (48 kHz, español) | 8 GB+ |
+
+En RunPod no hay llama-tts: en el **Clonador de voz** elige el motor **VoxCPM2** (📦 Modelos →
+Descargar VoxCPM2, o ponlo en `MODELOS`).
 
 Ejemplo con todo lo necesario para "Audio a imágenes" en una A40:
 ```bash

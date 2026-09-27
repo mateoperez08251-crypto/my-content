@@ -563,7 +563,7 @@ function renderizarModelos(modelos) {
     window.modelosPorId = {};
     modelos.forEach(m => {
         window.modelosPorId[m.id] = m;
-        if (selectActivo && m.installed && m.type !== "other" && m.type !== "stt") {
+        if (selectActivo && m.installed && m.type !== "other" && m.type !== "stt" && m.type !== "tts") {
             modelosInstalados++;
             const opt = document.createElement('option');
             opt.value = m.id;

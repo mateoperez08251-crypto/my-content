@@ -37,6 +37,7 @@ Source: "descargar_modelo.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "generate_prompt_variation.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "video_worker.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "transcripcion_local.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "tts_worker.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "clips_virales.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "reencuadre.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "gpu_video.py"; DestDir: "{app}"; Flags: ignoreversion

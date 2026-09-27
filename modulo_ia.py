@@ -567,6 +567,20 @@ AVAILABLE_MODELS = [
         "patrones": PATRONES_WHISPER,
     },
     {
+        "id": "voxcpm2",
+        "name": "VoxCPM2 2B (clonador de voz) - máxima calidad",
+        "type": "tts",
+        "motor": "voxcpm2",
+        "description": "Clona voces con audio de 48 kHz en 30 idiomas (español incluido). Con la transcripción "
+                       "de la referencia copia timbre, ritmo y emoción. Licencia Apache 2.0 (uso comercial). "
+                       "Se usa en el Clonador de voz.",
+        "size_gb": 5.0,
+        "vram_gb": 8,
+        "repo": "openbmb/VoxCPM2",
+        "patrones": ["config.json", "model.safetensors", "audiovae.pth", "tokenizer.json",
+                     "tokenizer_config.json", "special_tokens_map.json", "tokenization_voxcpm2.py"],
+    },
+    {
         "id": "director_ia_prompts",
         "type": "other",
         "name": "Director IA (Llama 3 8B)",
@@ -1184,7 +1198,7 @@ def generar_video():
         return jsonify({"success": False, "error": "Escribe un prompt."}), 400
 
     m = _modelo(data.get("model_id", ""))
-    if not m or m.get("type") in ("other", "stt", "t2i"):
+    if not m or m.get("type") in ("other", "stt", "tts", "t2i"):
         return jsonify({"success": False, "error": "Selecciona un modelo de video en 'Modelo Activo'."}), 400
     motor, error = _comprobar_generacion(m)
     if error:
