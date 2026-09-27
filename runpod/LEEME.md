@@ -37,6 +37,14 @@ HF_TOKEN=hf_tu_token MODELOS="ltx25_distilled" AUTOBORRAR_MIN=60 CONTENTAPP_BASE
 **MiniMax H3:** su licencia de pesos abiertos solo cubre la UE, el Reino Unido, Corea del Sur y
 EE. UU. (ver `docs/QA-about-License.md` en su repo). Revísala antes de usarlo.
 
+## Guion a video (voz IA + imágenes)
+En el Estudio: **¿Qué quieres crear? → Guion a video**. Pega el guion (o carga un .txt), elige una
+voz de la lista o una clonada en el Clonador de voz, y pulsa el botón. Necesita `voxcpm2` y un modelo
+de imagen (`zimage_turbo`); con `realesrgan_x2` las imágenes salen más nítidas al hacer zoom.
+```bash
+MODELOS="voxcpm2 zimage_turbo realesrgan_x2" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp bash my-content/runpod/arranque_rapido.sh
+```
+
 ## Wan 2.2 14B (el flujo de ComfyUI, recomendado en la A40)
 Genera a 720p y 16 fps en 4 pasos. Después RIFE lo pasa a 32 fps y Real-ESRGAN a 1080p. Sin foto
 base, primero crea la imagen con Z-Image.

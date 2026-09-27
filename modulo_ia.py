@@ -1299,6 +1299,70 @@ def generar_video():
                     "mensaje": f"Generando con {m['name']}..."})
 
 
+# Voces de la lista (VoxCPM2 "diseño de voz": la descripción en inglés define la voz, no se lee)
+VOCES_PRESET = [
+    {"id": "narrador_documental", "nombre": "Narrador documental (hombre, grave y cálido)",
+     "diseno": "A deep, warm, calm adult male documentary narrator, clear diction, slow pace"},
+    {"id": "narradora_calida", "nombre": "Narradora cálida (mujer, suave)",
+     "diseno": "A warm, soft, friendly adult female narrator, gentle and clear, storytelling tone"},
+    {"id": "locutor_energico", "nombre": "Locutor enérgico (anuncios y ventas)",
+     "diseno": "An energetic, enthusiastic male radio announcer, fast, bright and punchy"},
+    {"id": "locutora_energica", "nombre": "Locutora enérgica (anuncios y ventas)",
+     "diseno": "An energetic, cheerful young female presenter, bright, upbeat and expressive"},
+    {"id": "joven_casual", "nombre": "Chico joven casual (redes sociales)",
+     "diseno": "A casual young man in his twenties, relaxed, natural and conversational"},
+    {"id": "joven_alegre", "nombre": "Chica joven alegre (redes sociales)",
+     "diseno": "A cheerful young woman in her twenties, lively, natural and smiling voice"},
+    {"id": "abuelo_sabio", "nombre": "Abuelo sabio (cuentos, reflexiones)",
+     "diseno": "A wise elderly man, slightly raspy, slow and kind storyteller voice"},
+    {"id": "misterio", "nombre": "Misterio y terror (grave, susurrante)",
+     "diseno": "A low, mysterious, slightly whispering male voice, suspenseful and dark"},
+    {"id": "motivacional", "nombre": "Motivacional épico (intenso)",
+     "diseno": "A powerful, intense, inspiring male motivational speaker, epic and emotional"},
+    {"id": "noticias", "nombre": "Noticias (neutral y clara)",
+     "diseno": "A neutral, professional female news anchor, clear and steady"},
+    {"id": "cuento_infantil", "nombre": "Cuento infantil (dulce y expresiva)",
+     "diseno": "A sweet, playful and very expressive female voice reading a children's story"},
+]
+
+
+def _voces_clonadas():
+    try:
+        import api_clonador_flask as ac
+        return ac, ac.listar_voces()
+    except Exception:
+        return None, []
+
+
+@ia_bp.route('/voces_guion', methods=['GET'])
+def voces_guion():
+    """Voces para 'Guion a video': las de la lista y las clonadas en el Clonador de voz."""
+    _, clonadas = _voces_clonadas()
+    m = _modelo("voxcpm2")
+    return jsonify({"success": True, "voxcpm2": bool(m and _instalado(m)),
+                    "preset": [{"id": v["id"], "nombre": v["nombre"]} for v in VOCES_PRESET],
+                    "clonadas": [{"id": v["id"], "nombre": v.get("nombre", "Voz"),
+                                  "transcripcion": bool(v.get("transcripcion"))} for v in clonadas]})
+
+
+def _cfg_voz(voz):
+    """'preset:<id>' o 'clon:<id>' -> campos de voz para el motor."""
+    tipo, _, id_ = str(voz or "preset:narrador_documental").partition(":")
+    if tipo == "clon":
+        ac, _ = _voces_clonadas()
+        if ac is None:
+            raise ValueError("El Clonador de voz no está disponible.")
+        carpeta = ac.DIR_VOCES / os.path.basename(id_)
+        original = carpeta / "referencia.wav"
+        if not original.is_file():
+            raise ValueError("Esa voz clonada ya no existe. Elige otra.")
+        ref = ac.referencia_util(original)
+        texto = (ac.meta_voz(carpeta) or {}).get("transcripcion", "") if ref == original else ""
+        return {"voz_ref": str(ref), "voz_ref_texto": texto or ""}
+    preset = next((v for v in VOCES_PRESET if v["id"] == id_), VOCES_PRESET[0])
+    return {"voz_diseno": preset["diseno"]}
+
+
 def _rutas_mejora():
     """Rutas de los modelos de mejora descargados (RIFE, Real-ESRGAN) y de Z-Image, que crea la
     primera imagen cuando el modelo de video solo anima fotos."""
@@ -1371,10 +1435,24 @@ def _comprobar_generacion(m):
 def generar_imagenes():
     """Texto -> imágenes, o AUDIO -> imágenes secuenciales (+ video con el audio)."""
     data = (request.get_json(silent=True) if request.is_json else request.form) or {}
-    modo = "audio_imagenes" if data.get("modo") == "audio_imagenes" else "imagen"
+    modo = data.get("modo") if data.get("modo") in ("audio_imagenes", "guion_video") else "imagen"
     prompt = str(data.get("prompt", "")).strip()
+    guion = str(data.get("guion", "")).strip()
     if modo == "imagen" and not prompt:
         return jsonify({"success": False, "error": "Escribe qué imagen quieres."}), 400
+    voz = {}
+    if modo == "guion_video":
+        if len(guion) < 10:
+            return jsonify({"success": False, "error": "Pega el guion o la historia que quieres narrar."}), 400
+        mv = _modelo("voxcpm2")
+        if not mv or not _instalado(mv):
+            return jsonify({"success": False, "error": "Para narrar descarga 'VoxCPM2' en el Gestor de Modelos "
+                                                       "(o en el Clonador de voz → Modelos)."}), 400
+        try:
+            voz = _cfg_voz(data.get("voz"))
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        voz["carpeta_voz"] = _carpeta_modelo(mv)
     if modo == "audio_imagenes" and not request.files.get("audio"):
         return jsonify({"success": False, "error": "Sube el audio (MP3/WAV/M4A) para crear las imágenes."}), 400
     m = _modelo(data.get("model_id", ""))
@@ -1414,7 +1492,7 @@ def generar_imagenes():
             "cantidad": int(data.get("cantidad", 1) or 1), "audio": audio, "escena_seg": escena,
             "transcripcion": transcripcion, "whisper_local": whisper, "idioma": str(data.get("idioma", "es")),
             "groq_key": groq_key, "carpeta_imagenes": ASSETS_DIR, "salida": _salida_video(task_id),
-            "ffmpeg": _ffmpeg(),
+            "ffmpeg": _ffmpeg(), "guion": guion, **voz, **_rutas_mejora(),
         }
         _lanzar_tarea(task_id, m, motor, cfg)
     except Exception as e:

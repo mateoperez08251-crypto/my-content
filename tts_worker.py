@@ -104,38 +104,56 @@ def _semilla(torch, n):
         torch.cuda.manual_seed_all(n)
 
 
-def sintetizar(trabajo):
+def cargar_modelo(carpeta):
+    """VoxCPM2 en la GPU (o CPU). Se usa también desde video_worker (Guion a video)."""
     _sin_torchaudio()
-    import soundfile as sf
     import torch
     _ajustar_precision(torch)
     from voxcpm import VoxCPM
-
     cuda = torch.cuda.is_available()
     print(f"Cargando VoxCPM2 en {'GPU ' + torch.cuda.get_device_name(0) if cuda else 'CPU (lento)'}…",
           flush=True)
-    modelo = VoxCPM.from_pretrained(trabajo["modelo"], load_denoiser=False, optimize=False,
-                                    device="cuda" if cuda else "cpu")
+    return VoxCPM.from_pretrained(carpeta, load_denoiser=False, optimize=False, device="cuda" if cuda else "cpu")
+
+
+def sintetizar_bloques(modelo, bloques, salidas, ref=None, ref_texto="", diseno="", semilla=1234,
+                       cfg=2.0, pasos=10, al_bloque=None):
+    """Un WAV por bloque, todos con la misma voz. Devuelve (duraciones en s, frecuencia).
+    - ref: voz clonada (con su transcripción exacta = clonación total).
+    - diseno: voz descrita en inglés, p. ej. "A deep, warm male narrator" (solo en el 1er bloque).
+    - sin ref, el 1er bloque fija la voz y los demás la copian."""
+    import soundfile as sf
+    import torch
     sr = modelo.tts_model.sample_rate
-    ref, ref_texto = trabajo.get("ref"), (trabajo.get("ref_texto") or "").strip()
-    semilla = int(trabajo.get("semilla", 1234))
-    ancla = None  # sin voz de referencia: el 1er bloque fija la voz de todos los demás
-    bloques, salidas = trabajo["bloques"], trabajo["salidas"]
+    ancla, duraciones = None, []
+    ref_texto = (ref_texto or "").strip()
     for i, (texto, salida) in enumerate(zip(bloques, salidas), start=1):
-        emitir(bloque=i, total=len(bloques))
+        if al_bloque:
+            al_bloque(i, len(bloques))
         _semilla(torch, semilla)
-        kw = {"text": texto, "cfg_value": float(trabajo.get("cfg", 2.0)),
-              "inference_timesteps": int(trabajo.get("pasos", 10)), "retry_badcase": True}
+        kw = {"text": texto, "cfg_value": float(cfg), "inference_timesteps": int(pasos), "retry_badcase": True}
         if ref:
             kw["reference_wav_path"] = ref
             if ref_texto:  # clonación total: audio + su transcripción exacta
                 kw["prompt_wav_path"], kw["prompt_text"] = ref, ref_texto
         elif ancla:
             kw["reference_wav_path"] = ancla
+        elif diseno:
+            kw["text"] = f"({diseno}){texto}"  # la descripción no se lee: define la voz
         wav = modelo.generate(**kw)
         sf.write(salida, wav, sr, subtype="PCM_16")
+        duraciones.append(len(wav) / float(sr))
         if not ref and ancla is None:
             ancla = salida
+    return duraciones, sr
+
+
+def sintetizar(trabajo):
+    modelo = cargar_modelo(trabajo["modelo"])
+    sintetizar_bloques(modelo, trabajo["bloques"], trabajo["salidas"], trabajo.get("ref"),
+                       trabajo.get("ref_texto") or "", trabajo.get("diseno") or "",
+                       int(trabajo.get("semilla", 1234)), float(trabajo.get("cfg", 2.0)),
+                       int(trabajo.get("pasos", 10)), lambda i, n: emitir(bloque=i, total=n))
     emitir(ok=True)
     return 0
 

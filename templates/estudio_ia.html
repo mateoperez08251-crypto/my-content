@@ -46,7 +46,25 @@
                             <option value="video" selected>🎬 Video (texto o imagen a video)</option>
                             <option value="imagen">🖼️ Imágenes (texto a imagen)</option>
                             <option value="audio_imagenes">🎙️ Audio a imágenes (secuencia + video)</option>
+                            <option value="guion_video">📜 Guion a video (voz IA + imágenes)</option>
                         </select>
+                        <div id="opciones-guion" style="display:none; margin-top: 12px; padding: 12px; border: 1px dashed rgba(168, 85, 247, 0.5); border-radius: 8px; background: rgba(0,0,0,0.3);">
+                            <div style="font-size: 0.8rem; color: #cbd5e1; margin-bottom: 8px;">Pega tu guion o historia. La IA lo narra con la voz que elijas, crea una imagen por escena y arma el video con movimiento suave y transiciones. El texto de abajo es el <b>estilo visual</b> (opcional).</div>
+                            <textarea id="guion-texto" rows="7" placeholder="Había una vez..." style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit'; resize: vertical;"></textarea>
+                            <input type="file" id="guion-archivo" accept=".txt,text/plain" style="display:none" onchange="cargarGuionArchivo(this, 'guion-texto')">
+                            <button onclick="document.getElementById('guion-archivo').click()" style="margin-top: 6px; background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; color: #fff; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: 'Outfit'; font-size: 0.8rem;">Cargar guion (.txt)</button>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
+                                <select id="select-voz-guion" title="Voz del narrador" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                    <option value="preset:narrador_documental">Narrador documental</option>
+                                </select>
+                                <select id="select-escena-guion" title="Cada cuánto cambia la imagen" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                    <option value="3">Imagen cada ~3 s</option>
+                                    <option value="5" selected>Imagen cada ~5 s</option>
+                                    <option value="8">Imagen cada ~8 s</option>
+                                </select>
+                            </div>
+                            <div id="aviso-voz-guion" style="font-size: 0.75rem; color: #fbbf24; margin-top: 6px; display: none;"></div>
+                        </div>
                         <div id="opciones-imagen" style="display:none; margin-top: 12px;">
                             <div class="ai-feature-title" style="margin-bottom: 6px; font-size: 0.85rem;">Cantidad de imágenes</div>
                             <select id="select-cantidad-img" style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
@@ -72,6 +90,9 @@
                                     <option value="groq">Transcribir con Groq (nube)</option>
                                 </select>
                             </div>
+                            <textarea id="guion-audio" rows="3" placeholder="Guion o de qué trata la historia (opcional): ayuda a la IA a entender el audio y mantener personajes y ambiente." style="width: 100%; box-sizing: border-box; margin-top: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit'; resize: vertical;"></textarea>
+                            <input type="file" id="guion-audio-archivo" accept=".txt,text/plain" style="display:none" onchange="cargarGuionArchivo(this, 'guion-audio')">
+                            <button onclick="document.getElementById('guion-audio-archivo').click()" style="margin-top: 6px; background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; color: #fff; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: 'Outfit'; font-size: 0.8rem;">Cargar guion (.txt)</button>
                         </div>
                     </div>
 

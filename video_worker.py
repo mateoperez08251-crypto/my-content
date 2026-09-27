@@ -837,7 +837,7 @@ def postprocesar(entrada, salida, cfg, ffmpeg):
 
 
 def generar(cfg):
-    if cfg.get("tarea") in ("imagen", "audio_imagenes"):
+    if cfg.get("tarea") in ("imagen", "audio_imagenes", "guion_video"):
         return generar_imagenes(cfg)
     ffmpeg = cfg.get("ffmpeg") or "ffmpeg"
     motor = cfg["motor"]
@@ -1344,6 +1344,90 @@ def _una_imagen(pipe, motor, prompt, w, h, semilla, pasos, torch):
                 num_inference_steps=pasos, true_cfg_scale=4.0, generator=gen).images[0]
 
 
+def _partir_guion(texto, objetivo_seg=5.0, cps=15.0):
+    """Guion -> textos de escena de ~objetivo_seg segundos hablados (~15 letras por segundo),
+    cortando en fin de frase (o en comas si una frase es muy larga). Máx. 60 escenas."""
+    texto = re.sub(r"[ \t]+", " ", str(texto or "")).strip()
+    frases = [f.strip() for f in re.split(r"(?<=[.!?…])\s+|\n+", texto) if f.strip()]
+    trozos = []
+    maximo = 420  # VoxCPM2 aguanta bloques largos; más de esto se corta por comas
+    for f in frases:
+        while len(f) > maximo:
+            corte = max(f.rfind(",", 0, maximo), f.rfind(";", 0, maximo), f.rfind(" ", 0, maximo))
+            corte = corte if corte > maximo // 3 else maximo
+            trozos.append(f[:corte + 1].strip())
+            f = f[corte + 1:].strip()
+        if f:
+            trozos.append(f)
+    objetivo = max(2.0, float(objetivo_seg))
+    while True:
+        chars = objetivo * cps
+        escenas, actual = [], ""
+        for t in trozos:
+            if actual and len(actual) + len(t) + 1 > chars * 1.35:
+                escenas.append(actual)
+                actual = t
+            else:
+                actual = f"{actual} {t}".strip()
+            if len(actual) >= chars:
+                escenas.append(actual)
+                actual = ""
+        if actual:
+            if escenas and len(actual) < chars / 3:
+                escenas[-1] = f"{escenas[-1]} {actual}"
+            else:
+                escenas.append(actual)
+        if len(escenas) <= 60:
+            return escenas
+        objetivo *= 1.4
+
+
+def _narrar(cfg, textos, torch):
+    """Guion a voz con VoxCPM2 (misma voz en todo el video). Devuelve las escenas con sus tiempos
+    exactos (no hace falta Whisper) y deja el audio completo en cfg["audio"]."""
+    import wave
+    import tts_worker
+    if _persistente() and PERSISTENTE["clave"] is not None:
+        progreso(2, 1, "Liberando la GPU para la voz...")
+        _vaciar_persistente(torch)
+    if tts_worker._falta():
+        progreso(2, 1, "Instalando VoxCPM2 (solo la primera vez, 2-5 min)...")
+        if tts_worker.instalar() != 0:
+            raise RuntimeError("No se pudo instalar VoxCPM2 para la voz. Revisa la conexión y el disco.")
+    progreso(3, 1, "Cargando la voz (VoxCPM2)...")
+    modelo = tts_worker.cargar_modelo(cfg["carpeta_voz"])
+    tmp = os.path.splitext(cfg["salida"])[0] + "_voz"
+    os.makedirs(tmp, exist_ok=True)
+    partes = [os.path.join(tmp, f"{i:03d}.wav") for i in range(len(textos))]
+    semilla = int(cfg.get("semilla_voz", -1))
+    semilla = semilla if semilla >= 0 else int(time.time()) % 99991
+    try:
+        durs, sr = tts_worker.sintetizar_bloques(
+            modelo, textos, partes, cfg.get("voz_ref") or None, cfg.get("voz_ref_texto") or "",
+            cfg.get("voz_diseno") or "", semilla, float(cfg.get("voz_cfg", 2.0)), int(cfg.get("voz_pasos", 10)),
+            lambda i, n: progreso(3 + 9 * (i - 1) / n, 1, f"Narrando el guion · parte {i}/{n}..."))
+    finally:
+        del modelo
+        _liberar_vram(torch)
+    pausa = 0.3  # respiro entre frases
+    audio = os.path.join(tmp, "narracion.wav")
+    escenas, t = [], 0.0
+    with wave.open(audio, "wb") as salida:
+        salida.setnchannels(1)
+        salida.setsampwidth(2)
+        salida.setframerate(sr)
+        for i, (ruta, d) in enumerate(zip(partes, durs)):
+            with wave.open(ruta, "rb") as w:
+                salida.writeframes(w.readframes(w.getnframes()))
+            fin = t + d + (pausa if i < len(partes) - 1 else 0.4)
+            salida.writeframes(b"\x00\x00" * int(sr * (fin - t - d)))
+            escenas.append({"texto": textos[i], "inicio": t, "fin": fin})
+            t = fin
+    cfg["audio"] = audio
+    print(f"[voz] {len(textos)} partes, {t:.1f} s de narración", flush=True)
+    return escenas
+
+
 def _escenas_desde_audio(cfg, torch):
     """Transcribe el audio y lo reparte en escenas de ~N segundos que cubren todo el audio."""
     import clips_virales as cv
@@ -1399,15 +1483,23 @@ def _prompts_escenas(escenas, cfg):
     import requests
     estilo = (cfg.get("prompt") or "").strip() or "cinematic, photorealistic, dramatic lighting, high detail"
     sistema = (
-        "You are an art director turning a narrated audio into a sequence of images, one per scene. "
-        "For EACH scene write one English image prompt that clearly shows what that part of the audio says: "
-        "subject, action, setting, lighting and camera framing, 40-80 words. Keep the whole sequence coherent: "
-        "the same visual style and, if there are recurring characters, describe them identically every time. "
-        f"Requested style: {estilo}. Never put text or letters in the images unless the audio asks for it. "
+        "You are an art director turning a narrated story into a sequence of images, one per scene. "
+        "First understand the WHOLE story (who, where, mood, how it evolves). Then for EACH scene write one "
+        "English image prompt that clearly shows what that part says: subject, action, setting, lighting and "
+        "camera framing, 40-80 words. Vary the shots like a film editor (wide establishing, medium, close-up, "
+        "detail, over-the-shoulder) so consecutive images never look the same. Keep the sequence coherent: the "
+        "same visual style and, if there are recurring characters, describe them identically every time "
+        "(age, hair, clothes). "
+        f"Requested style: {estilo}. Never put text, letters, signs or captions in the images. "
+        "Also pick a camera motion for each scene that fits it: zoom_in (tension, focus on a detail), zoom_out "
+        "(reveal), pan_left/pan_right (travel, landscapes), pan_up/pan_down (tall subjects), diag_in/diag_out. "
         'Reply ONLY with JSON: {"style": "short shared style description", '
-        '"scenes": [{"n": 1, "prompt": "..."}]}')
+        '"scenes": [{"n": 1, "prompt": "...", "motion": "zoom_in"}]}')
+    guion = (cfg.get("guion") or "").strip()
     lineas = "\n".join(f"{i + 1}. [{e['inicio']:.1f}-{e['fin']:.1f}s] {e['texto'] or '(music, no speech)'}"
                         for i, e in enumerate(escenas))
+    if guion:
+        lineas = f"Full story for context:\n{guion[:6000]}\n\nScenes:\n{lineas}"
     mensajes = [{"role": "system", "content": sistema}, {"role": "user", "content": lineas}]
     datos = {}
     try:  # Director IA local (Ollama), si está corriendo
@@ -1426,12 +1518,14 @@ def _prompts_escenas(escenas, cfg):
         except Exception as e:
             print(f"[aviso] Groq no pudo escribir los prompts ({e})", flush=True)
     estilo_global = str(datos.get("style") or estilo).strip()
-    por_n = {}
+    por_n, movs = {}, {}
     for sc in datos.get("scenes") or []:
         try:
             por_n[int(sc.get("n"))] = str(sc.get("prompt") or "").strip()
+            movs[int(sc.get("n"))] = str(sc.get("motion") or "").strip().lower()
         except (TypeError, ValueError):
             continue
+    cfg["_movimientos"] = [movs.get(i + 1, "") for i in range(len(escenas))]
     if not por_n:
         aviso("No hay Director IA (Ollama/Groq): cada imagen usa el texto de su escena con tu estilo.")
     prompts = []
@@ -1533,7 +1627,16 @@ def generar_imagenes(cfg):
     os.makedirs(carpeta_img, exist_ok=True)
 
     escenas = None
-    if tarea == "audio_imagenes":
+    if tarea == "guion_video":
+        textos = _partir_guion(cfg.get("guion"), cfg.get("escena_seg") or 5)
+        if not textos:
+            raise RuntimeError("El guion está vacío.")
+        escenas = _narrar(cfg, textos, torch)
+        progreso(12, 1, f"Escribiendo {len(escenas)} prompts visuales (Director IA)...")
+        prompts = _prompts_escenas(escenas, cfg)
+        for i, (e, pr) in enumerate(zip(escenas, prompts)):
+            print(f"[escena {i + 1}] {e['inicio']:.1f}-{e['fin']:.1f}s | {e['texto'][:80]} -> {pr[:160]}", flush=True)
+    elif tarea == "audio_imagenes":
         escenas = _escenas_desde_audio(cfg, torch)
         progreso(12, 1, f"Escribiendo {len(escenas)} prompts visuales (Director IA)...")
         prompts = _prompts_escenas(escenas, cfg)
@@ -1566,7 +1669,48 @@ def generar_imagenes(cfg):
         progreso(100, 4, "¡Imágenes listas!")
         emitir("resultado", archivo=imgs[0], imagenes=imgs, avisos=AVISOS)
         return
-    _video_secuencia(imgs, escenas, cfg["audio"], cfg["salida"], w, h, ffmpeg)
+    fuentes = imgs
+    if cfg.get("esrgan") and os.path.exists(cfg["esrgan"]):
+        # Imágenes x2 con IA: el zoom sigue nítido en 1080p
+        progreso(85, 3, "Mejorando las imágenes con IA (Real-ESRGAN)...")
+        try:
+            import mejora_video
+            from PIL import Image
+            fuentes = []
+            for ruta in imgs:
+                im = Image.open(ruta)
+                hd = mejora_video.escalar_esrgan([im], im.size[1] * 2, cfg["esrgan"], torch)[0]
+                destino = os.path.splitext(ruta)[0] + "_hd.png"
+                hd.save(destino)
+                fuentes.append(destino)
+        except Exception as e:
+            _liberar_vram(torch)
+            fuentes = imgs
+            print(f"[aviso] Real-ESRGAN no disponible para las imágenes ({type(e).__name__}: {e})", flush=True)
+    try:
+        import montaje
+        progreso(88, 3, "Montando el video (movimiento suave y transiciones)...")
+        montaje.montar(fuentes, escenas, cfg["audio"], cfg["salida"], ffmpeg, _codificador(ffmpeg, 17), torch,
+                       fps=30, movimientos=cfg.get("_movimientos"),
+                       progreso=lambda f: progreso(88 + 10 * f, 3, f"Montando el video · {int(f * 100)}%"))
+    except Exception as e:
+        _liberar_vram(torch)
+        print(f"[aviso] montaje en GPU falló ({type(e).__name__}: {e}); se usa ffmpeg.", flush=True)
+        _video_secuencia(imgs, escenas, cfg["audio"], cfg["salida"], w, h, ffmpeg)
+    for ruta in fuentes:
+        if ruta.endswith("_hd.png"):
+            try:
+                os.remove(ruta)
+            except OSError:
+                pass
+    if tarea == "guion_video":  # la narración queda junto al video; los trozos se borran
+        import shutil
+        tmp = os.path.dirname(cfg["audio"])
+        try:
+            os.replace(cfg["audio"], os.path.splitext(cfg["salida"])[0] + "_voz.wav")
+        except OSError:
+            pass
+        shutil.rmtree(tmp, ignore_errors=True)
     progreso(100, 4, "¡Video listo!")
     emitir("resultado", archivo=cfg["salida"], imagenes=imgs, avisos=AVISOS)
 
