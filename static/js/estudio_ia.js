@@ -63,13 +63,15 @@ window.cambiarModoEstudio = function (modo) {
     const mostrar = (id, si) => { const el = document.getElementById(id); if (el) el.style.display = si ? 'block' : 'none'; };
     mostrar('opciones-imagen', modo === 'imagen');
     mostrar('opciones-audio-img', modo === 'audio_imagenes');
+    mostrar('opciones-guion', modo === 'guion_video');
+    if (modo === 'guion_video') cargarVocesGuion();
     ['select-duration-gen', 'toggle-upscale-gen', 'toggle-60fps-gen', 'toggle-lipsync-gen', 'select-resolution-gen'].forEach(id => {
         const el = document.getElementById(id);
         const caja = el && el.closest('.ai-feature');
         if (caja) caja.style.display = esVideo ? '' : 'none';
     });
     const prompt = document.getElementById('prompt-input-gen');
-    if (prompt) prompt.placeholder = modo === 'audio_imagenes'
+    if (prompt) prompt.placeholder = (modo === 'audio_imagenes' || modo === 'guion_video')
         ? 'Estilo visual (opcional). Ej: acuarela de cuento infantil, colores pastel...'
         : (modo === 'imagen' ? 'Describe la imagen que quieres...' : 'Escribe aquí tu idea básica y deja que la IA la convierta en un prompt detallado...');
     const btn = document.getElementById('btn-process-gen');
@@ -80,8 +82,43 @@ function textoBotonGenerar() {
     const modo = document.getElementById('select-modo-gen')?.value || 'video';
     if (modo === 'imagen') return '<i class="ph-fill ph-image"></i> Generar Imágenes';
     if (modo === 'audio_imagenes') return '<i class="ph-fill ph-microphone"></i> Crear Imágenes desde el Audio';
+    if (modo === 'guion_video') return '<i class="ph-fill ph-scroll"></i> Crear Video desde el Guion';
     return "Generar Video Ahora";
 }
+
+// Guion desde un archivo .txt
+window.cargarGuionArchivo = function (input, destino) {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    const lector = new FileReader();
+    lector.onload = (e) => { document.getElementById(destino).value = e.target.result; };
+    lector.readAsText(f, 'utf-8');
+    input.value = '';
+};
+
+// Voces para 'Guion a video': la lista de VoxCPM2 + las clonadas en el Clonador de voz
+window.cargarVocesGuion = function () {
+    const sel = document.getElementById('select-voz-guion');
+    if (!sel) return;
+    fetch('/api/ia/voces_guion').then(r => r.json()).then(d => {
+        if (!d.success) return;
+        const previo = sel.value;
+        const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        let html = '<optgroup label="Voces de la lista">' +
+            d.preset.map(v => `<option value="preset:${v.id}">${esc(v.nombre)}</option>`).join('') + '</optgroup>';
+        if (d.clonadas.length) {
+            html += '<optgroup label="Tus voces clonadas">' + d.clonadas.map(v =>
+                `<option value="clon:${v.id}">${esc(v.nombre)}${v.transcripcion ? ' ✓' : ''}</option>`).join('') + '</optgroup>';
+        }
+        sel.innerHTML = html;
+        if ([...sel.options].some(o => o.value === previo)) sel.value = previo;
+        const aviso = document.getElementById('aviso-voz-guion');
+        if (aviso) {
+            aviso.style.display = d.voxcpm2 ? 'none' : 'block';
+            aviso.textContent = 'Descarga "VoxCPM2" en el Gestor de Modelos para narrar. Para clonar tu voz, grábala en el Clonador de voz (con su transcripción sale más parecida).';
+        }
+    }).catch(() => {});
+};
 
 function generarImagenesEstudio(modo) {
     const modelId = document.getElementById('select-active-model')?.value || '';
@@ -100,8 +137,15 @@ function generarImagenesEstudio(modo) {
     if (modo === 'imagen') {
         if (!prompt) { mostrarToast("Falta el texto", "Describe la imagen que quieres.", true); return; }
         fd.append('cantidad', document.getElementById('select-cantidad-img')?.value || '1');
+    } else if (modo === 'guion_video') {
+        const guion = document.getElementById('guion-texto')?.value.trim() || '';
+        if (guion.length < 10) { mostrarToast("Falta el guion", "Pega el guion o la historia que quieres narrar.", true); return; }
+        fd.append('guion', guion);
+        fd.append('voz', document.getElementById('select-voz-guion')?.value || 'preset:narrador_documental');
+        fd.append('escena_seg', document.getElementById('select-escena-guion')?.value || '5');
     } else {
         const audio = document.getElementById('audio-secuencia-file')?.files[0];
+        fd.append('guion', document.getElementById('guion-audio')?.value.trim() || '');
         if (!audio) { mostrarToast("Falta el audio", "Selecciona el audio con el que se crearán las imágenes.", true); return; }
         fd.append('audio', audio);
         fd.append('escena_seg', document.getElementById('select-escena-seg')?.value || '5');
