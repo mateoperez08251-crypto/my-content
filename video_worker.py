@@ -1657,10 +1657,13 @@ def _audio_final(cfg, escenas, estilo, ffmpeg):
     progreso(87, 3, "Mezclando voz, música y efectos...")
     salida = os.path.splitext(cfg["salida"])[0] + "_mezcla.wav"
     try:
+        pistas = {}
         audio_mix.mezclar(cfg["audio"], salida, ffmpeg, duracion, musica=archivo, ambiente_tipo=ambiente,
                           vol_musica=float(cfg.get("vol_musica") or estilo.get("vol_musica", 0.22)),
-                          eventos=eventos, semilla=int(time.time()) % 1000)
-        cfg["_temporales"] = cfg.get("_temporales", []) + [salida]
+                          eventos=eventos, semilla=int(time.time()) % 1000, pistas=pistas)
+        cfg["_pistas"] = pistas
+        cfg["_temporales"] = cfg.get("_temporales", []) + [salida] + [
+            p for k, p in pistas.items() if p != archivo]
         return salida
     except Exception as e:
         print(f"[aviso] mezcla de audio falló ({e}); se usa solo la voz.", flush=True)
@@ -1792,6 +1795,21 @@ def generar_imagenes(cfg):
                 os.remove(ruta)
             except OSError:
                 pass
+    proyecto = ""
+    if cfg.get("exportar_proyecto", True):
+        try:  # ZIP para retocarlo en Kdenlive / Shotcut / DaVinci Resolve
+            import montaje
+            import proyecto_editable
+            from PIL import Image
+            W, H = montaje.tamano_salida(*Image.open(imgs[0]).size)
+            pistas = cfg.get("_pistas") or {}
+            proyecto = proyecto_editable.exportar(
+                os.path.splitext(cfg["salida"])[0] + "_proyecto.zip", imgs, escenas, 30, W, H,
+                [("Voz", cfg["audio"]), ("Musica", pistas.get("musica")), ("Efectos", pistas.get("efectos"))],
+                subs=(cfg.get("_subs").subs if cfg.get("_subs") is not None else None),
+                nombre=os.path.splitext(os.path.basename(cfg["salida"]))[0])
+        except Exception as e:
+            print(f"[aviso] no se pudo exportar el proyecto editable ({type(e).__name__}: {e})", flush=True)
     for ruta in cfg.get("_temporales", []):
         try:
             os.remove(ruta)
@@ -1806,7 +1824,7 @@ def generar_imagenes(cfg):
             pass
         shutil.rmtree(tmp, ignore_errors=True)
     progreso(100, 4, "¡Video listo!")
-    emitir("resultado", archivo=cfg["salida"], imagenes=imgs, avisos=AVISOS)
+    emitir("resultado", archivo=cfg["salida"], imagenes=imgs, proyecto=proyecto, avisos=AVISOS)
 
 
 def diagnostico():

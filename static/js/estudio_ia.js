@@ -978,6 +978,7 @@ function abrirTimelineVideo() {
     const cerrar = document.getElementById('btn-cerrar-timeline');
     if (cerrar) cerrar.innerText = 'Seguir en segundo plano';
     actualizarTimeline({ progreso: 0, paso: 1, mensaje: 'Iniciando motor de video...' });
+    mostrarBotonProyecto(null);
 }
 
 window.cerrarTimelineVideo = function () {
@@ -1035,6 +1036,7 @@ function esperarTareaVideo(taskId, intentos) {
             actualizarTimeline(t);
             if (t.estado === 'terminado') {
                 finTimeline('Ver mis videos');
+                mostrarBotonProyecto(t.proyecto ? taskId : null);
                 const modoFin = document.getElementById('select-modo-gen')?.value || 'video';
                 mostrarToast(modoFin === 'imagen' ? "¡Imágenes listas!" : "¡Video Completado!",
                     modoFin === 'imagen' ? "Tus imágenes están en 'Mis Videos Generados' → Imágenes."
@@ -1057,6 +1059,26 @@ function esperarTareaVideo(taskId, intentos) {
         .catch(() => {
             if (intentos < 2000) setTimeout(() => esperarTareaVideo(taskId, intentos + 1), 3000);
         });
+}
+
+// Botón "Exportar para editar" (ZIP para Kdenlive / Shotcut / DaVinci) al terminar el video
+function mostrarBotonProyecto(taskId) {
+    let btn = document.getElementById('btn-descargar-proyecto');
+    const cerrar = document.getElementById('btn-cerrar-timeline');
+    if (!taskId) { if (btn) btn.style.display = 'none'; return; }
+    if (!btn && cerrar) {
+        btn = document.createElement('a');
+        btn.id = 'btn-descargar-proyecto';
+        btn.className = cerrar.className;
+        btn.style.cssText = 'display:inline-flex; align-items:center; gap:6px; margin-right:8px; text-decoration:none; ' +
+            'background: linear-gradient(135deg, #14b8a6, #8b5cf6); color:#fff; border:none;';
+        btn.innerHTML = '<i class="ph-bold ph-package"></i> Exportar para editar (Kdenlive / DaVinci)';
+        cerrar.parentNode.insertBefore(btn, cerrar);
+    }
+    if (btn) {
+        btn.href = '/api/ia/descargar_proyecto/' + encodeURIComponent(taskId);
+        btn.style.display = 'inline-flex';
+    }
 }
 
 window.comprobarMotorVideo = function (refrescar) {

@@ -45,6 +45,7 @@ Source: "subtitulos.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "audio_mix.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "estilos_video.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dependencias.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "proyecto_editable.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "clips_virales.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "reencuadre.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "gpu_video.py"; DestDir: "{app}"; Flags: ignoreversion

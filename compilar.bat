@@ -105,6 +105,7 @@ copy /y "subtitulos.py" "%DIST%\" >nul 2>&1
 copy /y "audio_mix.py" "%DIST%\" >nul 2>&1
 copy /y "estilos_video.py" "%DIST%\" >nul 2>&1
 copy /y "dependencias.py" "%DIST%\" >nul 2>&1
+copy /y "proyecto_editable.py" "%DIST%\" >nul 2>&1
 copy /y "clips_virales.py" "%DIST%\" >nul 2>&1
 copy /y "reencuadre.py" "%DIST%\" >nul 2>&1
 copy /y "gpu_video.py" "%DIST%\" >nul 2>&1
