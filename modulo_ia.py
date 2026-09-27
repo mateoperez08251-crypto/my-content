@@ -867,10 +867,17 @@ def _ejecutar_worker(task_id, motor, cfg_path):
         winproc.adjuntar_a_job(proc)  # muere con la app aunque esta crashee
         _set_tarea(task_id, proceso=proc)
         ultimas = []
+        try:
+            registro = open(os.path.join(paths.LOGS_DIR, "motor_video.log"), "w", encoding="utf-8")
+        except OSError:
+            registro = None
         for linea in proc.stdout:
             linea = linea.strip()
             if not linea:
                 continue
+            if registro and '"tipo": "progreso"' not in linea:
+                registro.write(linea + "\n")
+                registro.flush()
             try:
                 ev = json.loads(linea) if linea.startswith("{") else None
             except ValueError:
@@ -890,6 +897,9 @@ def _ejecutar_worker(task_id, motor, cfg_path):
             elif tipo == "error":
                 _set_tarea(task_id, estado="error", error=ev.get("msg", "Error desconocido"))
         codigo = proc.wait()
+        if registro:
+            registro.write(f"[codigo de salida {codigo}]\n")
+            registro.close()
         with _tareas_lock:
             t = tareas_video.get(task_id, {})
             if t.get("estado") == "en_curso":

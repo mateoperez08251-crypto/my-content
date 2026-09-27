@@ -424,7 +424,15 @@ def generar(cfg):
     vectores = codificar_texto(motor, cfg["carpeta_modelo"], cfg["prompt"],
                                cfg.get("negativo") or NEGATIVO, torch, gpu)
     pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, gpu)
-    vectores_gpu = {k: v.to("cuda") if hasattr(v, "to") else v for k, v in vectores.items()}
+    # Los vectores deben tener el MISMO formato que el transformer (fp16 del codificador vs fp32
+    # del transformer en Pascal daba "expected ... same dtype"). Las máscaras no se convierten.
+    dtype_tr = getattr(getattr(pipe, "transformer", None), "dtype", gpu["dtype"])
+    vectores_gpu = {}
+    for k, v in vectores.items():
+        if hasattr(v, "to"):
+            flotante = getattr(v, "is_floating_point", lambda: False)()
+            v = v.to("cuda", dtype=dtype_tr) if flotante else v.to("cuda")
+        vectores_gpu[k] = v
     progreso(15, 1, f"Modelo cargado ({'entero en la GPU' if pipe._estrategia == 'gpu' else 'GPU + RAM'}).")
     imagen = None
     if cfg.get("imagen"):
@@ -543,7 +551,9 @@ def main(argv):
         generar(cfg)
         return 0
     except Exception as e:
-        msg = str(e)
+        import traceback
+        traceback.print_exc(file=sys.stdout)  # queda en logs/motor_video.log
+        msg = f"{type(e).__name__}: {e}"
         if "out of memory" in msg.lower() or "CUDA out of memory" in msg:
             msg = ("La GPU se quedó sin memoria (VRAM). Prueba con menos duración, un modelo más "
                    "ligero (Wan2.1 1.3B) o cierra otros programas que usen la GPU.")
