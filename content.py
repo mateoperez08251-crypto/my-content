@@ -455,7 +455,7 @@ def run_automation_thread(data):
             custom_dir = data.get('custom_output_dir', '')
             output_folder = custom_dir if custom_dir else os.path.join(EXEC_DIR, "videos_descargados")
             
-            video = yt_downloader.download_video(video, output_dir=output_folder, quality=calidad)
+            video = yt_downloader.download_video(video, output_dir=output_folder, quality=calidad, cancel_checker=lambda: cancel_requested)
             if not video:
                 unlock_mouse()
                 return
@@ -1255,7 +1255,7 @@ def run_smart_split_thread(data):
             log("Descargando video para Smart Split...")
             custom_dl = data.get('custom_output_dir', '')
             dl_dir = custom_dl if custom_dl else os.path.join(EXEC_DIR, "videos_descargados")
-            source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440")
+            source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440", cancel_checker=lambda: cancel_requested)
             if not source:
                 raise Exception("Error al descargar video")
                 
