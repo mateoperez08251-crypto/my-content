@@ -5,7 +5,7 @@
 #
 #  Uso:   bash runpod/instalar.sh                      (solo instala)
 #         bash runpod/instalar.sh wan21_t2v_13b        (instala y baja el modelo)
-#  Modelos: wan21_t2v_13b  ltx_video  cogvideox_5b  cogvideox_5b_i2v  hunyuan_video
+#  Modelos: wan22_ti2v_5b_turbo wan21_t2v_13b  ltx_video  cogvideox_5b  cogvideox_5b_i2v  hunyuan_video
 #
 #  Rápido a propósito (en RunPod el tiempo de instalación también se paga):
 #  - reutiliza el torch de la plantilla PyTorch (evita bajar ~2.5 GB),
