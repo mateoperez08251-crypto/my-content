@@ -429,6 +429,17 @@ PATRONES_DIFFUSERS = ["model_index.json", "transformer/*", "vae/*", "text_encode
 
 AVAILABLE_MODELS = [
     {
+        "id": "wan22_ti2v_5b_turbo",
+        "name": "Wan2.2 5B Turbo (720p, 4 pasos) - recomendado",
+        "type": "both",
+        "motor": "wan22_turbo",
+        "description": "El mejor en calidad/velocidad: 720p a 24 fps en 4 pasos. Anima fotos y encadena "
+                       "clips largos. GPU RTX de 16 GB+ (A40, A5000, 4090...).",
+        "size_gb": 21.2,
+        "vram_gb": 16,
+        "repo": "yetter-ai/Wan2.2-TI2V-5B-Turbo-Diffusers",
+    },
+    {
         "id": "wan21_t2v_13b",
         "name": "Wan2.1 1.3B (Texto a Video)",
         "type": "t2v",
@@ -671,7 +682,8 @@ def _incompatible(m):
     if m.get("type") == "other" or _motor_info.get("estado") != "listo":
         return ""
     gpu = _motor_info.get("gpu") or "tu GPU"
-    if _motor_info.get("formato") == "fp32" and m.get("motor") in ("cogvideox", "cogvideox_i2v", "hunyuan"):
+    if _motor_info.get("formato") == "fp32" and m.get("motor") in ("cogvideox", "cogvideox_i2v", "hunyuan",
+                                                                 "wan22_turbo"):
         return f"Necesita una gráfica RTX (serie 20 o más nueva). En tu {gpu} usa Wan2.1 1.3B o LTX-Video."
     vram = _motor_info.get("vram_gb") or 0
     if vram and vram + 0.5 < m.get("vram_gb", 0):

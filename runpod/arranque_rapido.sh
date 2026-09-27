@@ -6,7 +6,7 @@
 #  solo tras X minutos sin uso (así solo pagas lo que usas).
 #
 #  Variables opcionales (en "Environment Variables" del pod o antes del comando):
-#    MODELOS="wan21_t2v_13b ltx_video"   modelos a bajar (por defecto wan21_t2v_13b)
+#    MODELOS="wan22_ti2v_5b_turbo ltx_video"   modelos a bajar (por defecto wan22_ti2v_5b_turbo)
 #    AUTOBORRAR_MIN=60                   minutos quieto (sin trabajos ni clics) para borrar el pod (0 = nunca)
 #    CONTENTAPP_CLAVE=...                contraseña de la web (si no, se genera una)
 #    DIRECTOR_IA=1                       instala Ollama + llama3 para mejorar prompts (0 = no)
@@ -17,7 +17,7 @@ cd "$APP_DIR"
 
 git pull --ff-only -q 2>/dev/null || echo "[!] No se pudo actualizar con git pull (se usa la versión actual)."
 
-MODELOS="${MODELOS:-wan21_t2v_13b}"
+MODELOS="${MODELOS:-wan22_ti2v_5b_turbo}"
 # shellcheck disable=SC2086
 bash runpod/instalar.sh $MODELOS
 

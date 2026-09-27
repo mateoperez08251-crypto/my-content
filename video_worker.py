@@ -46,6 +46,10 @@ def aviso(msg):
 PERFILES = {
     "ltx": {"w": 768, "h": 512, "frames": 121, "fps": 24, "pasos": 40, "cfg": 3.0, "imagen": True},
     "wan": {"w": 832, "h": 480, "frames": 81, "fps": 16, "pasos": 30, "cfg": 5.0, "imagen": False},
+    # Wan 2.2 TI2V-5B Turbo: destilado (4 pasos, sin CFG), 720p a 24 fps. "destilado" = no se
+    # tocan sus pasos ni se le pone caché (ya está optimizado).
+    "wan22_turbo": {"w": 1280, "h": 704, "frames": 121, "fps": 24, "pasos": 4, "cfg": 1.0, "imagen": True,
+                    "destilado": True},
     "cogvideox": {"w": 720, "h": 480, "frames": 49, "fps": 8, "pasos": 50, "cfg": 6.0, "imagen": False},
     "cogvideox_i2v": {"w": 720, "h": 480, "frames": 49, "fps": 8, "pasos": 50, "cfg": 6.0, "imagen": True},
     "hunyuan": {"w": 848, "h": 480, "frames": 61, "fps": 24, "pasos": 30, "cfg": 6.0, "imagen": False},
@@ -61,7 +65,7 @@ NEGATIVO_WAN = ("Bright tones, overexposed, oversaturated, static, blurred detai
                 "extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, "
                 "misshapen limbs, fused fingers, still picture, messy background, three legs, "
                 "many people in the background, walking backwards")
-NEGATIVOS = {"wan": NEGATIVO_WAN}
+NEGATIVOS = {"wan": NEGATIVO_WAN, "wan22_turbo": NEGATIVO_WAN}
 
 ALTURAS = {"4k": 2160, "1080p": 1080, "720p": 720, "480p": 480}
 
@@ -79,6 +83,8 @@ MODELOS = {
             "tr": "LTXVideoTransformer3DModel", "vae": "AutoencoderKLLTXVideo"},
     "wan": {"clase": "WanPipeline", "te_gb": 10.6, "params": 1.4, "vram_min": 8, "trabajo": 2.0,
             "tr": "WanTransformer3DModel", "vae": "AutoencoderKLWan"},
+    "wan22_turbo": {"clase": "WanPipeline", "te_gb": 10.6, "params": 5.0, "vram_min": 12, "fp32": False,
+                    "trabajo": 3.0, "tr": "WanTransformer3DModel", "vae": "AutoencoderKLWan"},
     "cogvideox": {"clase": "CogVideoXPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8, "fp32": False,
                   "trabajo": 2.5, "tr": "CogVideoXTransformer3DModel", "vae": "AutoencoderKLCogVideoX"},
     "cogvideox_i2v": {"clase": "CogVideoXImageToVideoPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8,
@@ -220,6 +226,7 @@ def _mover(valor, dispositivo):
 TEXTO = {
     "ltx": ("T5EncoderModel", "T5Tokenizer"),
     "wan": ("UMT5EncoderModel", "AutoTokenizer"),
+    "wan22_turbo": ("UMT5EncoderModel", "AutoTokenizer"),
     "cogvideox": ("T5EncoderModel", "T5Tokenizer"),
     "cogvideox_i2v": ("T5EncoderModel", "T5Tokenizer"),
 }
@@ -352,7 +359,7 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
 
     nulos = _nulos(carpeta, COMPONENTES_TEXTO)
     clase = getattr(diffusers, info["clase"])
-    vae_dtype = torch.float32 if motor == "wan" else dtype  # el VAE de Wan pide fp32
+    vae_dtype = torch.float32 if motor.startswith("wan") else dtype  # el VAE de Wan pide fp32
 
     _liberar_vram(torch)
     libre = vram_libre_gb(torch, gpu)
@@ -377,7 +384,7 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
             _liberar_vram(torch)
     else:
         progreso(10, 1, f"Cargando el modelo ({gpu['dtype_nombre']}, GPU + RAM)...")
-    if not piezas and motor == "wan":
+    if not piezas and motor.startswith("wan"):
         piezas["vae"] = diffusers.AutoencoderKLWan.from_pretrained(carpeta, subfolder="vae",
                                                                    torch_dtype=torch.float32)
     pipe = clase.from_pretrained(carpeta, torch_dtype=dtype, **piezas, **nulos)
@@ -447,6 +454,19 @@ def pipeline_imagen(motor, pipe):
         # defecto): el transformer compartido quedaba en fp32 y chocaba con el prompt en bf16.
         p = diffusers.LTXImageToVideoPipeline.from_pipe(pipe, torch_dtype=getattr(pipe, "_dtype", None)
                                                         or pipe.transformer.dtype)
+        if getattr(pipe, "_estrategia", "gpu") == "offload":
+            p.enable_model_cpu_offload()
+        elif getattr(pipe, "_estrategia", "gpu") == "secuencial":
+            p.enable_sequential_cpu_offload()
+        return p
+    if motor == "wan22_turbo":
+        # Wan 2.2 5B anima imágenes sin codificador de imagen. Se arma con las MISMAS piezas
+        # (sin from_pipe, que convertiría el VAE fp32 a bf16).
+        import diffusers
+        p = diffusers.WanImageToVideoPipeline(
+            tokenizer=None, text_encoder=None, vae=pipe.vae, scheduler=pipe.scheduler,
+            transformer=pipe.transformer, transformer_2=None, image_processor=None, image_encoder=None,
+            boundary_ratio=None, expand_timesteps=True)
         if getattr(pipe, "_estrategia", "gpu") == "offload":
             p.enable_model_cpu_offload()
         elif getattr(pipe, "_estrategia", "gpu") == "secuencial":
@@ -633,7 +653,11 @@ def generar(cfg):
 
     pipe_img = None
     if imagen is not None or perfil["imagen"]:
-        pipe_img = pipeline_imagen(motor, pipe)
+        try:
+            pipe_img = pipeline_imagen(motor, pipe)
+        except Exception as e:  # sin imagen de partida: cada tramo se genera por separado
+            print(f"[aviso] modo imagen-a-video no disponible ({type(e).__name__}: {e})", flush=True)
+            pipe_img = None
     if imagen is not None and pipe_img is None:
         aviso("Este modelo solo genera desde texto: se ignoró la imagen base.")
         imagen = None
@@ -641,6 +665,8 @@ def generar(cfg):
         raise RuntimeError("CogVideoX Imagen-a-Video necesita una imagen base (Paso 1).")
 
     ajuste = VELOCIDADES.get(str(cfg.get("velocidad") or "rapido"), VELOCIDADES["rapido"])
+    if perfil.get("destilado"):  # ya viene optimizado (pocos pasos): no se toca
+        ajuste = VELOCIDADES["calidad"]
     perfil["pasos"] = max(10, round(perfil["pasos"] * ajuste["pasos"]))
     if ajuste["cache"]:
         try:

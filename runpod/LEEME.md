@@ -12,7 +12,7 @@ videos antes.
 En la terminal del pod nuevo:
 ```bash
 cd /root && git clone https://github.com/mateoperez08251-crypto/my-content.git
-MODELOS="wan21_t2v_13b" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp bash my-content/runpod/arranque_rapido.sh
+MODELOS="wan22_ti2v_5b_turbo" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp bash my-content/runpod/arranque_rapido.sh
 ```
 - `MODELOS`: los que quieras, separados por espacio.
 - `AUTOBORRAR_MIN=0` desactiva el autoborrado.
