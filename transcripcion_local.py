@@ -96,25 +96,17 @@ def transcribir(ruta, modelo="auto", idioma="es", ffmpeg=None, inicio=None, fin=
     gen = {"task": "transcribe"}
     if idioma:
         gen["language"] = idioma
-    # Los tiempos por palabra guardan la atención de cada paso: con lotes de 8 trozos Whisper
-    # llenaba la VRAM. Lotes pequeños y, si aun así se llena, de uno en uno.
-    lote = 1
-    if cuda:
-        libre = torch.cuda.mem_get_info()[0] / 1024 ** 3
-        lote = 4 if libre >= 24 else (2 if libre >= 12 else 1)
+    # Un trozo de 30 s cada vez: los tiempos por palabra guardan la atención de cada paso y con
+    # varios trozos juntos un audio de 2 min llenaba la VRAM. Así la memoria no crece con la duración.
     try:
-        while True:
-            try:
-                res = asr({"raw": audio, "sampling_rate": 16000}, return_timestamps="word",
-                          chunk_length_s=30, batch_size=lote, generate_kwargs=gen)
-                break
-            except Exception as e:
-                if not cuda or lote == 1 or "out of memory" not in str(e).lower():
-                    raise
-            lote = 1
-            gc.collect()
-            torch.cuda.empty_cache()
-            avisar("VRAM llena: Whisper sigue de un trozo en uno (algo más lento).")
+        try:
+            res = asr({"raw": audio, "sampling_rate": 16000}, return_timestamps="word",
+                      chunk_length_s=30, stride_length_s=5, batch_size=1, generate_kwargs=gen)
+        except Exception as e:
+            if "out of memory" in str(e).lower():
+                raise RuntimeError("Whisper no cabe en la VRAM: otro modelo la está ocupando. Reinicia con "
+                                   "'bash runpod/iniciar.sh' o usa la transcripción con Groq.") from e
+            raise
     finally:
         try:
             asr.model.to("cpu")  # suelta la VRAM aunque quede alguna referencia al modelo
