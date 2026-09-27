@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -1203,6 +1204,10 @@ def _escenas_desde_audio(cfg, torch):
              else "Transcribiendo el audio (Groq)...")
     if proveedor == "groq" and cfg.get("groq_key"):
         os.environ["GROQ_API_KEY"] = cfg["groq_key"]
+    if proveedor == "local" and _persistente() and PERSISTENTE["clave"] is not None:
+        # Un modelo de video/imagen cargado de antes + Whisper no caben juntos: se libera antes
+        progreso(3, 1, "Liberando la GPU para Whisper...")
+        _vaciar_persistente(torch)
     palabras, segmentos = cv.transcribir(audio, idioma=cfg.get("idioma") or "es", proveedor=proveedor,
                                          modelo_local=cfg.get("whisper_local") or "auto")
     _liberar_vram(torch)
@@ -1278,9 +1283,25 @@ def _prompts_escenas(escenas, cfg):
         aviso("No hay Director IA (Ollama/Groq): cada imagen usa el texto de su escena con tu estilo.")
     prompts = []
     for i, e in enumerate(escenas):
-        base = (por_n.get(i + 1) or e["texto"] or estilo).strip().rstrip(".")
+        base = _sin_letreros((por_n.get(i + 1) or e["texto"] or estilo).strip()).rstrip(".")
         prompts.append(f"{base}. Style: {estilo_global}")
     return prompts
+
+
+_CITA = r"[\"'“‘][^\"'”’]*[\"'”’]"
+_DICE = r"(?:reading|saying|that (?:says|reads)|which (?:says|reads)|with the (?:words?|text))\s*:?\s*"
+_LETRERO = re.compile(  # ", with a sign reading '...'" -> fuera entero
+    r",?\s*(?:with|and|holding|showing)\s+(?:an?|the)?\s*(?:\w+\s+)?"
+    r"(?:signs?|banners?|posters?|texts?|captions?|labels?|placards?|billboards?|words?|letters?)\s+"
+    + _DICE + _CITA, re.IGNORECASE)
+_SOLO_DICE = re.compile(r"\s*" + _DICE + _CITA, re.IGNORECASE)  # "A banner that says '...'" -> "A banner"
+
+
+def _sin_letreros(prompt):
+    """El Director a veces pide "un cartel que dice '...'" y el modelo dibuja letras sin sentido."""
+    limpio = _SOLO_DICE.sub("", _LETRERO.sub("", prompt))
+    limpio = re.sub(r"[\"“”][^\"“”]{1,80}[\"“”]", "", limpio)  # frases citadas sueltas
+    return re.sub(r"\s{2,}", " ", re.sub(r"\s+([,.])", r"\1", limpio)).strip(" ,")
 
 
 def _video_secuencia(imgs, escenas, audio, salida, w, h, ffmpeg, fps=30):
