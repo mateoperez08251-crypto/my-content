@@ -338,8 +338,10 @@ def _prompt_con_gguf(idea):
     gguf = os.path.join(MODELS_DIR, "llama-3-8b-instruct.Q8_0.gguf")
     if not os.path.exists(gguf):
         return ""
-    if estado_memoria()["commit_libre_gb"] < 10:
-        raise RuntimeError("No hay memoria libre suficiente (se necesitan ~10 GB) para el Director IA local.")
+    # Con GPU NVIDIA el modelo va a la VRAM (-ngl 99): basta poca RAM. Sin GPU necesita ~10 GB.
+    necesita = 3 if (_motor_info.get("cuda") or shutil.which("nvidia-smi")) else 10
+    if estado_memoria()["commit_libre_gb"] < necesita:
+        raise RuntimeError(f"No hay memoria libre suficiente (se necesitan ~{necesita} GB) para el Director IA local.")
     try:
         from api_clonador_flask import buscar_binario
         tts = buscar_binario()
@@ -407,11 +409,13 @@ def generar_prompt():
             errores.append(f"{nombre}: {e}")
 
     detalle = (" Detalle: " + " | ".join(errores)) if errores else ""
-    return jsonify({
-        "success": False,
-        "error": ("No hay ningún Director IA disponible. Instala Ollama (ollama.com) y ejecuta "
-                  "'ollama pull llama3', o descarga 'Director IA' en el Gestor de Modelos." + detalle),
-    })
+    if os.environ.get("CONTENTAPP_SERVIDOR") == "1":
+        consejo = ("En RunPod el Director IA se instala solo con arranque_rapido.sh (DIRECTOR_IA=1, "
+                   "viene activado). Si lo desactivaste, vuelve a ejecutarlo.")
+    else:
+        consejo = ("Instala Ollama (ollama.com) y ejecuta 'ollama pull llama3', o descarga "
+                   "'Director IA' en el Gestor de Modelos.")
+    return jsonify({"success": False, "error": "No hay ningún Director IA disponible. " + consejo + detalle})
 
 
 # ---------------------------------------------------------------------------

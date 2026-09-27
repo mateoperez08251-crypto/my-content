@@ -140,6 +140,14 @@ def _memoria_linux_gb():
                 break
             with open(uso, "r", encoding="utf-8") as f:
                 usado = int(f.read().strip())
+            # La caché de disco (p. ej. tras bajar 50 GB de modelos) cuenta como "usada" en el
+            # cgroup pero se libera sola cuando hace falta: no es memoria ocupada de verdad.
+            try:
+                with open(os.path.join(os.path.dirname(uso), "memory.stat"), "r", encoding="utf-8") as f:
+                    stat = dict(l.split()[:2] for l in f if len(l.split()) >= 2)
+                usado -= int(stat.get("inactive_file") or stat.get("total_inactive_file") or 0)
+            except (OSError, ValueError):
+                pass
             total = int(limite)
             libre = min(libre, max(0, total - usado))
             break

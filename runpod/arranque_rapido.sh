@@ -9,6 +9,7 @@
 #    MODELOS="wan21_t2v_13b ltx_video"   modelos a bajar (por defecto wan21_t2v_13b)
 #    AUTOBORRAR_MIN=60                   minutos quieto (sin trabajos ni clics) para borrar el pod (0 = nunca)
 #    CONTENTAPP_CLAVE=...                contraseña de la web (si no, se genera una)
+#    DIRECTOR_IA=1                       instala Ollama + llama3 para mejorar prompts (0 = no)
 # ============================================================================
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

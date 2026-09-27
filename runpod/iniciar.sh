@@ -21,6 +21,11 @@ if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
     sleep 2
 fi
 
+# Director IA: arrancar Ollama si está instalado y no está corriendo
+if command -v ollama >/dev/null && ! curl -fs http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+    OLLAMA_MODELS="${OLLAMA_MODELS:-$BASE/ollama}" nohup ollama serve >> "$(dirname "$LOG")/ollama.log" 2>&1 &
+fi
+
 cd "$APP_DIR"
 CONTENTAPP_PUERTO="$PUERTO" nohup "$CONTENTAPP_VIDEO_PYTHON" content.py --servidor >> "$LOG" 2>&1 &
 echo $! > "$PID"
