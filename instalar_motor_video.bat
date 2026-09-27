@@ -36,19 +36,52 @@ if errorlevel 1 (
 for /f "tokens=*" %%i in ('nvidia-smi --query-gpu^=name^,memory.total --format^=csv^,noheader') do echo  [OK] GPU: %%i
 
 :: 3. Entorno aislado (no toca el Python del sistema)
-if not exist ".venv_video\Scripts\python.exe" (
-    echo  [*] Creando entorno .venv_video ...
-    %PY% -m venv .venv_video
-    if errorlevel 1 (
-        echo  [X] No se pudo crear el entorno virtual.
-        pause
-        exit /b 1
-    )
-)
+:: No usar paquetes del Python del usuario (evita que un torch viejo "se cuele")
+set "PYTHONNOUSERSITE=1"
 set "VPY=%APP_DIR%.venv_video\Scripts\python.exe"
 
+if exist "%VPY%" goto validar_entorno
+if exist ".venv_video" goto rehacer_entorno
+goto crear_entorno
+
+:validar_entorno
+"%VPY%" -m pip --version >nul 2>&1
+if errorlevel 1 goto rehacer_entorno
+"%VPY%" -c "import os,sys,pip._vendor.certifi as c;sys.exit(0 if os.path.exists(c.where()) else 1)" >nul 2>&1
+if errorlevel 1 goto rehacer_entorno
+echo  [OK] Entorno .venv_video correcto.
+goto entorno_ok
+
+:rehacer_entorno
+echo  [!] El entorno .venv_video esta incompleto o dañado: se borra y se crea de nuevo.
+echo      Si falla, cierra Content App (tambien desde la bandeja junto al reloj).
+:: se conserva lo ya descargado de PyTorch para no bajarlo otra vez
+if exist ".venv_video\descargas" (
+    if exist "_descargas_motor" rmdir /s /q "_descargas_motor" >nul 2>&1
+    move ".venv_video\descargas" "_descargas_motor" >nul 2>&1
+)
+rmdir /s /q ".venv_video" >nul 2>&1
+if exist ".venv_video" (
+    echo  [X] No se pudo borrar .venv_video porque algun programa lo esta usando.
+    echo      Cierra Content App, espera unos segundos y vuelve a ejecutar este archivo.
+    pause
+    exit /b 1
+)
+
+:crear_entorno
+echo  [*] Creando entorno .venv_video ...
+%PY% -m venv .venv_video
+if errorlevel 1 (
+    echo  [X] No se pudo crear el entorno virtual.
+    pause
+    exit /b 1
+)
+if exist "_descargas_motor" move "_descargas_motor" ".venv_video\descargas" >nul 2>&1
+
+:entorno_ok
 echo  [*] Actualizando pip...
-"%VPY%" -m pip install --upgrade pip --quiet
+"%VPY%" -m pip install --upgrade pip --quiet --retries 10 --timeout 120
+if errorlevel 1 "%VPY%" -m ensurepip --upgrade >nul 2>&1
 
 :: --- PyTorch: descarga reanudable con reintentos (el archivo pesa ~2.5 GB) ---
 set "WHEELS=%APP_DIR%.venv_video\descargas"
@@ -56,10 +89,16 @@ if not exist "%WHEELS%" mkdir "%WHEELS%"
 set "REPORTE=%WHEELS%\torch_reporte.json"
 set "URLTXT=%WHEELS%\torch_url.txt"
 
+:: PyTorch ya instalado: solo se acepta si es < 2.15 y funciona de verdad en la GPU
+"%VPY%" -c "import torch;v=tuple(int(x) for x in torch.__version__.split('+')[0].split('.')[:2]);assert v<(2,15);assert torch.cuda.is_available();(torch.ones(8,device='cuda')*2).sum().item()" >nul 2>&1
+if not errorlevel 1 (
+    echo  [OK] PyTorch ya estaba instalado y funciona con tu GPU.
+    goto diffusers
+)
 "%VPY%" -c "import torch" >nul 2>&1
 if not errorlevel 1 (
-    echo  [OK] PyTorch ya estaba instalado.
-    goto diffusers
+    echo  [!] El PyTorch instalado no sirve para tu GPU: se reinstala.
+    "%VPY%" -m pip uninstall -y torch torchvision torchaudio >nul 2>&1
 )
 
 echo  [*] Buscando la version de PyTorch para tu Python...
