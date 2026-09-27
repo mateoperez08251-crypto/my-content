@@ -312,7 +312,12 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
     # memoria de trabajo para generar los frames (fp32 ocupa el doble)
     margen = 4.0 if dtype == torch.float32 else 3.0
     estrategia = ""
-    if peso_gb + margen <= libre * 0.95:
+    # LTX en gráficas antiguas (Pascal): offload secuencial desde el inicio
+    if motor == "ltx" and gpu["cc"] < (8, 0):
+        pipe.enable_sequential_cpu_offload()
+        estrategia = "secuencial"
+        aviso("LTX en esta gráfica: se carga por partes (lento, pero sin OOM).")
+    elif peso_gb + margen <= libre * 0.95:
         try:
             pipe.to("cuda")
             estrategia = "gpu"
