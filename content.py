@@ -1448,17 +1448,87 @@ def health():
 # ---------------------------------------------------------------------------
 # Arranque
 # ---------------------------------------------------------------------------
+PUERTO_PREFERIDO = 5001
+_log_arranque = open(os.path.join(paths.LOGS_DIR, "arranque.log"), "w", encoding="utf-8", buffering=1)
+
+
+def _arranque(msg):
+    """Registro de cada paso del arranque: si la app se queda cargando, aquí se ve dónde."""
+    try:
+        _log_arranque.write(f"[{datetime.datetime.now():%H:%M:%S}] {msg}\n")
+    except Exception:
+        pass
+    try:
+        print(msg)
+    except Exception:
+        pass
+
+
 def _instancia_unica():
-    """Evita dos copias de la app peleando por el puerto 5001."""
+    """True si no hay otra copia NUEVA de la app abierta (mutex de Windows)."""
     if winproc.ES_WINDOWS:
         try:
             import ctypes
-            ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\ContentAppPro_SingleInstance")
-            return ctypes.windll.kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.CreateMutexW.restype = ctypes.c_void_p
+            global _mutex_handle
+            _mutex_handle = k32.CreateMutexW(None, False, "Local\\ContentAppPro_SingleInstance")
+            return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
         except Exception:
             return True
-    with socket.socket() as s:
-        return s.connect_ex(("127.0.0.1", 5001)) != 0
+    return True
+
+
+def _responde(puerto, ruta="/api/health", timeout=2.0):
+    try:
+        r = requests.get(f"http://127.0.0.1:{puerto}{ruta}", timeout=timeout)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _puerto_libre(puerto):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", puerto))
+            return True
+        except OSError:
+            return False
+
+
+def _elegir_puerto():
+    """5001 si está libre. Si lo ocupa otro proceso (p. ej. una versión vieja oculta en
+    la bandeja que ya no responde), se usa el siguiente puerto libre para no colgarse."""
+    if _puerto_libre(PUERTO_PREFERIDO):
+        return PUERTO_PREFERIDO
+    _arranque(f"AVISO: el puerto {PUERTO_PREFERIDO} está ocupado por otro proceso.")
+    for p in range(PUERTO_PREFERIDO + 1, PUERTO_PREFERIDO + 30):
+        if _puerto_libre(p):
+            return p
+    return PUERTO_PREFERIDO
+
+
+def _aviso_windows(titulo, texto):
+    if winproc.ES_WINDOWS:
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, texto, titulo, 0x40)
+        except Exception:
+            pass
+
+
+@app.route("/api/_mostrar_ventana", methods=["POST"])
+def mostrar_ventana():
+    """La segunda copia de la app pide a la primera que muestre su ventana."""
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"success": False}), 403
+    if _window is not None:
+        try:
+            _window.show()
+            _window.restore()
+        except Exception:
+            pass
+    return jsonify({"success": True})
 
 
 def _salir_limpio():
@@ -1471,12 +1541,16 @@ def _salir_limpio():
 
 if __name__ == "__main__":
     hidden_mode = "--hidden" in sys.argv
+    _arranque(f"Arrancando Content App (datos en {paths.DATA_DIR})")
 
     if not _instancia_unica():
-        print("Content App ya está en ejecución.")
+        _arranque("Ya hay una copia abierta: se le pide que muestre su ventana.")
         if not hidden_mode:
-            import webbrowser
-            webbrowser.open("http://127.0.0.1:5001")
+            try:
+                requests.post(f"http://127.0.0.1:{PUERTO_PREFERIDO}/api/_mostrar_ventana", timeout=3)
+            except Exception:
+                _aviso_windows("Content App", "Content App ya está abierta en la bandeja del sistema "
+                                              "(junto al reloj). Haz clic en su icono para abrirla.")
         sys.exit(0)
 
     # Los subprocesos pesados (editor, ffmpeg, llama-tts...) se adjuntan a este
@@ -1487,15 +1561,43 @@ if __name__ == "__main__":
     threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
     threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
 
-    print("Iniciando Content App Pro Web Server en el puerto 5001...")
+    PUERTO = _elegir_puerto()
+    URL_APP = f"http://127.0.0.1:{PUERTO}"
+    _arranque(f"Iniciando servidor web en {URL_APP}...")
     log_telemetry("Aplicación Iniciada", "La aplicación de escritorio ha sido arrancada.")
+
+    _error_servidor = []
 
     def start_server():
         # Solo localhost: antes escuchaba en 0.0.0.0 y cualquiera en la red podía
         # usar la API (incluido /api/open_file).
-        app.run(host="127.0.0.1", port=5001, debug=False, use_reloader=False, threaded=True)
+        try:
+            app.run(host="127.0.0.1", port=PUERTO, debug=False, use_reloader=False, threaded=True)
+        except Exception as e:
+            _error_servidor.append(e)
+            _arranque(f"ERROR: el servidor web no pudo arrancar: {e}")
 
     threading.Thread(target=start_server, daemon=True, name="flask").start()
+
+    # Esperar a que el servidor responda ANTES de abrir la ventana (máx. 30 s).
+    for _ in range(150):
+        if _error_servidor or _responde(PUERTO, timeout=1):
+            break
+        time.sleep(0.2)
+    if _error_servidor or not _responde(PUERTO, timeout=2):
+        _arranque("ERROR: el servidor web no responde.")
+        _aviso_windows("Content App - Error al iniciar",
+                       "El servidor interno no arrancó.\n\n"
+                       "Cierra otras copias de Content App desde el Administrador de tareas "
+                       f"y vuelve a abrirla.\n\nDetalles en:\n{paths.LOGS_DIR}")
+        os._exit(1)
+    _arranque("Servidor listo.")
+    if PUERTO != PUERTO_PREFERIDO:
+        _aviso_windows("Content App",
+                       f"El puerto {PUERTO_PREFERIDO} lo ocupa otro programa (seguramente una versión "
+                       f"anterior de Content App que quedó abierta).\n\nLa app funcionará en el puerto "
+                       f"{PUERTO}, pero conectar TikTok/Facebook necesita el {PUERTO_PREFERIDO}.\n"
+                       "Cierra la copia vieja desde el Administrador de tareas y reinicia la app.")
 
     def start_radar():
         try:
@@ -1517,7 +1619,7 @@ if __name__ == "__main__":
 
         window = webview.create_window(
             'Content App Premium',
-            'http://127.0.0.1:5001',
+            URL_APP,
             width=1280,
             height=800,
             background_color='#09111e',
@@ -1563,6 +1665,7 @@ if __name__ == "__main__":
                 print("Error iniciando bandeja del sistema:", e)
 
         threading.Thread(target=run_tray, daemon=True, name="tray").start()
+        _arranque("Abriendo ventana...")
         webview.start(private_mode=False)
         _salir_limpio()
     except ImportError:
@@ -1570,7 +1673,7 @@ if __name__ == "__main__":
         import webbrowser
         if not hidden_mode:
             time.sleep(1.5)
-            webbrowser.open("http://127.0.0.1:5001")
+            webbrowser.open(URL_APP)
         try:
             while True:
                 time.sleep(1)
