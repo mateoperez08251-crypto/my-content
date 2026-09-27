@@ -5,13 +5,17 @@ from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
+import paths
+
 # Scopes para permitir subida de videos
 SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
-CLIENT_SECRETS_FILE = 'client_secrets.json'
+paths.migrar_desde_recursos('client_secrets.json')
+paths.migrar_desde_recursos('token_youtube.pickle')
+CLIENT_SECRETS_FILE = paths.data_path('client_secrets.json')
 
 def get_authenticated_service():
     creds = None
-    token_path = 'token_youtube.pickle'
+    token_path = paths.data_path('token_youtube.pickle')
     
     # Intentar cargar credenciales guardadas si existen
     if os.path.exists(token_path):

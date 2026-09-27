@@ -3388,7 +3388,7 @@
                     linksContainer.innerHTML = '';
 
                     result.download_links.forEach(link => {
-                        linksContainer.innerHTML += `<a href="${link.url}" target="_blank" class="btn btn-primary" style="text-decoration: none;">⬇️ ${link.name}</a>`;
+                        linksContainer.innerHTML += `<a href="${escapeHtml(link.url)}" target="_blank" class="btn btn-primary" style="text-decoration: none;">⬇️ ${escapeHtml(link.name)}</a>`;
                     });
                 } else {
                     alert("Error al separar audio: " + result.error);
@@ -4011,8 +4011,18 @@
             appendLog("Proceso CANCELADO por el usuario.", "warn");
         }
 
+        // Escapa texto antes de meterlo en HTML (evita inyección de código
+        // desde títulos de videos, logs o datos remotos).
+        function escapeHtml(v) {
+            return String(v ?? '').replace(/[&<>"'`]/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
+            }[c]));
+        }
+        window.escapeHtml = escapeHtml;
+
         // Terminal Logs (Polling)
         function appendLog(msg, type = "info") {
+            msg = String(msg ?? '');
             const term = document.getElementById('terminalLogsBottom');
             const d = new Date();
             const time = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0') + ':' + d.getSeconds().toString().padStart(2, '0');
@@ -4025,7 +4035,11 @@
 
             const line = document.createElement('div');
             line.className = `terminal-line ${cssClass}`;
-            line.innerHTML = `<span class="time">[${time}]</span> ${msg}`;
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'time';
+            timeSpan.textContent = `[${time}]`;
+            line.appendChild(timeSpan);
+            line.appendChild(document.createTextNode(' ' + msg));
             term.appendChild(line);
             term.scrollTop = term.scrollHeight;
         }
@@ -4061,7 +4075,7 @@
                 const container = document.getElementById('inboxContainer');
 
                 if (data.error) {
-                    container.innerHTML = `<div style="color:var(--danger-bg); font-size:0.85rem;">${data.error}</div>`;
+                    container.innerHTML = `<div style="color:var(--danger-bg); font-size:0.85rem;">${escapeHtml(data.error)}</div>`;
                     return;
                 }
 
@@ -4069,15 +4083,18 @@
                     if (data.videos.length > 0) {
                         container.innerHTML = '';
                         data.videos.forEach(item => {
+                            const titulo = escapeHtml(item.title || 'Video Detectado');
+                            const url = /^https?:\/\//i.test(item.url || '') ? escapeHtml(item.url) : '#';
+                            const urlJs = escapeHtml(JSON.stringify(/^https?:\/\//i.test(item.url || '') ? item.url : ''));
                             container.innerHTML += `
                                 <div class="inbox-item" style="flex-direction: column; align-items: stretch; gap: 10px;">
                                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <div class="inbox-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 75%;" title="${item.title || 'Video'}">${item.title || 'Video Detectado'}</div>
-                                        <div class="inbox-time">${item.time_ago || ''}</div>
+                                        <div class="inbox-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 75%;" title="${titulo}">${titulo}</div>
+                                        <div class="inbox-time">${escapeHtml(item.time_ago || '')}</div>
                                     </div>
                                     <div style="display: flex; gap: 10px;">
-                                        <button class="btn btn-primary" style="flex: 1; font-size: 0.8rem; padding: 6px;" onclick="document.getElementById('video_path').value='${item.url}'; closeInboxModal();">📥 Usar Link</button>
-                                        <a href="${item.url}" target="_blank" class="btn btn-secondary" style="flex: 1; font-size: 0.8rem; padding: 6px; text-decoration: none; text-align: center;">👀 Ver</a>
+                                        <button class="btn btn-primary" style="flex: 1; font-size: 0.8rem; padding: 6px;" onclick="document.getElementById('video_path').value=${urlJs}; closeInboxModal();">📥 Usar Link</button>
+                                        <a href="${url}" target="_blank" rel="noopener" class="btn btn-secondary" style="flex: 1; font-size: 0.8rem; padding: 6px; text-decoration: none; text-align: center;">👀 Ver</a>
                                     </div>
                                 </div>
                             `;
@@ -4461,10 +4478,11 @@
             }).then(r => r.json()).then(res => {
                 if (res.success) {
                     window.adminPassword = pass;
+                    window.adminHeaders = { 'X-Admin-Password': pass };
                     document.getElementById('godPanelModal').style.display = 'flex';
                     refreshGodPanel();
                 } else {
-                    alert("Contraseña incorrecta. Intento bloqueado.");
+                    alert(res.error || "Contraseña incorrecta. Intento bloqueado.");
                 }
             });
         }
@@ -4487,18 +4505,18 @@
         }
 
         function refreshGodPanel() {
-            fetch('/api/admin/users').then(r => r.json()).then(data => {
+            fetch('/api/admin/users', { headers: window.adminHeaders || {} }).then(r => r.json()).then(data => {
                 if (data.success) {
                     const html = data.users.map(u => `
                     <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid ${u.is_blocked ? '#ff4757' : '#2ed573'};">
                         <div>
-                            <div style="font-weight: bold; color: #fff;">${u.hostname} <span style="font-size: 0.8rem; color: #aaa; font-weight: normal;">(${u.hwid})</span></div>
-                            <div style="font-size: 0.85rem; color: #aaa; margin-top: 5px;">SO: ${u.os} | Última acción: ${u.last_action}</div>
+                            <div style="font-weight: bold; color: #fff;">${escapeHtml(u.hostname)} <span style="font-size: 0.8rem; color: #aaa; font-weight: normal;">(${escapeHtml(u.hwid)})</span></div>
+                            <div style="font-size: 0.85rem; color: #aaa; margin-top: 5px;">SO: ${escapeHtml(u.os)} | Última acción: ${escapeHtml(u.last_action)}</div>
                         </div>
                         <div>
                             ${u.is_blocked ?
                             '<span style="color: #ff4757; font-weight: bold; padding: 5px 10px; background: rgba(255,71,87,0.1); border-radius: 5px;">Bloqueado</span>' :
-                            `<button onclick="blockUser('${u.hwid}')" class="btn" style="background: #ff4757; color: white; padding: 8px 15px; border: none; cursor: pointer; border-radius: 6px;">Bloquear</button>`
+                            `<button onclick='blockUser(${escapeHtml(JSON.stringify(u.hwid))})' class="btn" style="background: #ff4757; color: white; padding: 8px 15px; border: none; cursor: pointer; border-radius: 6px;">Bloquear</button>`
                         }
                         </div>
                     </div>
@@ -4507,29 +4525,29 @@
                 }
             });
 
-            fetch('/api/admin/telemetry').then(r => r.json()).then(data => {
+            fetch('/api/admin/telemetry', { headers: window.adminHeaders || {} }).then(r => r.json()).then(data => {
                 if (data.success) {
                     const html = data.logs.map(log => `
                     <div style="padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; gap: 15px;">
                         <span style="color: #8e2de2; white-space: nowrap;">[${new Date(log.timestamp).toLocaleString()}]</span>
-                        <span style="color: #2ed573; width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${log.hostname}</span>
-                        <span style="color: #fff; font-weight: bold; width: 200px;">${log.action}</span>
-                        <span style="color: #aaa;">${log.details || ''}</span>
+                        <span style="color: #2ed573; width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(log.hostname)}</span>
+                        <span style="color: #fff; font-weight: bold; width: 200px;">${escapeHtml(log.action)}</span>
+                        <span style="color: #aaa;">${escapeHtml(log.details || '')}</span>
                     </div>
                 `).join('');
                     document.getElementById('godLogsList').innerHTML = html || '<p style="color: #aaa; text-align: center;">No hay logs</p>';
                 }
             });
 
-            fetch('/api/admin/errors').then(r => r.json()).then(data => {
+            fetch('/api/admin/errors', { headers: window.adminHeaders || {} }).then(r => r.json()).then(data => {
                 if (data.success) {
                     const html = data.errors.map(err => `
                     <div style="background: rgba(255,71,87,0.05); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,71,87,0.2);">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                            <span style="color: #ff4757; font-weight: bold;">${err.error}</span>
-                            <span style="color: #aaa; font-size: 0.85rem;">[${new Date(err.timestamp).toLocaleString()}] ${err.hostname}</span>
+                            <span style="color: #ff4757; font-weight: bold;">${escapeHtml(err.error)}</span>
+                            <span style="color: #aaa; font-size: 0.85rem;">[${new Date(err.timestamp).toLocaleString()}] ${escapeHtml(err.hostname)}</span>
                         </div>
-                        <div style="color: #ccc; font-family: monospace; font-size: 0.85rem; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;">${err.details || 'Sin detalles extra'}</div>
+                        <div style="color: #ccc; font-family: monospace; font-size: 0.85rem; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;">${escapeHtml(err.details || 'Sin detalles extra')}</div>
                     </div>
                 `).join('');
                     document.getElementById('godErrorsList').innerHTML = html || '<p style="color: #aaa; text-align: center;">No hay errores registrados</p>';
