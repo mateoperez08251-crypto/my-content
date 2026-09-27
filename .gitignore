@@ -64,3 +64,12 @@ modelo/*.gguf
 models/
 *.part
 *.parte
+
+.venv_video/
+
+salidas/
+uploads/
+voces/
+logs/
+*.txt
+*.log
