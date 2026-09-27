@@ -53,6 +53,15 @@ PERFILES = {
 
 NEGATIVO = ("worst quality, low quality, blurry, jittery, distorted, deformed, watermark, text, "
             "subtitles, static image, frozen frame, extra limbs, bad anatomy")
+# Wan necesita su negativo oficial: sin él sale sobresaturado/quemado y a veces mete textos
+# o "créditos" al final del clip.
+NEGATIVO_WAN = ("Bright tones, overexposed, oversaturated, static, blurred details, subtitles, text, "
+                "letters, words, credits, logo, watermark, style, works, paintings, images, static, "
+                "overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, "
+                "extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, "
+                "misshapen limbs, fused fingers, still picture, messy background, three legs, "
+                "many people in the background, walking backwards")
+NEGATIVOS = {"wan": NEGATIVO_WAN}
 
 ALTURAS = {"4k": 2160, "1080p": 1080, "720p": 720, "480p": 480}
 
@@ -606,7 +615,7 @@ def generar(cfg):
                            f"{gpu['vram']:.0f} GB. Usa Wan2.1 1.3B o LTX-Video.")
 
     vectores = codificar_texto(motor, cfg["carpeta_modelo"], cfg["prompt"],
-                               cfg.get("negativo") or NEGATIVO, torch, gpu)
+                               cfg.get("negativo") or NEGATIVOS.get(motor, NEGATIVO), torch, gpu)
     pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, gpu)
     # Los vectores deben tener el MISMO formato que el transformer (fp16 del codificador vs fp32
     # del transformer en Pascal daba "expected ... same dtype"). Las máscaras no se convierten.
