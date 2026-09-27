@@ -14,6 +14,14 @@ os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")  # antes de importar huggi
 os.environ.setdefault("HF_XET_CHUNK_CACHE_SIZE_BYTES", "0")  # sin caché extra: no llena el disco
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Sin entorno.sh cargado, los modelos iban a la carpeta del código y la app no los veía:
+# usar la carpeta de datos de la instalación de RunPod si existe.
+if not os.environ.get("CONTENTAPP_DATA_DIR"):
+    for _base in (os.environ.get("CONTENTAPP_BASE"), "/workspace/contentapp", "/root/contentapp"):
+        if _base and os.path.isfile(os.path.join(_base, "entorno.sh")):
+            os.environ["CONTENTAPP_DATA_DIR"] = os.path.join(_base, "datos")
+            break
+
 import modulo_ia as mi  # noqa: E402
 
 
