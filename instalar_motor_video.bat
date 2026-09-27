@@ -63,7 +63,8 @@ if not errorlevel 1 (
 )
 
 echo  [*] Buscando la version de PyTorch para tu Python...
-"%VPY%" -m pip install torch --index-url https://download.pytorch.org/whl/cu126 --dry-run --no-deps --ignore-installed --report "%REPORTE%" --quiet --retries 10 --timeout 120
+:: torch < 2.15: las versiones siguientes quitan el soporte de las GPU Pascal (GTX 10xx, TITAN Xp)
+"%VPY%" -m pip install "torch<2.15" --index-url https://download.pytorch.org/whl/cu126 --dry-run --no-deps --ignore-installed --report "%REPORTE%" --quiet --retries 10 --timeout 120
 if errorlevel 1 (
     echo  [X] No se pudo consultar el servidor de PyTorch. Revisa tu internet y vuelve a ejecutar.
     pause
@@ -117,7 +118,7 @@ set INTENTO=0
 :reintento_diffusers
 set /a INTENTO+=1
 echo  [*] Instalando diffusers y dependencias (intento %INTENTO% de 3)...
-"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy pillow imageio-ffmpeg "bitsandbytes>=0.45" --retries 10 --timeout 120
+"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy pillow imageio-ffmpeg --retries 10 --timeout 120
 if not errorlevel 1 goto comprobar
 if %INTENTO% geq 3 (
     echo  [X] Fallo la instalacion de diffusers. Revisa tu internet y vuelve a ejecutar.

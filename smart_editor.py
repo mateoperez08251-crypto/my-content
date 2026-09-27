@@ -422,8 +422,12 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             out_name = f"{raiz_out}_{n_copia}{ext_out}"
             n_copia += 1
 
-        processed_clip.write_videofile(out_name, codec="libx264", audio_codec="aac", preset="fast",
-                                       threads=max(2, os.cpu_count() or 2), logger=None)
+        import gpu_video
+        opciones = gpu_video.opciones_moviepy(preset_cpu="fast")
+        if idx == 0:
+            print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
+        processed_clip.write_videofile(out_name, audio_codec="aac", threads=max(2, os.cpu_count() or 2),
+                                       logger=None, **opciones)
         generated_files.append(out_name)
 
         # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
