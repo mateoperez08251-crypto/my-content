@@ -133,35 +133,17 @@ def _mover(valor, dispositivo):
     return valor
 
 
-def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
-    """FASE 1: convierte el prompt en vectores con el codificador de texto y lo LIBERA.
-    El codificador es la pieza más pesada (9-16 GB) y solo se necesita un momento.
-    Antes se quedaba cargado en la RAM todo el tiempo y la agotaba."""
-    import gc
+# Clases del codificador de texto y tokenizador de cada modelo (para cargarlo directo en la GPU)
+TEXTO = {
+    "ltx": ("T5EncoderModel", "T5Tokenizer"),
+    "wan": ("UMT5EncoderModel", "AutoTokenizer"),
+    "cogvideox": ("T5EncoderModel", "T5Tokenizer"),
+    "cogvideox_i2v": ("T5EncoderModel", "T5Tokenizer"),
+}
+
+
+def _encode(pipe_txt, motor, prompt, negativo, torch, dispositivo, dtype):
     import inspect
-
-    import diffusers
-
-    info = MODELOS[motor]
-    libre = memoria_libre_gb()
-    en_gpu = gpu["dtype"] == torch.bfloat16 and gpu["vram"] >= info["te_gb"] + 1.5
-    if not en_gpu and libre and libre < info["te_gb"] + 1.0:
-        raise RuntimeError(
-            f"No hay memoria suficiente para leer el prompt: quedan {libre:.1f} GB libres y el "
-            f"codificador de texto necesita ~{info['te_gb']:.0f} GB. Cierra programas y aumenta la "
-            "memoria virtual de Windows (Sistema > Configuración avanzada > Rendimiento > Memoria virtual).")
-    donde = "GPU" if en_gpu else "CPU (bf16)"
-    progreso(4, 1, f"Leyendo el prompt con el codificador de texto en {donde}...")
-    clase = getattr(diffusers, info["clase"])
-    nulos = _nulos(carpeta, ("transformer", "vae"))
-    pipe_txt = clase.from_pretrained(carpeta, torch_dtype=torch.bfloat16, **nulos)
-    dispositivo = "cuda" if en_gpu else "cpu"
-    if en_gpu:
-        for nombre in COMPONENTES_TEXTO:
-            comp = getattr(pipe_txt, nombre, None)
-            if comp is not None and hasattr(comp, "to"):
-                comp.to("cuda")
-
     params = inspect.signature(pipe_txt.encode_prompt).parameters
     kw = {}
     if "prompt" in params:
@@ -175,7 +157,7 @@ def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
     if "device" in params:
         kw["device"] = torch.device(dispositivo)
     if "dtype" in params:
-        kw["dtype"] = torch.bfloat16
+        kw["dtype"] = dtype
     with torch.no_grad():
         res = pipe_txt.encode_prompt(**kw)
     if not isinstance(res, (tuple, list)):
@@ -187,12 +169,90 @@ def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
         nombres = ("prompt_embeds", "pooled_prompt_embeds", "prompt_attention_mask")
     else:
         nombres = ("prompt_embeds", "negative_prompt_embeds")
-    vectores = {n: _mover(v, "cpu") for n, v in zip(nombres, res) if v is not None}
+    return {n: v for n, v in zip(nombres, res) if v is not None}
 
-    del pipe_txt, res
-    gc.collect()
-    if en_gpu:
+
+def _hay_nan(vectores, torch):
+    for n, v in vectores.items():
+        if "embeds" in n and hasattr(v, "float"):
+            try:
+                if not bool(torch.isfinite(v.float()).all()):
+                    return True
+            except Exception:
+                pass
+    return False
+
+
+def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
+    """FASE 1: convierte el prompt en vectores con el codificador de texto y lo LIBERA.
+
+    Se carga DIRECTO en la GPU (sin pasar por la RAM): en bf16 si la gráfica lo soporta
+    y en fp16 en las más antiguas (Pascal: TITAN Xp, GTX 10xx). Antes, en Pascal se
+    cargaba en la CPU y ocupaba ~11 GB de RAM mientras la GPU esperaba sin hacer nada.
+    Si la GPU no alcanza o el resultado sale inválido, se usa la CPU como respaldo."""
+    import gc
+
+    import diffusers
+    import transformers
+
+    info = MODELOS[motor]
+    clase = getattr(diffusers, info["clase"])
+    nulos = _nulos(carpeta, ("transformer", "vae"))
+    dtype_gpu = torch.bfloat16 if gpu["dtype"] == torch.bfloat16 else torch.float16
+
+    if motor in TEXTO and gpu["vram"] >= info["te_gb"] + 0.8:
+        progreso(4, 1, "Leyendo el prompt con el codificador de texto en la GPU...")
+        te = pipe_txt = None
+        try:
+            clase_te, clase_tok = TEXTO[motor]
+            te = getattr(transformers, clase_te).from_pretrained(
+                carpeta, subfolder="text_encoder", torch_dtype=dtype_gpu,
+                device_map="cuda", low_cpu_mem_usage=True)
+            tok = getattr(transformers, clase_tok).from_pretrained(carpeta, subfolder="tokenizer")
+            pipe_txt = clase.from_pretrained(carpeta, text_encoder=te, tokenizer=tok, **nulos)
+            vectores = _encode(pipe_txt, motor, prompt, negativo, torch, "cuda", dtype_gpu)
+            if _hay_nan(vectores, torch):
+                raise ValueError("vectores inválidos en fp16")
+            vectores = {k: v.to("cpu") if hasattr(v, "to") else v for k, v in vectores.items()}
+            return vectores
+        except Exception as e:
+            aviso(f"El codificador de texto no pudo usar la GPU ({str(e)[:80]}): se usa la CPU.")
+        finally:
+            del te, pipe_txt
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+    if motor not in TEXTO and gpu["dtype"] == torch.bfloat16 and gpu["vram"] >= info["te_gb"] + 1.5:
+        # HunyuanVideo en GPU grande y moderna: cargar el pipeline de texto y subirlo a la GPU
+        progreso(4, 1, "Leyendo el prompt con el codificador de texto en la GPU...")
+        pipe_txt = clase.from_pretrained(carpeta, torch_dtype=torch.bfloat16, **nulos)
+        for nombre in COMPONENTES_TEXTO:
+            comp = getattr(pipe_txt, nombre, None)
+            if comp is not None and hasattr(comp, "to"):
+                comp.to("cuda")
+        vectores = _encode(pipe_txt, motor, prompt, negativo, torch, "cuda", torch.bfloat16)
+        vectores = {k: v.to("cpu") if hasattr(v, "to") else v for k, v in vectores.items()}
+        del pipe_txt
+        gc.collect()
         torch.cuda.empty_cache()
+        return vectores
+
+    # Respaldo: CPU en bf16 (usa RAM)
+    libre = memoria_libre_gb()
+    if libre and libre < info["te_gb"] + 1.0:
+        raise RuntimeError(
+            f"No hay memoria suficiente para leer el prompt: quedan {libre:.1f} GB libres y el "
+            f"codificador de texto necesita ~{info['te_gb']:.0f} GB. Cierra programas y aumenta la "
+            "memoria virtual de Windows (Sistema > Configuración avanzada > Rendimiento > Memoria virtual).")
+    progreso(4, 1, "Leyendo el prompt con el codificador de texto en la CPU...")
+    pipe_txt = clase.from_pretrained(carpeta, torch_dtype=torch.bfloat16, **nulos)
+    vectores = _encode(pipe_txt, motor, prompt, negativo, torch, "cpu", torch.bfloat16)
+    vectores = {k: v.to("cpu") if hasattr(v, "to") else v for k, v in vectores.items()}
+    del pipe_txt
+    gc.collect()
     return vectores
 
 
