@@ -55,6 +55,13 @@ echo "Python: $PY"
 if [ -x "$VPY" ] && ! "$VPY" -c "import sys" 2>/dev/null; then
     echo "[!] Entorno roto: se recrea."; rm -rf "$VENV"
 fi
+# torch a medio instalar dentro del entorno (p. ej. se cortó con Ctrl+C) tapa al de la
+# plantilla y rompe todo: se borra el entorno y se vuelve a usar el torch del sistema.
+if [ -x "$VPY" ] && [ -d "$VENV/lib" ] && ls -d "$VENV"/lib/python3*/site-packages/torch >/dev/null 2>&1 \
+        && ! "$VPY" -c "import torch" >/dev/null 2>&1; then
+    echo "[!] torch incompleto en el entorno (instalación cortada): se recrea el entorno."
+    rm -rf "$VENV"
+fi
 if [ ! -x "$VPY" ]; then
     # --system-site-packages: reutiliza el torch de la plantilla
     "$PY" -m venv --system-site-packages "$VENV" 2>/dev/null || {
@@ -85,6 +92,31 @@ cc = torch.cuda.get_device_capability(0)
 print(f"OK torch {torch.__version__} · {torch.cuda.get_device_name(0)} · sm_{cc[0]}{cc[1]}")
 PYEOF
 }
+# ¿torch está bien pero la GPU no arranca? Eso es del servidor de RunPod, no de torch:
+# reinstalar no sirve (antes se perdían minutos bajando torch otra vez).
+estado_cuda() {
+    "$VPY" - 2>&1 <<'PYEOF' | tail -n 1
+try:
+    import torch
+except Exception:
+    print("SIN_TORCH"); raise SystemExit
+v = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
+if v < (2, 4):
+    print("VIEJO"); raise SystemExit
+if not torch.cuda.is_available():
+    print("SIN_CUDA"); raise SystemExit
+try:
+    (torch.ones(8, device="cuda") * 2).sum().item()
+    print("OK")
+except Exception as e:
+    print("KERNEL" if "kernel image" in str(e) or "no kernel" in str(e) else "SIN_CUDA")
+PYEOF
+}
+if ! probar_torch && [ "$(estado_cuda)" = "SIN_CUDA" ]; then
+    echo "Reintentando en 10 s (a veces la GPU tarda en estar lista)..."; sleep 10
+    probar_torch || falla "La GPU de este pod no responde (CUDA unknown error). Es un problema
+    del servidor de RunPod, no de la app. Haz Terminate a este pod y crea otro igual."
+fi
 if ! probar_torch; then
     if   [ "$CUDA_DRIVER" -ge 128 ]; then IDX=cu128
     elif [ "$CUDA_DRIVER" -ge 126 ]; then IDX=cu126
