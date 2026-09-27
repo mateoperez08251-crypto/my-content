@@ -57,35 +57,104 @@ NEGATIVO = ("worst quality, low quality, blurry, jittery, distorted, deformed, w
 ALTURAS = {"4k": 2160, "1080p": 1080, "720p": 720, "480p": 480}
 
 
-def cargar_pipeline(motor, carpeta, torch, vram_gb):
-    """Carga el pipeline de diffusers con la estrategia de memoria adecuada a la GPU."""
-    import diffusers
+# RAM necesaria (GB) para cargar cada modelo completo en bf16, y clases de sus partes.
+MODELOS = {
+    "ltx": {"ram": 26, "te": "T5EncoderModel", "tr": "LTXVideoTransformer3DModel", "tr_grande": False},
+    "wan": {"ram": 27, "te": "UMT5EncoderModel", "tr": "WanTransformer3DModel", "tr_grande": False},
+    "cogvideox": {"ram": 20, "te": "T5EncoderModel", "tr": "CogVideoXTransformer3DModel", "tr_grande": True},
+    "cogvideox_i2v": {"ram": 20, "te": "T5EncoderModel", "tr": "CogVideoXTransformer3DModel", "tr_grande": True},
+    "hunyuan": {"ram": 39, "te": "LlamaModel", "tr": "HunyuanVideoTransformer3DModel", "tr_grande": True},
+}
 
+
+def memoria_libre_gb():
+    """Memoria que se puede reservar ahora (RAM libre + archivo de paginación en Windows)."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("x", ctypes.c_ulonglong)]
+            m = MS()
+            m.dwLength = ctypes.sizeof(MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+            return m.ullAvailPageFile / 1024 ** 3
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
+    except Exception:
+        return 0.0
+
+
+def hay_bitsandbytes():
+    try:
+        import bitsandbytes  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def cargar_pipeline(motor, carpeta, torch, vram_gb, forzar_4bit=False):
+    """Carga el pipeline. Si la RAM no alcanza para el modelo completo, carga el
+    codificador de texto (y el transformer grande) comprimido a 4 bits: ~4x menos RAM.
+    Antes se cargaba todo en bf16 y en PCs de 16 GB se agotaba la RAM (0xC0000409)."""
+    import diffusers
+    import transformers
+
+    info = MODELOS[motor]
     bf16 = torch.bfloat16
+    libre = memoria_libre_gb()
+    cuantizar = forzar_4bit or (libre and libre < info["ram"] * 1.1)
+    extra = {}
+    if cuantizar:
+        if not hay_bitsandbytes():
+            raise RuntimeError(
+                f"No hay memoria suficiente: quedan {libre:.1f} GB libres y el modelo necesita ~{info['ram']} GB "
+                "para cargar. Vuelve a ejecutar 'instalar_motor_video.bat' (instala el modo de bajo consumo) "
+                "o aumenta la memoria virtual de Windows.")
+        aviso(f"Poca memoria libre ({libre:.1f} GB): se carga el modelo comprimido (4 bits) para que quepa.")
+        progreso(5, 1, "Cargando codificador de texto comprimido (4 bits)...")
+        q_te = transformers.BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                                               bnb_4bit_compute_dtype=bf16)
+        clase_te = getattr(transformers, info["te"])
+        extra["text_encoder"] = clase_te.from_pretrained(
+            carpeta, subfolder="text_encoder", quantization_config=q_te, torch_dtype=bf16)
+        if info["tr_grande"] or libre < info["ram"] * 0.5:
+            progreso(10, 1, "Cargando transformer comprimido (4 bits)...")
+            q_tr = diffusers.BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                                                bnb_4bit_compute_dtype=bf16)
+            clase_tr = getattr(diffusers, info["tr"])
+            extra["transformer"] = clase_tr.from_pretrained(
+                carpeta, subfolder="transformer", quantization_config=q_tr, torch_dtype=bf16)
+
     if motor == "ltx":
-        pipe = diffusers.LTXPipeline.from_pretrained(carpeta, torch_dtype=bf16)
+        pipe = diffusers.LTXPipeline.from_pretrained(carpeta, torch_dtype=bf16, **extra)
     elif motor == "wan":
         vae = diffusers.AutoencoderKLWan.from_pretrained(carpeta, subfolder="vae", torch_dtype=torch.float32)
-        pipe = diffusers.WanPipeline.from_pretrained(carpeta, vae=vae, torch_dtype=bf16)
+        pipe = diffusers.WanPipeline.from_pretrained(carpeta, vae=vae, torch_dtype=bf16, **extra)
     elif motor == "cogvideox":
-        pipe = diffusers.CogVideoXPipeline.from_pretrained(carpeta, torch_dtype=bf16)
+        pipe = diffusers.CogVideoXPipeline.from_pretrained(carpeta, torch_dtype=bf16, **extra)
     elif motor == "cogvideox_i2v":
-        pipe = diffusers.CogVideoXImageToVideoPipeline.from_pretrained(carpeta, torch_dtype=bf16)
+        pipe = diffusers.CogVideoXImageToVideoPipeline.from_pretrained(carpeta, torch_dtype=bf16, **extra)
     elif motor == "hunyuan":
-        transformer = diffusers.HunyuanVideoTransformer3DModel.from_pretrained(
-            carpeta, subfolder="transformer", torch_dtype=bf16)
-        pipe = diffusers.HunyuanVideoPipeline.from_pretrained(
-            carpeta, transformer=transformer, torch_dtype=torch.float16)
+        if "transformer" not in extra:
+            extra["transformer"] = diffusers.HunyuanVideoTransformer3DModel.from_pretrained(
+                carpeta, subfolder="transformer", torch_dtype=bf16)
+        pipe = diffusers.HunyuanVideoPipeline.from_pretrained(carpeta, torch_dtype=torch.float16, **extra)
     else:
         raise ValueError(f"Motor desconocido: {motor}")
 
-    aplicar_memoria(pipe, motor, vram_gb)
+    aplicar_memoria(pipe, motor, vram_gb, cuantizado=bool(cuantizar))
+    pipe._cuantizado = bool(cuantizar)
     return pipe
 
 
-def aplicar_memoria(pipe, motor, vram_gb):
+def aplicar_memoria(pipe, motor, vram_gb, cuantizado=False):
     # Con poca VRAM se descarga capa a capa (más lento pero no revienta la GPU).
-    if vram_gb and vram_gb < 12 and motor != "wan":
+    # Los modelos de 4 bits no admiten la descarga secuencial: se usa la de modelo.
+    if vram_gb and vram_gb < 12 and motor != "wan" and not cuantizado:
         pipe.enable_sequential_cpu_offload()
     else:
         pipe.enable_model_cpu_offload()
@@ -105,7 +174,7 @@ def pipeline_imagen(motor, pipe, vram_gb):
         import diffusers
         p = diffusers.LTXImageToVideoPipeline.from_pipe(pipe)
         try:
-            aplicar_memoria(p, motor, vram_gb)
+            aplicar_memoria(p, motor, vram_gb, cuantizado=getattr(pipe, "_cuantizado", False))
         except Exception:
             pass
         return p
@@ -188,7 +257,16 @@ def generar(cfg):
     vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
     progreso(3, 1, f"GPU: {torch.cuda.get_device_name(0)} ({vram_gb:.0f} GB). Cargando modelo...")
 
-    pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, vram_gb)
+    try:
+        pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, vram_gb)
+    except (MemoryError, RuntimeError) as e:
+        if "memoria" in str(e) or not hay_bitsandbytes() or "out of memory" not in str(e).lower():
+            raise
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        aviso("La GPU se quedó sin memoria al cargar: reintentando en modo comprimido (4 bits).")
+        pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, vram_gb, forzar_4bit=True)
     progreso(15, 1, "Modelo cargado.")
 
     imagen = None
@@ -277,6 +355,8 @@ def diagnostico():
         info["diffusers"] = diffusers.__version__
         import transformers  # noqa: F401
         import accelerate  # noqa: F401
+        info["bitsandbytes"] = hay_bitsandbytes()
+        info["memoria_libre_gb"] = round(memoria_libre_gb(), 1)
     except Exception as e:
         info["error"] = f"{type(e).__name__}: {e}"
     print(json.dumps(info, ensure_ascii=False), flush=True)

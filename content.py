@@ -1218,9 +1218,12 @@ SMART_PROGRESS = os.path.join(TEMP_DIR, "smart_progress.txt")
 
 
 def _escribir_progreso_smart(texto):
+    """Escritura atómica: la UI nunca lee el archivo a medias (vacío)."""
+    tmp = SMART_PROGRESS + ".tmp"
     try:
-        with open(SMART_PROGRESS, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(texto)
+        os.replace(tmp, SMART_PROGRESS)
     except OSError:
         pass
 
@@ -1237,6 +1240,8 @@ def run_smart_split_thread(data):
             source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440", cancel_checker=lambda: cancel_requested)
             if not source:
                 raise Exception("Error al descargar video")
+        elif not source or not os.path.isfile(source):
+            raise Exception(f"El video no existe: {source}")
         if _cancelado():
             raise Exception("Cancelado.")
 
@@ -1258,14 +1263,22 @@ def run_smart_split_thread(data):
             "anti_copyright_audio": data.get('anti_copyright_audio', True),
             "bg_music": data.get('bg_music', ''),
             "show_progress_bar": data.get('show_progress_bar', True),
+            "motor_ia": data.get('motor_ia', 'pro'),
+            "emojis": data.get('emojis', True),
         }
         log(f"Iniciando procesamiento de Smart Split (Escala: {cfg_datos['subtitle_scale']}%, "
             f"Estilo: {cfg_datos['subtitle_style']})...")
         log_telemetry("Iniciando Smart Split", f"Origen: {source}")
 
-        resultado = {"rutas": []}
+        resultado = {"rutas": [], "meta": []}
 
         def leer_smart(lin):
+            if lin.startswith("RESULT_META:"):
+                try:
+                    resultado["meta"] = json.loads(lin.split("RESULT_META:", 1)[1])
+                except ValueError:
+                    pass
+                return True
             if lin.startswith("RESULT_PATHS:"):
                 try:
                     resultado["rutas"] = json.loads(lin.split("RESULT_PATHS:", 1)[1])
@@ -1291,9 +1304,18 @@ def run_smart_split_thread(data):
         facebook = bool(data.get('subir_facebook', False))
         if tiktok or youtube or facebook:
             log("Iniciando subida de clips a plataformas seleccionadas...")
-            titulo = data.get('smart_split_title', '').strip() or "Clip generado por Smart Split #viral"
+            titulo_usuario = data.get('smart_split_title', '').strip()
+            meta_por_archivo = {m.get("archivo"): m for m in resultado["meta"]}
             for clip_path in result_paths:
+                meta = meta_por_archivo.get(clip_path, {})
+                # Descripción viral generada por la IA para ESTE clip (con hashtags); si el
+                # usuario escribió un título, se usa el suyo con los hashtags de la IA.
+                if titulo_usuario:
+                    titulo = f"{titulo_usuario} {' '.join(meta.get('hashtags') or [])}".strip()
+                else:
+                    titulo = meta.get("publicacion") or "Clip generado por Smart Split #viral #fyp"
                 _log_destinos(os.path.basename(clip_path), tiktok, youtube, facebook)
+                log(f"Descripción: {titulo}")
                 _subir(clip_path, titulo, tiktok, facebook, youtube)
                 if _cancelado():
                     raise Exception("Cancelado.")
@@ -1310,6 +1332,7 @@ def smart_split_api():
     data = request.get_json(silent=True) or {}
     if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "error": "Ya hay una automatización en curso"})
+    _escribir_progreso_smart("Iniciando...|0")
     threading.Thread(target=run_smart_split_thread, args=(data,), daemon=True).start()
     return jsonify({"success": True})
 

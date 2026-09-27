@@ -418,7 +418,7 @@ function renderizarHistorial(items) {
 
 window.descargarVideoActualEstudio = function() {
     if(window.estudioCurrentFile) {
-        fetch('/api/salidas/' + encodeURIComponent(window.estudioCurrentFile) + '/abrir', { method: 'POST' })
+        fetch('/api/ia/abrir_video/' + encodeURIComponent(window.estudioCurrentFile), { method: 'POST' })
         .then(res => res.json())
         .then(data => {
             if(data.success) {

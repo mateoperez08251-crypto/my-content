@@ -117,7 +117,7 @@ set INTENTO=0
 :reintento_diffusers
 set /a INTENTO+=1
 echo  [*] Instalando diffusers y dependencias (intento %INTENTO% de 3)...
-"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy pillow imageio-ffmpeg --retries 10 --timeout 120
+"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy pillow imageio-ffmpeg "bitsandbytes>=0.45" --retries 10 --timeout 120
 if not errorlevel 1 goto comprobar
 if %INTENTO% geq 3 (
     echo  [X] Fallo la instalacion de diffusers. Revisa tu internet y vuelve a ejecutar.
@@ -128,6 +128,14 @@ timeout /t 15 /nobreak >nul
 goto reintento_diffusers
 
 :comprobar
+:: --- Demucs (para "Separar Musica"). Opcional: si falla, el video sigue funcionando ---
+echo  [*] Instalando Demucs para separar musica (opcional)...
+"%VPY%" -c "import torch;print(torch.__version__.split('+')[0])" > "%WHEELS%\torch_version.txt"
+set /p TORCH_VER=<"%WHEELS%\torch_version.txt"
+"%VPY%" -m pip install torchaudio "torch==%TORCH_VER%" --index-url https://download.pytorch.org/whl/cu126 --retries 10 --timeout 120
+"%VPY%" -m pip install demucs soundfile "torch==%TORCH_VER%" --extra-index-url https://download.pytorch.org/whl/cu126 --retries 10 --timeout 120
+if errorlevel 1 echo  [!] Demucs no se pudo instalar: "Separar Musica" no funcionara. El video si.
+
 echo.
 echo  [*] Comprobando...
 "%VPY%" "%APP_DIR%video_worker.py" --diagnostico
