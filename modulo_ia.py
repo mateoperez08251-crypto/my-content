@@ -742,8 +742,15 @@ def _candidatos_python():
     cands = []
     if os.environ.get("CONTENTAPP_VIDEO_PYTHON"):
         cands.append(os.environ["CONTENTAPP_VIDEO_PYTHON"])
+    # Ubicación del motor (fuera del proyecto): la elegida por el usuario, la del mismo
+    # disco que la app (p. ej. D:\ContentApp\motor_video) y la de versiones anteriores.
+    if os.environ.get("CONTENTAPP_MOTOR_DIR"):
+        cands.append(os.path.join(os.environ["CONTENTAPP_MOTOR_DIR"], "Scripts", "python.exe"))
+    unidad = os.path.splitdrive(os.path.abspath(paths.EXEC_DIR))[0]
+    if unidad:
+        cands.append(os.path.join(unidad + os.sep, "ContentApp", "motor_video", "Scripts", "python.exe"))
     local = os.environ.get("LOCALAPPDATA")
-    if local:  # ubicación actual del motor (fuera del proyecto)
+    if local:
         cands.append(os.path.join(local, "ContentApp", "motor_video", "Scripts", "python.exe"))
     for base in (paths.EXEC_DIR, paths.DATA_DIR, paths.RES_DIR):
         for sub in ((".venv_video", "Scripts", "python.exe"), (".venv_video", "bin", "python"),
