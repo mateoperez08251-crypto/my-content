@@ -5,6 +5,41 @@ import yt_dlp
 import shutil
 
 import sys
+import threading
+
+SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_demucs_py = None
+_demucs_lock = threading.Lock()
+
+
+def _python_con_demucs():
+    """Python que tenga Demucs instalado.
+    En el .exe, sys.executable es la propia app: lanzarla con '-m demucs' abría otra
+    copia de la aplicación en vez de separar el audio."""
+    global _demucs_py
+    with _demucs_lock:
+        if _demucs_py:
+            return _demucs_py
+        candidatos = []
+        if not getattr(sys, "frozen", False):
+            candidatos.append(sys.executable)
+        try:
+            import modulo_ia
+            candidatos += modulo_ia._candidatos_python()
+        except Exception:
+            pass
+        for py in dict.fromkeys(candidatos):
+            try:
+                r = subprocess.run([py, "-c", "import demucs"], capture_output=True, timeout=120,
+                                   creationflags=SIN_VENTANA)
+                if r.returncode == 0:
+                    _demucs_py = py
+                    return py
+            except Exception:
+                continue
+        raise Exception("Demucs no está instalado. Ejecuta 'instalar_motor_video.bat' (instala Demucs "
+                        "junto al motor de IA) y vuelve a intentarlo.")
+
 
 def separate_music(source_path, output_dir, stems="2"):
     """
@@ -51,7 +86,7 @@ def separate_music(source_path, output_dir, stems="2"):
     # Modelo htdemucs para 4 stems, y htdemucs --two-stems=vocals para 2 stems
     out_demucs_dir = os.path.join(output_dir, "separated_" + file_id)
     cmd = [
-        sys.executable, "-m", "demucs.separate",
+        _python_con_demucs(), "-m", "demucs.separate",
         "-n", "htdemucs",
         "-o", out_demucs_dir,
         input_file
@@ -60,7 +95,8 @@ def separate_music(source_path, output_dir, stems="2"):
     if stems == "2":
         cmd.append("--two-stems=vocals")
         
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          encoding="utf-8", errors="replace", creationflags=SIN_VENTANA)
     
     # Identificar la carpeta generada por Demucs
     model_output_dir = os.path.join(out_demucs_dir, "htdemucs", os.path.splitext(os.path.basename(input_file))[0])
@@ -69,7 +105,7 @@ def separate_music(source_path, output_dir, stems="2"):
         # A veces Demucs arroja código distinto de 0 pero igual genera los archivos (ej. warnings de dependencias)
         if not os.path.exists(model_output_dir) or not any(f.endswith(".wav") for f in os.listdir(model_output_dir)):
             shutil.rmtree(temp_dir, ignore_errors=True)
-            raise Exception(f"Error de Demucs: {proc.stderr}")
+            raise Exception(f"Error de Demucs: {proc.stderr[-800:]}")
         else:
             print(f"Demucs arrojó un error pero los archivos se generaron: {proc.stderr}")
     
@@ -87,7 +123,8 @@ def separate_music(source_path, output_dir, stems="2"):
                 final_path_mp3 = os.path.join(output_dir, final_name_mp3)
                 
                 # Convertir WAV a MP3 con ffmpeg
-                subprocess.run([ffmpeg_exe, "-y", "-i", final_path_wav, "-q:a", "0", "-map", "a", final_path_mp3], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                subprocess.run([ffmpeg_exe, "-y", "-i", final_path_wav, "-q:a", "0", "-map", "a", final_path_mp3],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=SIN_VENTANA)
                 
                 # Mapeo simple de nombres (vocals.wav -> Voz, etc.)
                 key_name = base_f.capitalize()

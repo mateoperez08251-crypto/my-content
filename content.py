@@ -1218,9 +1218,12 @@ SMART_PROGRESS = os.path.join(TEMP_DIR, "smart_progress.txt")
 
 
 def _escribir_progreso_smart(texto):
+    """Escritura atómica: la UI nunca lee el archivo a medias (vacío)."""
+    tmp = SMART_PROGRESS + ".tmp"
     try:
-        with open(SMART_PROGRESS, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(texto)
+        os.replace(tmp, SMART_PROGRESS)
     except OSError:
         pass
 
@@ -1237,6 +1240,8 @@ def run_smart_split_thread(data):
             source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440", cancel_checker=lambda: cancel_requested)
             if not source:
                 raise Exception("Error al descargar video")
+        elif not source or not os.path.isfile(source):
+            raise Exception(f"El video no existe: {source}")
         if _cancelado():
             raise Exception("Cancelado.")
 
@@ -1310,6 +1315,7 @@ def smart_split_api():
     data = request.get_json(silent=True) or {}
     if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "error": "Ya hay una automatización en curso"})
+    _escribir_progreso_smart("Iniciando...|0")
     threading.Thread(target=run_smart_split_thread, args=(data,), daemon=True).start()
     return jsonify({"success": True})
 

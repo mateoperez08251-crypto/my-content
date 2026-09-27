@@ -63,9 +63,11 @@ def extract_audio(source_path, output_dir):
             output_file
         ]
         
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              encoding="utf-8", errors="replace",
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         
         if proc.returncode != 0 or not os.path.exists(output_file):
-            raise Exception(f"Error de ffmpeg: {proc.stderr}")
+            raise Exception(f"Error de ffmpeg: {proc.stderr[-600:]}")
             
         return output_file

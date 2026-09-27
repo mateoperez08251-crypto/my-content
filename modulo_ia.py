@@ -1021,6 +1021,24 @@ def serve_video(filename):
     return send_from_directory(VIDEOS_DIR, filename)
 
 
+@ia_bp.route('/abrir_video/<filename>', methods=['POST'])
+def abrir_video(filename):
+    """Abre el Explorador con el video generado seleccionado (Mis Videos Generados)."""
+    ruta = os.path.join(VIDEOS_DIR, os.path.basename(filename))
+    if not os.path.isfile(ruta):
+        return jsonify({"success": False, "error": "Archivo no encontrado"}), 404
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", ruta])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", ruta])
+        else:
+            subprocess.Popen(["xdg-open", VIDEOS_DIR])
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @ia_bp.route('/asset/<filename>')
 def serve_asset(filename):
     return send_from_directory(ASSETS_DIR, filename)

@@ -93,6 +93,11 @@ def get_transcription(audio_path):
         "Authorization": f"Bearer {_groq_key()}"
     }
     
+    if not os.path.exists(audio_path) or os.path.getsize(audio_path) < 1000:
+        raise Exception("No se pudo extraer el audio del video (¿el archivo no tiene audio?).")
+    if os.path.getsize(audio_path) > 24 * 1024 * 1024:
+        raise Exception("El audio supera el límite de 25 MB de Groq (video de más de ~1h 40m). "
+                        "Usa 'Inicio' y 'Fin' para procesar solo una parte.")
     with open(audio_path, "rb") as f:
         files = {
             "file": (os.path.basename(audio_path), f, "audio/m4a")
@@ -301,8 +306,10 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
 
 def write_progress(msg, percent=0):
     try:
-        with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+        tmp = PROGRESS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(f"{msg}|{percent}")
+        os.replace(tmp, PROGRESS_FILE)
     except:
         pass
 

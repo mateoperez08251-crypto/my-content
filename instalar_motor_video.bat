@@ -128,6 +128,14 @@ timeout /t 15 /nobreak >nul
 goto reintento_diffusers
 
 :comprobar
+:: --- Demucs (para "Separar Musica"). Opcional: si falla, el video sigue funcionando ---
+echo  [*] Instalando Demucs para separar musica (opcional)...
+"%VPY%" -c "import torch;print(torch.__version__.split('+')[0])" > "%WHEELS%\torch_version.txt"
+set /p TORCH_VER=<"%WHEELS%\torch_version.txt"
+"%VPY%" -m pip install torchaudio "torch==%TORCH_VER%" --index-url https://download.pytorch.org/whl/cu126 --retries 10 --timeout 120
+"%VPY%" -m pip install demucs soundfile "torch==%TORCH_VER%" --extra-index-url https://download.pytorch.org/whl/cu126 --retries 10 --timeout 120
+if errorlevel 1 echo  [!] Demucs no se pudo instalar: "Separar Musica" no funcionara. El video si.
+
 echo.
 echo  [*] Comprobando...
 "%VPY%" "%APP_DIR%video_worker.py" --diagnostico

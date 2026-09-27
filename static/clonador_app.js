@@ -5,7 +5,7 @@ const api = async (url, opciones) => {
   const r = await fetch(url, opciones);
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
-    try { msg = (await r.json()).detail || msg; } catch { /* respuesta sin JSON */ }
+    try { const j = await r.json(); msg = j.detail || j.error || msg; } catch { /* respuesta sin JSON */ }
     throw new Error(msg);
   }
   return r.status === 204 ? null : r.json();
