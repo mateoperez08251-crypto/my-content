@@ -180,15 +180,16 @@ def editar_video(ruta_entrada, inicio, fin, wm_path="", smart="0", texto_arriba=
 
         recorte = clip.subclipped(inicio_f, fin_f)
         final = _componer(recorte, wm_path, texto_arriba, texto_abajo, fs_top, fs_bot, bg_image, temporales)
+        import gpu_video
+        opciones = gpu_video.opciones_moviepy(preset_cpu="superfast", bitrate="8000k")
+        print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
         final.write_videofile(
             ruta_salida,
-            codec="libx264",
             audio_codec="aac",
-            preset="superfast",
-            bitrate="8000k",
             fps=final.fps or clip.fps or 30,
             threads=max(2, (os.cpu_count() or 2) // 2),
             logger='bar',
+            **opciones,
         )
         print(f"SMART_END:{fin_f}")
         print(f"OUTPUT_FILE:{os.path.abspath(ruta_salida)}")

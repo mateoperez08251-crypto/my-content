@@ -418,7 +418,7 @@ function renderizarHistorial(items) {
 
 window.descargarVideoActualEstudio = function() {
     if(window.estudioCurrentFile) {
-        fetch('/api/salidas/' + encodeURIComponent(window.estudioCurrentFile) + '/abrir', { method: 'POST' })
+        fetch('/api/ia/abrir_video/' + encodeURIComponent(window.estudioCurrentFile), { method: 'POST' })
         .then(res => res.json())
         .then(data => {
             if(data.success) {
@@ -845,10 +845,19 @@ window.comprobarMotorVideo = function (refrescar) {
             } else if (m.estado === 'listo') {
                 box.innerHTML = `<span style="color:#2dcc70; font-weight:bold;">● Listo</span><br>` +
                     `${escEstudio(m.gpu)} · ${escEstudio(m.vram_gb)} GB VRAM<br>` +
-                    `<span style="opacity:0.7">RAM libre: ${escEstudio(m.ram_libre_gb)} GB</span>`;
+                    (m.formato ? `<span style="opacity:0.7">Arquitectura ${escEstudio(m.arquitectura)} · formato ${escEstudio(m.formato)}</span><br>` : '') +
+                    `<span style="opacity:0.7">RAM libre: ${escEstudio(m.ram_libre_gb)} GB</span><br>` +
+                    `<span style="opacity:0.6; font-size:0.72rem; word-break:break-all;">Motor: ${escEstudio(m.python_cmd || '')}</span>`;
+            } else if (m.error && m.torch) {
+                box.innerHTML = `<span style="color:#ff4d5f; font-weight:bold;">● Error del motor</span><br>${escEstudio(m.error)}<br>` +
+                    `Vuelve a ejecutar <b>instalar_motor_video.bat</b>.`;
             } else if (m.estado === 'sin_gpu') {
+                const cpu = String(m.torch || '').includes('+cpu') || !String(m.torch || '').includes('+');
                 box.innerHTML = `<span style="color:#fbbf24; font-weight:bold;">● Sin GPU CUDA</span><br>` +
-                    `El motor está instalado pero no ve una GPU NVIDIA. Actualiza los drivers.`;
+                    (cpu ? `El Python encontrado tiene PyTorch <b>solo para CPU</b> (${escEstudio(m.torch)}). `
+                         : `PyTorch ${escEstudio(m.torch)} no ve la GPU: actualiza los drivers de NVIDIA. `) +
+                    `Ejecuta <b>instalar_motor_video.bat</b> y pulsa "Comprobar motor".<br>` +
+                    `<span style="opacity:0.6; font-size:0.72rem; word-break:break-all;">Python: ${escEstudio(m.python_cmd || m.python || '')}</span>`;
             } else {
                 box.innerHTML = `<span style="color:#ff4d5f; font-weight:bold;">● No instalado</span><br>` +
                     `Ejecuta <b>${escEstudio(m.instalador || 'instalar_motor_video.bat')}</b> en la carpeta de la app y pulsa "Comprobar motor".`;

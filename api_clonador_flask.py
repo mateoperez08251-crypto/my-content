@@ -273,60 +273,109 @@ def duracion_wav(ruta: Path) -> float:
         return 0.0
 
 
+def _tiempo_srt(seg: float) -> str:
+    seg = max(0.0, seg)
+    ms = int(round(seg * 1000))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+
+
+def _rango_voz(ruta: Path) -> tuple[float, float, float]:
+    """(inicio_voz, fin_voz, duracion) en segundos: recorta el silencio del principio y del final."""
+    import array
+    with wave.open(str(ruta), "rb") as w:
+        sr, ch, ancho, n = w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getnframes()
+        datos = w.readframes(n)
+    dur = n / float(sr or 1)
+    if ancho != 2 or not n:
+        return 0.0, dur, dur
+    muestras = array.array("h", datos)
+    ventana = max(1, int(sr * 0.02)) * ch  # 20 ms
+    energias = []
+    for k in range(0, len(muestras), ventana):
+        trozo = muestras[k:k + ventana]
+        energias.append(sum(abs(x) for x in trozo[::4]) / max(1, len(trozo[::4])))
+    if not energias:
+        return 0.0, dur, dur
+    umbral = max(300.0, max(energias) * 0.06)
+    voz = [idx for idx, e in enumerate(energias) if e > umbral]
+    if not voz:
+        return 0.0, dur, dur
+    paso = ventana / ch / sr
+    return max(0.0, voz[0] * paso - 0.05), min(dur, (voz[-1] + 1) * paso + 0.1), dur
+
+
+def _partir_subtitulos(texto: str, max_chars: int = 42) -> list[str]:
+    """Parte un texto en subtítulos cortos (máx. 2 líneas de ~42 caracteres), cortando en
+    signos de puntuación cuando se puede."""
+    palabras = texto.split()
+    cues, actual = [], []
+    for p in palabras:
+        propuesta = " ".join(actual + [p])
+        if actual and len(propuesta) > max_chars * 2:
+            cues.append(actual)
+            actual = [p]
+        else:
+            actual.append(p)
+            if len(propuesta) > max_chars and p[-1:] in ".,;:!?…":
+                cues.append(actual)
+                actual = []
+    if actual:
+        cues.append(actual)
+    salida = []
+    for c in cues:
+        linea = " ".join(c)
+        if len(linea) > max_chars:  # dos líneas equilibradas
+            mitad = len(linea) // 2
+            corte = min((k for k, ch in enumerate(linea) if ch == " "), key=lambda k: abs(k - mitad), default=None)
+            if corte:
+                linea = linea[:corte] + "\n" + linea[corte + 1:]
+        salida.append(linea)
+    return salida
+
+
+def escribir_srt(tramos: list[tuple[str, float, float]], destino: Path) -> None:
+    """tramos = [(texto, inicio, fin)]. Reparte el tiempo de cada tramo entre sus subtítulos
+    según la cantidad de letras (así cada frase aparece cuando se dice)."""
+    n = 0
+    lineas = []
+    for texto, ini, fin in tramos:
+        cues = _partir_subtitulos(texto)
+        total = sum(len(c.replace("\n", " ")) for c in cues) or 1
+        t = ini
+        for c in cues:
+            d = (fin - ini) * len(c.replace("\n", " ")) / total
+            n += 1
+            lineas.append(f"{n}\n{_tiempo_srt(t)} --> {_tiempo_srt(t + d)}\n{c}\n")
+            t += d
+    destino.write_text("\n".join(lineas), encoding="utf-8")
+
+
 def unir_wavs(partes: list[Path], destino: Path, pausa_ms: int = 150, bloques: list[str] = None) -> None:
-    """Concatena WAVs del mismo formato intercalando un breve silencio y genera subtitulos .srt."""
+    """Concatena los WAV con una breve pausa y genera siempre el .srt sincronizado."""
     partes = [p for p in partes if p.exists() and p.stat().st_size > 44]
     if not partes:
         raise RuntimeError("El modelo no generó ningún audio.")
-    
-    srt_lines = []
-    current_time = 0.0
 
-    def format_srt_time(seconds: float) -> str:
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = int(seconds % 60)
-        ms = int((seconds % 1) * 1000)
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-    if len(partes) == 1:
-        shutil.copyfile(partes[0], destino)
-        if bloques and len(bloques) == 1:
-            with wave.open(str(partes[0]), "rb") as w:
-                dur = w.getnframes() / w.getframerate()
-            srt_lines.append(f"1\n00:00:00,000 --> {format_srt_time(dur)}\n{bloques[0]}\n")
-            with open(destino.with_suffix('.srt'), 'w', encoding='utf-8') as f:
-                f.write("\n".join(srt_lines))
-        return
-
+    tramos = []
+    t = 0.0
     with wave.open(str(partes[0]), "rb") as w0:
         parametros = w0.getparams()
-    silencio = b"\x00" * (
-        int(parametros.framerate * pausa_ms / 1000)
-        * parametros.nchannels * parametros.sampwidth
-    )
+    silencio = b"\x00" * (int(parametros.framerate * pausa_ms / 1000)
+                          * parametros.nchannels * parametros.sampwidth)
     with wave.open(str(destino), "wb") as salida:
         salida.setparams(parametros)
         for i, parte in enumerate(partes):
             with wave.open(str(parte), "rb") as w:
                 salida.writeframes(w.readframes(w.getnframes()))
-                
-                # Calcular subtítulo
-                if bloques and i < len(bloques):
-                    dur = w.getnframes() / w.getframerate()
-                    start_srt = format_srt_time(current_time)
-                    end_srt = format_srt_time(current_time + dur)
-                    srt_lines.append(f"{i+1}\n{start_srt} --> {end_srt}\n{bloques[i]}\n")
-                    current_time += dur
-
+            ini, fin, dur = _rango_voz(parte)
+            if bloques and i < len(bloques) and bloques[i].strip():
+                tramos.append((bloques[i].strip(), t + ini, t + fin))
+            t += dur
             if i < len(partes) - 1 and silencio:
                 salida.writeframes(silencio)
-                current_time += (pausa_ms / 1000.0)
-
-    # Escribir el archivo .srt
-    if srt_lines:
-        with open(destino.with_suffix('.srt'), 'w', encoding='utf-8') as f:
-            f.write("\n".join(srt_lines))
+                t += pausa_ms / 1000.0
+    if tramos:
+        escribir_srt(tramos, destino.with_suffix(".srt"))
 
 
 # ---------------------------------------------------------------------------
@@ -490,9 +539,8 @@ def ejecutar_sintesis(tarea: Tarea, cfg: dict[str, Any], bloques: list[str],
 
         unir_wavs(partes, destino, int(cfg["pausa_ms"]), bloques)
         tarea.estado = "terminada"
-        tarea.emitir("fin", archivo=destino.name,
-                     tiempo=round(time.time() - inicio, 2), 
-                     srt=destino.with_suffix('.srt').name,
+        tarea.emitir("fin", archivo=destino.name, srt=destino.with_suffix(".srt").name if destino.with_suffix(".srt").exists() else "",
+                     tiempo=round(time.time() - inicio, 2),
                      duracion=round(duracion_wav(destino), 2),
                      segundos=round(time.time() - inicio, 1))
     except Exception as exc:  # noqa: BLE001 — el mensaje se muestra íntegro en la web
@@ -803,6 +851,7 @@ def listar_salidas() -> list[dict[str, Any]]:
                       key=lambda p: p.stat().st_mtime, reverse=True)
     return [{
         "archivo": a.name,
+        "srt": a.with_suffix(".srt").is_file(),
         "tamano": a.stat().st_size,
         "duracion": round(duracion_wav(a), 2),
         "fecha": datetime.fromtimestamp(a.stat().st_mtime).isoformat(timespec="seconds"),
@@ -815,6 +864,14 @@ def obtener_salida(archivo: str):
     if not ruta.is_file():
         return jsonify({"error": "Archivo no encontrado"}), 404
     return send_file(ruta, download_name=ruta.name, as_attachment=True)
+
+
+@clonador_bp.route("/api/salidas/<archivo>/srt", methods=["GET"])
+def obtener_srt(archivo: str):
+    ruta = (DIR_SALIDAS / Path(archivo).name).with_suffix(".srt")
+    if not ruta.is_file():
+        return jsonify({"error": "Este audio no tiene subtítulos."}), 404
+    return send_file(ruta, mimetype="application/x-subrip", download_name=ruta.name, as_attachment=True)
 
 
 @clonador_bp.route("/api/salidas/<archivo>/abrir", methods=["POST"])
@@ -839,6 +896,7 @@ def abrir_salida(archivo: str):
 def borrar_salida(archivo: str) -> dict[str, bool]:
     ruta = DIR_SALIDAS / Path(archivo).name
     ruta.unlink(missing_ok=True)
+    ruta.with_suffix(".srt").unlink(missing_ok=True)
     return {"ok": True}
 
 

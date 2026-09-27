@@ -742,6 +742,16 @@ def _candidatos_python():
     cands = []
     if os.environ.get("CONTENTAPP_VIDEO_PYTHON"):
         cands.append(os.environ["CONTENTAPP_VIDEO_PYTHON"])
+    # Ubicación del motor (fuera del proyecto): la elegida por el usuario, la del mismo
+    # disco que la app (p. ej. D:\ContentApp\motor_video) y la de versiones anteriores.
+    if os.environ.get("CONTENTAPP_MOTOR_DIR"):
+        cands.append(os.path.join(os.environ["CONTENTAPP_MOTOR_DIR"], "Scripts", "python.exe"))
+    unidad = os.path.splitdrive(os.path.abspath(paths.EXEC_DIR))[0]
+    if unidad:
+        cands.append(os.path.join(unidad + os.sep, "ContentApp", "motor_video", "Scripts", "python.exe"))
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        cands.append(os.path.join(local, "ContentApp", "motor_video", "Scripts", "python.exe"))
     for base in (paths.EXEC_DIR, paths.DATA_DIR, paths.RES_DIR):
         for sub in ((".venv_video", "Scripts", "python.exe"), (".venv_video", "bin", "python"),
                     ("VideoAI", ".venv", "Scripts", "python.exe"), ("VideoAI", ".venv", "bin", "python")):
@@ -779,16 +789,17 @@ def _detectar_motor():
         info["python_cmd"] = py
         info["worker"] = worker
         listo = bool(info.get("torch") and info.get("diffusers") and not info.get("error"))
-        info["listo"] = listo and info.get("cuda")
+        info["listo"] = listo and info.get("cuda") and info.get("kernels_ok", True)
         if info["listo"]:
             mejor = info
             break
-        if listo and mejor is None:
-            mejor = info  # tiene librerías pero sin GPU
+        if (listo or (info.get("torch") and info.get("error"))) and mejor is None:
+            mejor = info  # tiene librerías pero sin GPU, o PyTorch no funciona con la GPU
     with _motor_lock:
         if mejor:
             _motor_info.clear()
-            _motor_info.update(mejor, estado="listo" if mejor.get("listo") else "sin_gpu")
+            estado = "listo" if mejor.get("listo") else ("error" if mejor.get("error") else "sin_gpu")
+            _motor_info.update(mejor, estado=estado)
         else:
             _motor_info.clear()
             _motor_info.update(estado="no_instalado")
@@ -856,10 +867,17 @@ def _ejecutar_worker(task_id, motor, cfg_path):
         winproc.adjuntar_a_job(proc)  # muere con la app aunque esta crashee
         _set_tarea(task_id, proceso=proc)
         ultimas = []
+        try:
+            registro = open(os.path.join(paths.LOGS_DIR, "motor_video.log"), "w", encoding="utf-8")
+        except OSError:
+            registro = None
         for linea in proc.stdout:
             linea = linea.strip()
             if not linea:
                 continue
+            if registro and '"tipo": "progreso"' not in linea:
+                registro.write(linea + "\n")
+                registro.flush()
             try:
                 ev = json.loads(linea) if linea.startswith("{") else None
             except ValueError:
@@ -879,14 +897,25 @@ def _ejecutar_worker(task_id, motor, cfg_path):
             elif tipo == "error":
                 _set_tarea(task_id, estado="error", error=ev.get("msg", "Error desconocido"))
         codigo = proc.wait()
+        if registro:
+            registro.write(f"[codigo de salida {codigo}]\n")
+            registro.close()
         with _tareas_lock:
             t = tareas_video.get(task_id, {})
             if t.get("estado") == "en_curso":
                 if t.get("cancelada"):
                     t.update(estado="cancelada", error="Generación cancelada.")
                 else:
-                    detalle = " | ".join(ultimas[-3:])
-                    t.update(estado="error", error=f"El motor de video se cerró (código {codigo}). {detalle}".strip())
+                    texto = " ".join(ultimas).lower()
+                    if "memory allocation" in texto or "memoryerror" in texto or codigo in (3221226505, 3221225495):
+                        msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Cierra otros programas "
+                               "y aumenta la memoria virtual de Windows a 32 GB o más.")
+                    elif codigo == 3221225477:
+                        msg = "El motor de video falló (acceso a memoria). Actualiza los drivers de NVIDIA y reintenta."
+                    else:
+                        detalle = " | ".join(l for l in ultimas[-3:] if "Loading" not in l)
+                        msg = f"El motor de video se cerró (código {codigo}). {detalle}".strip()
+                    t.update(estado="error", error=msg)
     except Exception as e:
         _set_tarea(task_id, estado="error", error=str(e))
     finally:
@@ -918,6 +947,9 @@ def generar_video():
     if motor.get("estado") == "no_instalado":
         return jsonify({"success": False, "error": "Falta el motor de video (Python con torch + diffusers). "
                                                     "Ejecuta 'instalar_motor_video.bat' en la carpeta de la app y reinicia."}), 400
+    if motor.get("estado") == "error":
+        return jsonify({"success": False, "error": f"El motor de video no funciona con tu GPU: {motor.get('error')}. "
+                                                    "Vuelve a ejecutar 'instalar_motor_video.bat'."}), 400
     if motor.get("estado") == "sin_gpu":
         return jsonify({"success": False, "error": "El motor está instalado pero no ve una GPU NVIDIA con CUDA. "
                                                     "Actualiza los drivers de NVIDIA o reinstala el motor."}), 400
@@ -1019,6 +1051,24 @@ def get_assets_library():
 @ia_bp.route('/video/<filename>')
 def serve_video(filename):
     return send_from_directory(VIDEOS_DIR, filename)
+
+
+@ia_bp.route('/abrir_video/<filename>', methods=['POST'])
+def abrir_video(filename):
+    """Abre el Explorador con el video generado seleccionado (Mis Videos Generados)."""
+    ruta = os.path.join(VIDEOS_DIR, os.path.basename(filename))
+    if not os.path.isfile(ruta):
+        return jsonify({"success": False, "error": "Archivo no encontrado"}), 404
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", ruta])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", ruta])
+        else:
+            subprocess.Popen(["xdg-open", VIDEOS_DIR])
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @ia_bp.route('/asset/<filename>')

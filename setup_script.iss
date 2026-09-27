@@ -36,6 +36,9 @@ Source: "youtube_uploader.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "descargar_modelo.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "generate_prompt_variation.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "video_worker.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "clips_virales.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "reencuadre.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "gpu_video.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "instalar_motor_video.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 ; === CONFIGURACIÓN Y CREDENCIALES ===

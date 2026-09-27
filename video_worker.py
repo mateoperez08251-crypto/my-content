@@ -57,38 +57,277 @@ NEGATIVO = ("worst quality, low quality, blurry, jittery, distorted, deformed, w
 ALTURAS = {"4k": 2160, "1080p": 1080, "720p": 720, "480p": 480}
 
 
-def cargar_pipeline(motor, carpeta, torch, vram_gb):
-    """Carga el pipeline de diffusers con la estrategia de memoria adecuada a la GPU."""
+# Datos de cada modelo:
+#   clase      pipeline de diffusers
+#   te_gb      RAM del codificador de texto en bf16 (se usa solo al principio)
+#   params     miles de millones de parámetros del transformer (el que dibuja el video)
+#   vram_min   VRAM mínima razonable
+MODELOS = {
+    "ltx": {"clase": "LTXPipeline", "te_gb": 9.0, "params": 1.9, "vram_min": 8},
+    "wan": {"clase": "WanPipeline", "te_gb": 10.6, "params": 1.4, "vram_min": 8},
+    "cogvideox": {"clase": "CogVideoXPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8},
+    "cogvideox_i2v": {"clase": "CogVideoXImageToVideoPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8},
+    "hunyuan": {"clase": "HunyuanVideoPipeline", "te_gb": 16.5, "params": 12.8, "vram_min": 24},
+}
+COMPONENTES_TEXTO = ("text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2")
+
+
+def memoria_libre_gb():
+    """Memoria que se puede reservar ahora (RAM libre + archivo de paginación en Windows)."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("x", ctypes.c_ulonglong)]
+            m = MS()
+            m.dwLength = ctypes.sizeof(MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+            return m.ullAvailPageFile / 1024 ** 3
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
+    except Exception:
+        return 0.0
+
+
+def info_gpu(torch):
+    """Nombre, VRAM, arquitectura y el tipo de dato adecuado para ESTA gráfica.
+
+    - Ampere o más nueva (RTX 30/40, A5000...): bf16 (rápido y estable).
+    - Volta/Turing (RTX 20, Titan V...): fp16 (tensor cores).
+    - Pascal (GTX 10, TITAN Xp...): fp32. No tiene bf16 y su fp16 es ~64 veces más lento;
+      antes se usaba bf16 y la GPU apenas trabajaba.
+    """
+    props = torch.cuda.get_device_properties(0)
+    cc = torch.cuda.get_device_capability(0)
+    if cc >= (8, 0):
+        dtype, nombre_dt = torch.bfloat16, "bf16"
+    elif cc >= (7, 0):
+        dtype, nombre_dt = torch.float16, "fp16"
+    else:
+        dtype, nombre_dt = torch.float32, "fp32"
+    return {"nombre": props.name, "vram": props.total_memory / 1024 ** 3, "cc": cc,
+            "dtype": dtype, "dtype_nombre": nombre_dt}
+
+
+def vram_libre_gb(torch, gpu):
+    """VRAM libre REAL (Windows y otros programas ya usan parte de la gráfica)."""
+    try:
+        return torch.cuda.mem_get_info()[0] / 1024 ** 3
+    except Exception:
+        return gpu["vram"]
+
+
+def _es_oom(e):
+    return "out of memory" in str(e).lower() or type(e).__name__ == "OutOfMemoryError"
+
+
+def _liberar_vram(torch):
+    import gc
+    gc.collect()
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _componentes(carpeta):
+    """Componentes que declara el modelo (model_index.json)."""
+    try:
+        with open(os.path.join(carpeta, "model_index.json"), "r", encoding="utf-8") as f:
+            return {k for k in json.load(f) if not k.startswith("_")}
+    except (OSError, ValueError):
+        return set()
+
+
+def _nulos(carpeta, nombres):
+    presentes = _componentes(carpeta)
+    return {n: None for n in nombres if not presentes or n in presentes}
+
+
+def _mover(valor, dispositivo):
+    if hasattr(valor, "to"):
+        return valor.to(dispositivo)
+    return valor
+
+
+# Clases del codificador de texto y tokenizador de cada modelo (para cargarlo directo en la GPU)
+TEXTO = {
+    "ltx": ("T5EncoderModel", "T5Tokenizer"),
+    "wan": ("UMT5EncoderModel", "AutoTokenizer"),
+    "cogvideox": ("T5EncoderModel", "T5Tokenizer"),
+    "cogvideox_i2v": ("T5EncoderModel", "T5Tokenizer"),
+}
+
+
+def _encode(pipe_txt, motor, prompt, negativo, torch, dispositivo, dtype):
+    import inspect
+    params = inspect.signature(pipe_txt.encode_prompt).parameters
+    kw = {}
+    if "prompt" in params:
+        kw["prompt"] = prompt
+    if "negative_prompt" in params and motor != "hunyuan":
+        kw["negative_prompt"] = negativo
+    if "do_classifier_free_guidance" in params:
+        kw["do_classifier_free_guidance"] = True
+    if "num_videos_per_prompt" in params:
+        kw["num_videos_per_prompt"] = 1
+    if "device" in params:
+        kw["device"] = torch.device(dispositivo)
+    if "dtype" in params:
+        kw["dtype"] = dtype
+    with torch.no_grad():
+        res = pipe_txt.encode_prompt(**kw)
+    if not isinstance(res, (tuple, list)):
+        res = (res,)
+    if motor == "ltx":
+        nombres = ("prompt_embeds", "prompt_attention_mask", "negative_prompt_embeds",
+                   "negative_prompt_attention_mask")
+    elif motor == "hunyuan":
+        nombres = ("prompt_embeds", "pooled_prompt_embeds", "prompt_attention_mask")
+    else:
+        nombres = ("prompt_embeds", "negative_prompt_embeds")
+    return {n: v for n, v in zip(nombres, res) if v is not None}
+
+
+def _hay_nan(vectores, torch):
+    for n, v in vectores.items():
+        if "embeds" in n and hasattr(v, "float"):
+            try:
+                if not bool(torch.isfinite(v.float()).all()):
+                    return True
+            except Exception:
+                pass
+    return False
+
+
+def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
+    """FASE 1: convierte el prompt en vectores con el codificador de texto y lo LIBERA.
+
+    Se carga DIRECTO en la GPU (sin pasar por la RAM): en bf16 si la gráfica lo soporta
+    y en fp16 en las más antiguas (Pascal: TITAN Xp, GTX 10xx). Antes, en Pascal se
+    cargaba en la CPU y ocupaba ~11 GB de RAM mientras la GPU esperaba sin hacer nada.
+    Si la GPU no alcanza o el resultado sale inválido, se usa la CPU como respaldo."""
+    import gc
+
+    import diffusers
+    import transformers
+
+    info = MODELOS[motor]
+    clase = getattr(diffusers, info["clase"])
+    nulos = _nulos(carpeta, ("transformer", "vae"))
+    dtype_gpu = torch.bfloat16 if gpu["dtype"] == torch.bfloat16 else torch.float16
+
+    if motor in TEXTO and vram_libre_gb(torch, gpu) >= info["te_gb"] + 0.4:
+        progreso(4, 1, "Leyendo el prompt con el codificador de texto en la GPU...")
+        te = pipe_txt = None
+        try:
+            clase_te, clase_tok = TEXTO[motor]
+            te = getattr(transformers, clase_te).from_pretrained(
+                carpeta, subfolder="text_encoder", torch_dtype=dtype_gpu,
+                device_map="cuda", low_cpu_mem_usage=True)
+            tok = getattr(transformers, clase_tok).from_pretrained(carpeta, subfolder="tokenizer")
+            pipe_txt = clase.from_pretrained(carpeta, text_encoder=te, tokenizer=tok, **nulos)
+            vectores = _encode(pipe_txt, motor, prompt, negativo, torch, "cuda", dtype_gpu)
+            if _hay_nan(vectores, torch):
+                raise ValueError("vectores inválidos en fp16")
+            vectores = {k: v.to("cpu") if hasattr(v, "to") else v for k, v in vectores.items()}
+            return vectores
+        except Exception as e:
+            aviso(f"El codificador de texto no pudo usar la GPU ({str(e)[:80]}): se usa la CPU.")
+        finally:
+            del te, pipe_txt
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+    if motor not in TEXTO and gpu["dtype"] == torch.bfloat16 and \
+            vram_libre_gb(torch, gpu) >= info["te_gb"] + 1.5:
+        # HunyuanVideo en GPU grande y moderna: cargar el pipeline de texto y subirlo a la GPU
+        progreso(4, 1, "Leyendo el prompt con el codificador de texto en la GPU...")
+        pipe_txt = clase.from_pretrained(carpeta, torch_dtype=torch.bfloat16, **nulos)
+        for nombre in COMPONENTES_TEXTO:
+            comp = getattr(pipe_txt, nombre, None)
+            if comp is not None and hasattr(comp, "to"):
+                comp.to("cuda")
+        vectores = _encode(pipe_txt, motor, prompt, negativo, torch, "cuda", torch.bfloat16)
+        vectores = {k: v.to("cpu") if hasattr(v, "to") else v for k, v in vectores.items()}
+        del pipe_txt
+        gc.collect()
+        torch.cuda.empty_cache()
+        return vectores
+
+    # Respaldo: CPU en bf16 (usa RAM)
+    libre = memoria_libre_gb()
+    if libre and libre < info["te_gb"] + 1.0:
+        raise RuntimeError(
+            f"No hay memoria suficiente para leer el prompt: quedan {libre:.1f} GB libres y el "
+            f"codificador de texto necesita ~{info['te_gb']:.0f} GB. Cierra programas y aumenta la "
+            "memoria virtual de Windows (Sistema > Configuración avanzada > Rendimiento > Memoria virtual).")
+    progreso(4, 1, "Leyendo el prompt con el codificador de texto en la CPU...")
+    pipe_txt = clase.from_pretrained(carpeta, torch_dtype=torch.bfloat16, **nulos)
+    vectores = _encode(pipe_txt, motor, prompt, negativo, torch, "cpu", torch.bfloat16)
+    vectores = {k: v.to("cpu") if hasattr(v, "to") else v for k, v in vectores.items()}
+    del pipe_txt
+    gc.collect()
+    return vectores
+
+
+def cargar_pipeline(motor, carpeta, torch, gpu):
+    """FASE 2: carga solo la parte que dibuja el video (sin codificador de texto) en el
+    formato adecuado para la gráfica y, si cabe, ENTERA en la GPU (lo más rápido)."""
     import diffusers
 
-    bf16 = torch.bfloat16
-    if motor == "ltx":
-        pipe = diffusers.LTXPipeline.from_pretrained(carpeta, torch_dtype=bf16)
-    elif motor == "wan":
+    info = MODELOS[motor]
+    dtype = gpu["dtype"]
+    bytes_por_param = {torch.float32: 4, torch.float16: 2, torch.bfloat16: 2}[dtype]
+    peso_gb = info["params"] * bytes_por_param + 0.5  # + VAE
+    if dtype == torch.float32 and peso_gb + 3 > gpu["vram"] and \
+            info["params"] * 2 + 3 <= gpu["vram"] * 1.6:
+        # En Pascal un modelo grande no cabe en fp32: se usa fp16 (más lento pero cabe)
+        dtype, bytes_por_param = torch.float16, 2
+        peso_gb = info["params"] * 2 + 0.5
+        aviso("El modelo no cabe en la GPU en fp32: se usa fp16 (más lento en esta gráfica).")
+
+    nulos = _nulos(carpeta, COMPONENTES_TEXTO)
+    clase = getattr(diffusers, info["clase"])
+    progreso(10, 1, f"Cargando el modelo de video en la GPU ({gpu['dtype_nombre'] if dtype == gpu['dtype'] else 'fp16'})...")
+    if motor == "wan":
         vae = diffusers.AutoencoderKLWan.from_pretrained(carpeta, subfolder="vae", torch_dtype=torch.float32)
-        pipe = diffusers.WanPipeline.from_pretrained(carpeta, vae=vae, torch_dtype=bf16)
-    elif motor == "cogvideox":
-        pipe = diffusers.CogVideoXPipeline.from_pretrained(carpeta, torch_dtype=bf16)
-    elif motor == "cogvideox_i2v":
-        pipe = diffusers.CogVideoXImageToVideoPipeline.from_pretrained(carpeta, torch_dtype=bf16)
+        pipe = clase.from_pretrained(carpeta, vae=vae, torch_dtype=dtype, **nulos)
     elif motor == "hunyuan":
         transformer = diffusers.HunyuanVideoTransformer3DModel.from_pretrained(
-            carpeta, subfolder="transformer", torch_dtype=bf16)
-        pipe = diffusers.HunyuanVideoPipeline.from_pretrained(
-            carpeta, transformer=transformer, torch_dtype=torch.float16)
+            carpeta, subfolder="transformer", torch_dtype=dtype)
+        pipe = clase.from_pretrained(carpeta, transformer=transformer, torch_dtype=dtype, **nulos)
     else:
-        raise ValueError(f"Motor desconocido: {motor}")
+        pipe = clase.from_pretrained(carpeta, torch_dtype=dtype, **nulos)
 
-    aplicar_memoria(pipe, motor, vram_gb)
-    return pipe
-
-
-def aplicar_memoria(pipe, motor, vram_gb):
-    # Con poca VRAM se descarga capa a capa (más lento pero no revienta la GPU).
-    if vram_gb and vram_gb < 12 and motor != "wan":
-        pipe.enable_sequential_cpu_offload()
-    else:
+    _liberar_vram(torch)
+    libre = vram_libre_gb(torch, gpu)
+    # memoria de trabajo para generar los frames (fp32 ocupa el doble)
+    margen = 4.0 if dtype == torch.float32 else 3.0
+    estrategia = ""
+    if peso_gb + margen <= libre * 0.95:
+        try:
+            pipe.to("cuda")
+            estrategia = "gpu"
+        except Exception as e:
+            if not _es_oom(e):
+                raise
+            pipe.to("cpu")
+            _liberar_vram(torch)
+    if not estrategia and peso_gb + 1.0 <= libre:
         pipe.enable_model_cpu_offload()
+        estrategia = "offload"
+    elif not estrategia:
+        pipe.enable_sequential_cpu_offload()
+        estrategia = "secuencial"
+        aviso("El modelo es más grande que la VRAM: se carga por partes (bastante más lento).")
     vae = getattr(pipe, "vae", None)
     for metodo in ("enable_tiling", "enable_slicing"):
         if vae is not None and hasattr(vae, metodo):
@@ -96,18 +335,45 @@ def aplicar_memoria(pipe, motor, vram_gb):
                 getattr(vae, metodo)()
             except Exception:
                 pass
+    pipe._estrategia = estrategia
+    pipe._dtype = dtype
+    return pipe
 
 
-def pipeline_imagen(motor, pipe, vram_gb):
-    """Pipeline que acepta imagen de partida (para animar una foto o encadenar segmentos).
+def bajar_estrategia(pipe, torch):
+    """Si la VRAM se llena: GPU entera -> GPU + RAM -> por partes. False si ya no hay más."""
+    actual = getattr(pipe, "_estrategia", "gpu")
+    if actual == "secuencial":
+        return False
+    try:
+        pipe.remove_all_hooks()
+    except Exception:
+        pass
+    if actual == "gpu":
+        pipe.to("cpu")
+        _liberar_vram(torch)
+        pipe.enable_model_cpu_offload()
+        pipe._estrategia = "offload"
+        aviso("La VRAM se llenó: se continúa usando GPU + RAM (un poco más lento).")
+    else:
+        _liberar_vram(torch)
+        pipe.enable_sequential_cpu_offload()
+        pipe._estrategia = "secuencial"
+        aviso("La VRAM se llenó: se carga el modelo por partes (más lento).")
+    _liberar_vram(torch)
+    return True
+
+
+def pipeline_imagen(motor, pipe):
+    """Pipeline que acepta imagen de partida (animar una foto o encadenar segmentos).
     Reutiliza los pesos ya cargados: no duplica la memoria."""
     if motor == "ltx":
         import diffusers
         p = diffusers.LTXImageToVideoPipeline.from_pipe(pipe)
-        try:
-            aplicar_memoria(p, motor, vram_gb)
-        except Exception:
-            pass
+        if getattr(pipe, "_estrategia", "gpu") == "offload":
+            p.enable_model_cpu_offload()
+        elif getattr(pipe, "_estrategia", "gpu") == "secuencial":
+            p.enable_sequential_cpu_offload()
         return p
     if motor == "cogvideox_i2v":
         return pipe
@@ -119,12 +385,31 @@ def ajustar_imagen(img, w, h):
     return ImageOps.fit(img.convert("RGB"), (w, h))
 
 
+_NVENC = None
+
+
+def _codificador(ffmpeg, crf):
+    """NVENC (GPU) si funciona; si no, libx264 (CPU)."""
+    global _NVENC
+    if _NVENC is None:
+        try:
+            r = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                                "color=c=black:s=256x256:d=0.2", "-c:v", "h264_nvenc", "-f", "null", "-"],
+                               capture_output=True, timeout=30,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            _NVENC = r.returncode == 0
+        except Exception:
+            _NVENC = False
+    if _NVENC:
+        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", str(int(crf) + 2), "-b:v", "0"]
+    return ["-c:v", "libx264", "-crf", str(crf), "-preset", "medium"]
+
+
 def escribir_video(frames, ruta, fps, ffmpeg):
     """Escribe frames PIL a MP4 enviándolos en crudo a ffmpeg (sin depender de imageio)."""
     w, h = frames[0].size
     cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-           "-s", f"{w}x{h}", "-r", str(fps), "-i", "-", "-c:v", "libx264", "-crf", "16",
-           "-preset", "medium", "-pix_fmt", "yuv420p", ruta]
+           "-s", f"{w}x{h}", "-r", str(fps), "-i", "-", *_codificador(ffmpeg, 16), "-pix_fmt", "yuv420p", ruta]
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
     try:
@@ -157,7 +442,7 @@ def postprocesar(entrada, salida, cfg, alto_nativo, ffmpeg):
         cmd += ["-i", audio]
     if filtros:
         cmd += ["-vf", ",".join(filtros)]
-    cmd += ["-c:v", "libx264", "-crf", "17", "-preset", "medium", "-pix_fmt", "yuv420p"]
+    cmd += [*_codificador(ffmpeg, 17), "-pix_fmt", "yuv420p"]
     if audio:
         cmd += ["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "192k", "-shortest"]
     cmd.append(salida)
@@ -185,12 +470,26 @@ def generar(cfg):
     if not torch.cuda.is_available():
         raise RuntimeError("No se detectó una GPU NVIDIA con CUDA. La generación de video "
                            "necesita GPU (en CPU tardaría horas).")
-    vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
-    progreso(3, 1, f"GPU: {torch.cuda.get_device_name(0)} ({vram_gb:.0f} GB). Cargando modelo...")
+    gpu = info_gpu(torch)
+    info = MODELOS[motor]
+    progreso(2, 1, f"GPU: {gpu['nombre']} ({gpu['vram']:.0f} GB, formato {gpu['dtype_nombre']})")
+    if gpu["vram"] + 0.5 < info["vram_min"]:
+        raise RuntimeError(f"Este modelo necesita una GPU de {info['vram_min']} GB y la tuya tiene "
+                           f"{gpu['vram']:.0f} GB. Usa Wan2.1 1.3B o LTX-Video.")
 
-    pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, vram_gb)
-    progreso(15, 1, "Modelo cargado.")
-
+    vectores = codificar_texto(motor, cfg["carpeta_modelo"], cfg["prompt"],
+                               cfg.get("negativo") or NEGATIVO, torch, gpu)
+    pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, gpu)
+    # Los vectores deben tener el MISMO formato que el transformer (fp16 del codificador vs fp32
+    # del transformer en Pascal daba "expected ... same dtype"). Las máscaras no se convierten.
+    dtype_tr = getattr(getattr(pipe, "transformer", None), "dtype", gpu["dtype"])
+    vectores_gpu = {}
+    for k, v in vectores.items():
+        if hasattr(v, "to"):
+            flotante = getattr(v, "is_floating_point", lambda: False)()
+            v = v.to("cuda", dtype=dtype_tr) if flotante else v.to("cuda")
+        vectores_gpu[k] = v
+    progreso(15, 1, f"Modelo cargado ({'entero en la GPU' if pipe._estrategia == 'gpu' else 'GPU + RAM'}).")
     imagen = None
     if cfg.get("imagen"):
         from PIL import Image
@@ -198,7 +497,7 @@ def generar(cfg):
 
     pipe_img = None
     if imagen is not None or perfil["imagen"]:
-        pipe_img = pipeline_imagen(motor, pipe, vram_gb)
+        pipe_img = pipeline_imagen(motor, pipe)
     if imagen is not None and pipe_img is None:
         aviso("Este modelo solo genera desde texto: se ignoró la imagen base.")
         imagen = None
@@ -228,19 +527,32 @@ def generar(cfg):
             return kw
 
         generador = torch.Generator(device="cpu").manual_seed(semilla + i)
-        kwargs = dict(prompt=cfg["prompt"], num_frames=perfil["frames"],
-                      num_inference_steps=perfil["pasos"], guidance_scale=perfil["cfg"],
-                      generator=generador, callback_on_step_end=cb)
+        kwargs = dict(num_frames=perfil["frames"], num_inference_steps=perfil["pasos"],
+                      guidance_scale=perfil["cfg"], generator=generador, callback_on_step_end=cb,
+                      **vectores_gpu)  # vectores del prompt ya calculados (fase 1)
         if motor not in ("cogvideox", "cogvideox_i2v"):
             kwargs.update(width=perfil["w"], height=perfil["h"])
-        if motor != "hunyuan":
-            kwargs["negative_prompt"] = cfg.get("negativo") or NEGATIVO
 
         usar_img = ultimo is not None and pipe_img is not None
-        p = pipe_img if usar_img else pipe
         if usar_img:
             kwargs["image"] = ultimo
-        frames = p(**kwargs).frames[0]
+        while True:
+            p = pipe_img if usar_img else pipe
+            oom = False
+            try:
+                frames = p(**kwargs).frames[0]
+            except Exception as e:
+                if not _es_oom(e):
+                    raise
+                oom = True
+            if not oom:
+                break
+            _liberar_vram(torch)
+            if not bajar_estrategia(pipe, torch):
+                raise RuntimeError("CUDA out of memory incluso cargando el modelo por partes.")
+            if pipe_img is not None and pipe_img is not pipe:
+                pipe_img = pipeline_imagen(motor, pipe)
+            kwargs["generator"] = torch.Generator(device="cpu").manual_seed(semilla + i)
         if i > 0 and usar_img:
             frames = frames[1:]  # el primer frame repite el último del segmento anterior
         frames_total.extend(frames)
@@ -271,12 +583,23 @@ def diagnostico():
         info["torch"] = torch.__version__
         info["cuda"] = bool(torch.cuda.is_available())
         if info["cuda"]:
-            info["gpu"] = torch.cuda.get_device_name(0)
-            info["vram_gb"] = round(torch.cuda.get_device_properties(0).total_memory / 1024 ** 3, 1)
+            g = info_gpu(torch)
+            info["gpu"] = g["nombre"]
+            info["vram_gb"] = round(g["vram"], 1)
+            info["arquitectura"] = f"sm_{g['cc'][0]}{g['cc'][1]}"
+            info["formato"] = g["dtype_nombre"]
+            try:
+                # comprobar que PyTorch trae kernels para esta gráfica
+                (torch.ones(8, device="cuda") * 2).sum().item()
+                info["kernels_ok"] = True
+            except Exception as e:
+                info["kernels_ok"] = False
+                info["error"] = f"PyTorch no funciona con esta GPU: {e}"
         import diffusers
         info["diffusers"] = diffusers.__version__
         import transformers  # noqa: F401
         import accelerate  # noqa: F401
+        info["memoria_libre_gb"] = round(memoria_libre_gb(), 1)
     except Exception as e:
         info["error"] = f"{type(e).__name__}: {e}"
     print(json.dumps(info, ensure_ascii=False), flush=True)
@@ -299,7 +622,9 @@ def main(argv):
         generar(cfg)
         return 0
     except Exception as e:
-        msg = str(e)
+        import traceback
+        traceback.print_exc(file=sys.stdout)  # queda en logs/motor_video.log
+        msg = f"{type(e).__name__}: {e}"
         if "out of memory" in msg.lower() or "CUDA out of memory" in msg:
             msg = ("La GPU se quedó sin memoria (VRAM). Prueba con menos duración, un modelo más "
                    "ligero (Wan2.1 1.3B) o cierra otros programas que usen la GPU.")
