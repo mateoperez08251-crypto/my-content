@@ -11,10 +11,13 @@ echo.
 set "APP_DIR=%~dp0"
 cd /d "%APP_DIR%"
 
-:: El motor se instala FUERA del proyecto (carpeta limpia del usuario): así VS Code
-:: u otros programas no bloquean sus archivos y no hay restos de intentos viejos.
-set "VENV=%LOCALAPPDATA%\ContentApp\motor_video"
-if not exist "%LOCALAPPDATA%\ContentApp" mkdir "%LOCALAPPDATA%\ContentApp"
+:: El motor se instala FUERA del proyecto, en el MISMO DISCO que la app
+:: (p. ej. D:\ContentApp\motor_video): así no llena el disco C y VS Code u otros
+:: programas no bloquean sus archivos. Se puede cambiar con la variable
+:: CONTENTAPP_MOTOR_DIR.
+set "MOTOR_BASE=%~d0\ContentApp"
+if defined CONTENTAPP_MOTOR_DIR (set "VENV=%CONTENTAPP_MOTOR_DIR%") else (set "VENV=%MOTOR_BASE%\motor_video")
+if not exist "%MOTOR_BASE%" mkdir "%MOTOR_BASE%"
 
 :: 1. Buscar Python 3.10 - 3.12
 set "PY="
@@ -73,8 +76,8 @@ echo  [!] El entorno del motor esta incompleto o dañado: se borra y se crea de 
 echo      Si falla, cierra Content App (tambien desde la bandeja junto al reloj).
 :: se conserva lo ya descargado de PyTorch para no bajarlo otra vez
 if exist "%VENV%\descargas" (
-    if exist "%LOCALAPPDATA%\ContentApp\_descargas_motor" rmdir /s /q "%LOCALAPPDATA%\ContentApp\_descargas_motor" >nul 2>&1
-    move "%VENV%\descargas" "%LOCALAPPDATA%\ContentApp\_descargas_motor" >nul 2>&1
+    if exist "%MOTOR_BASE%\_descargas_motor" rmdir /s /q "%MOTOR_BASE%\_descargas_motor" >nul 2>&1
+    move "%VENV%\descargas" "%MOTOR_BASE%\_descargas_motor" >nul 2>&1
 )
 call :liberar_venv
 rmdir /s /q "%VENV%" >nul 2>&1
@@ -93,7 +96,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-if exist "%LOCALAPPDATA%\ContentApp\_descargas_motor" move "%LOCALAPPDATA%\ContentApp\_descargas_motor" "%VENV%\descargas" >nul 2>&1
+if exist "%MOTOR_BASE%\_descargas_motor" move "%MOTOR_BASE%\_descargas_motor" "%VENV%\descargas" >nul 2>&1
 
 :entorno_ok
 echo  [*] Actualizando pip...
