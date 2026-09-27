@@ -5,7 +5,7 @@
 #
 #  Uso:   bash runpod/instalar.sh                      (solo instala)
 #         bash runpod/instalar.sh wan21_t2v_13b        (instala y baja el modelo)
-#  Modelos: wan22_ti2v_5b_turbo wan21_t2v_13b  ltx_video  cogvideox_5b  cogvideox_5b_i2v  hunyuan_video
+#  Modelos: ltx25_distilled minimax_h3 wan22_ti2v_5b_turbo wan21_t2v_13b  ltx_video  cogvideox_5b  cogvideox_5b_i2v  hunyuan_video
 #
 #  Rápido a propósito (en RunPod el tiempo de instalación también se paga):
 #  - reutiliza el torch de la plantilla PyTorch (evita bajar ~2.5 GB),
@@ -157,6 +157,8 @@ paso "[4/5] App y motor de video (diffusers, transformers...)"
 echo "torch==$TORCH_VER" > "$BASE/constraints.txt"
 instalar -r "$APP_DIR/runpod/requirements-runpod.txt" -c "$BASE/constraints.txt" \
     || falla "No se pudieron instalar las dependencias."
+# Opcional: kernels de atención rápida (FlashAttention 3) para MiniMax H3 en H100/H200
+"$VPY" -m pip install -q kernels -c "$BASE/constraints.txt" 2>/dev/null || echo "[!] kernels no disponible (opcional)."
 
 # Variables que usan iniciar.sh y la app
 cat > "$BASE/entorno.sh" <<ENVEOF
@@ -170,6 +172,8 @@ export HF_XET_CHUNK_CACHE_SIZE_BYTES=0
 export PYTHONUTF8=1
 export OLLAMA_MODELS="$BASE/ollama"
 ENVEOF
+# Token de Hugging Face (LTX-2.5 lo exige): se recuerda para descargar desde la app
+if [ -n "${HF_TOKEN:-}" ]; then echo "export HF_TOKEN=\"$HF_TOKEN\"" >> "$BASE/entorno.sh"; fi
 
 paso "[5/5] Diagnóstico del motor"
 "$VPY" "$APP_DIR/video_worker.py" --diagnostico
