@@ -185,10 +185,65 @@ def _clave_servidor():
     return clave
 
 
+_ultima_accion = [time.time()]
+
+
+def _gpu_trabajando():
+    """Seguro extra: si la GPU está trabajando (>10 %) no se borra, pase lo que pase."""
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=20)
+        return any(int(x.strip() or 0) > 10 for x in r.stdout.splitlines())
+    except Exception:
+        return False
+
+
+def _hilo_autoborrado(minutos):
+    """RunPod: si nadie usa la app en `minutos`, borra el pod para que deje de cobrar.
+    El contador se PAUSA mientras se genera un video, corre un Smart Split, se baja un
+    modelo o la GPU trabaja: solo cuenta el tiempo quieto DESPUÉS de terminar.
+    Los videos que no hayas descargado se pierden."""
+    from modulo_ia import hay_trabajo_ia
+    import shutil as _sh
+    pod = os.environ.get("RUNPOD_POD_ID")
+    avisado = False
+    while True:
+        time.sleep(60)
+        with _estado_lock:
+            ocupado = automation_status == "running"
+        if ocupado or hay_trabajo_ia() or _gpu_trabajando():
+            _ultima_accion[0] = time.time()
+            avisado = False
+            continue
+        quieto = (time.time() - _ultima_accion[0]) / 60
+        if quieto >= minutos - 10 and not avisado:
+            log(f"Autoborrado: sin uso. El pod se borrará en ~{max(1, int(minutos - quieto))} min. "
+                "Descarga tus videos o haz clic en la app para cancelarlo.")
+            avisado = True
+        if quieto < minutos:
+            continue
+        _arranque(f"Autoborrado: {minutos} min sin uso. Borrando el pod {pod}...")
+        runpodctl = _sh.which("runpodctl")
+        if not (pod and runpodctl):
+            _arranque("Autoborrado: no hay runpodctl o RUNPOD_POD_ID; no se puede borrar el pod.")
+            return
+        for orden in (["remove", "pod", pod], ["stop", "pod", pod]):
+            try:
+                r = subprocess.run([runpodctl, *orden], capture_output=True, text=True, timeout=60)
+                _arranque(f"runpodctl {' '.join(orden)}: {r.returncode} {(r.stdout or r.stderr).strip()[:200]}")
+                if r.returncode == 0:
+                    return
+            except Exception as e:
+                _arranque(f"runpodctl falló: {e}")
+        return
+
+
 @app.before_request
 def exigir_clave():
     """En modo servidor la app queda expuesta a internet: todo pide usuario y contraseña
     (usuario: cualquiera, contraseña: la clave). El navegador la recuerda."""
+    if MODO_SERVIDOR and request.method != "GET":
+        _ultima_accion[0] = time.time()  # un clic cuenta como uso (las consultas GET periódicas no)
     if not MODO_SERVIDOR or request.remote_addr in ("127.0.0.1", "::1") and \
             not request.headers.get("X-Forwarded-For"):
         return None
@@ -1613,6 +1668,10 @@ def _arrancar_servidor():
     threading.Thread(target=init_firebase_async, daemon=True, name="firebase").start()
     threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
     threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
+    minutos = float(os.environ.get("CONTENTAPP_AUTOBORRAR_MIN") or 0)
+    if minutos > 0:
+        threading.Thread(target=_hilo_autoborrado, args=(minutos,), daemon=True, name="autoborrado").start()
+        _arranque(f"Autoborrado activo: el pod se borra tras {minutos:g} min sin uso.")
     pod = os.environ.get("RUNPOD_POD_ID")
     url = f"https://{pod}-{puerto}.proxy.runpod.net" if pod else f"http://<IP-del-servidor>:{puerto}"
     aviso = (f"\n  Content App en modo servidor\n  Abre: {url}\n"

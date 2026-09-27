@@ -852,6 +852,15 @@ def motor_estado():
 # ---------------------------------------------------------------------------
 tareas_video = {}
 _tareas_lock = threading.Lock()
+
+
+def hay_trabajo_ia():
+    """True si hay un video generándose o un modelo descargándose (para el autoborrado de RunPod)."""
+    with _tareas_lock:
+        if any(t.get("estado") == "en_curso" for t in tareas_video.values()):
+            return True
+    with _dl_lock:
+        return any(d.get("status") == "downloading" and not d.get("pause") for d in download_status.values())
 _gpu_lock = threading.Lock()  # una generación a la vez (una sola GPU)
 
 

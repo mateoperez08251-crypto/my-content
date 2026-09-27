@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  Content App en RunPod: instala TODO (app + motor de video) en el volumen
-#  persistente /workspace. Se puede volver a ejecutar sin romper nada.
+#  Content App en RunPod: instala TODO (app + motor de video). Se puede volver
+#  a ejecutar sin romper nada.
 #
 #  Uso:   bash runpod/instalar.sh                      (solo instala)
 #         bash runpod/instalar.sh wan21_t2v_13b        (instala y baja el modelo)
 #  Modelos: wan21_t2v_13b  ltx_video  cogvideox_5b  cogvideox_5b_i2v  hunyuan_video
+#
+#  Rápido a propósito (en RunPod el tiempo de instalación también se paga):
+#  - reutiliza el torch de la plantilla PyTorch (evita bajar ~2.5 GB),
+#  - baja los modelos EN PARALELO mientras instala lo demás.
 # ============================================================================
 set -euo pipefail
 
@@ -14,41 +18,52 @@ BASE="${CONTENTAPP_BASE:-/workspace/contentapp}"
 VENV="$BASE/venv"
 VPY="$VENV/bin/python"
 export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore
-mkdir -p "$BASE"
+export CONTENTAPP_DATA_DIR="$BASE/datos" HF_HOME="$BASE/hf_cache" HF_XET_HIGH_PERFORMANCE=1
+mkdir -p "$BASE" "$CONTENTAPP_DATA_DIR/logs"
+T0=$(date +%s)
 
-paso() { echo; echo "==> $*"; }
+paso() { echo; echo "==> $*  [$(( $(date +%s) - T0 ))s]"; }
 falla() { echo; echo "[X] $*"; exit 1; }
 
-paso "[1/6] GPU"
+# pip (respeta el torch de la plantilla; uv no lo ve y lo volvería a bajar). 3 intentos.
+instalar() {
+    local i
+    for i in 1 2 3; do
+        "$VPY" -m pip install -q --retries 10 --timeout 120 "$@" && return 0
+        echo "[!] Falló la instalación (intento $i de 3), reintentando..."; sleep 5
+    done
+    return 1
+}
+
+paso "[1/5] GPU"
 command -v nvidia-smi >/dev/null || falla "No hay GPU NVIDIA en este pod. Crea el pod con GPU."
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 CUDA_DRIVER="$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\1\2/p' | head -n1)"
 CUDA_DRIVER="${CUDA_DRIVER:-0}"
-echo "CUDA que soporta el driver: ${CUDA_DRIVER:0:2}.${CUDA_DRIVER:2}"
 
-paso "[2/6] Paquetes del sistema (ffmpeg)"
-if command -v apt-get >/dev/null && ! command -v ffmpeg >/dev/null; then
-    (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg >/dev/null) \
-        || echo "[!] No se pudo instalar ffmpeg con apt (no pasa nada: la app trae el suyo)."
-fi
-
-paso "[3/6] Entorno de Python en $VENV"
+paso "[2/5] Entorno de Python en $VENV"
 PY="$(command -v python3.11 || command -v python3.12 || command -v python3.10 || command -v python3)"
 [ -n "$PY" ] || falla "No hay Python 3 en el pod."
 if [ -x "$VPY" ] && ! "$VPY" -c "import sys" 2>/dev/null; then
     echo "[!] Entorno roto: se recrea."; rm -rf "$VENV"
 fi
 if [ ! -x "$VPY" ]; then
-    # --system-site-packages: reutiliza el torch de la plantilla (evita bajar ~2.5 GB)
+    # --system-site-packages: reutiliza el torch de la plantilla
     "$PY" -m venv --system-site-packages "$VENV" 2>/dev/null || {
         "$PY" -m pip install -q virtualenv && "$PY" -m virtualenv -q --system-site-packages "$VENV"; }
 fi
-"$VPY" -m pip install -q --upgrade pip
 
-paso "[4/6] PyTorch con CUDA"
+DESCARGA_PID=""
+if [ "$#" -gt 0 ]; then
+    paso "Descargando modelos en segundo plano: $*"
+    instalar flask requests werkzeug huggingface_hub hf_xet || falla "No se pudo preparar la descarga."
+    "$VPY" "$APP_DIR/runpod/descargar_modelo.py" "$@" > "$CONTENTAPP_DATA_DIR/logs/descarga_modelos.log" 2>&1 &
+    DESCARGA_PID=$!
+fi
+
+paso "[3/5] PyTorch con CUDA"
 probar_torch() {
     "$VPY" - <<'PYEOF'
-import sys
 import torch
 v = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
 assert v >= (2, 4), f"torch {torch.__version__} es muy viejo"
@@ -64,27 +79,20 @@ if ! probar_torch; then
     elif [ "$CUDA_DRIVER" -ge 126 ]; then IDX=cu126
     elif [ "$CUDA_DRIVER" -ge 124 ]; then IDX=cu124
     else IDX=cu121; fi
-    echo "Instalando torch para $IDX (puede tardar un par de minutos)..."
-    for i in 1 2 3; do
-        "$VPY" -m pip install -q --upgrade torch --index-url "https://download.pytorch.org/whl/$IDX" \
-            --retries 10 --timeout 120 && break
-        echo "[!] Falló la descarga de torch (intento $i de 3)."; sleep 5
-    done
+    echo "Instalando torch para $IDX..."
+    instalar --upgrade torch --index-url "https://download.pytorch.org/whl/$IDX" \
+        || falla "No se pudo bajar PyTorch."
     probar_torch || falla "PyTorch no funciona con esta GPU/driver. Usa la plantilla 'RunPod PyTorch 2.x'."
 fi
 TORCH_VER="$("$VPY" -c 'import torch; print(torch.__version__)')"
 
-paso "[5/6] App y motor de video (diffusers, transformers...)"
-# torch fijado: pip no debe cambiar la versión que ya funciona con la GPU
+paso "[4/5] App y motor de video (diffusers, transformers...)"
+# torch fijado: no se debe cambiar la versión que ya funciona con la GPU
 echo "torch==$TORCH_VER" > "$BASE/constraints.txt"
-for i in 1 2 3; do
-    "$VPY" -m pip install -q -r "$APP_DIR/runpod/requirements-runpod.txt" -c "$BASE/constraints.txt" \
-        --retries 10 --timeout 120 && break
-    [ "$i" = 3 ] && falla "No se pudieron instalar las dependencias."
-    echo "[!] Reintentando ($i de 3)..."; sleep 5
-done
+instalar -r "$APP_DIR/runpod/requirements-runpod.txt" -c "$BASE/constraints.txt" \
+    || falla "No se pudieron instalar las dependencias."
 
-# Variables que usan instalar.sh, iniciar.sh y la app
+# Variables que usan iniciar.sh y la app
 cat > "$BASE/entorno.sh" <<ENVEOF
 export CONTENTAPP_BASE="$BASE"
 export CONTENTAPP_DATA_DIR="$BASE/datos"
@@ -94,19 +102,17 @@ export HF_HOME="$BASE/hf_cache"
 export HF_XET_HIGH_PERFORMANCE=1
 export PYTHONUTF8=1
 ENVEOF
-# shellcheck disable=SC1091
-source "$BASE/entorno.sh"
-mkdir -p "$CONTENTAPP_DATA_DIR"
 
-paso "[6/6] Diagnóstico del motor"
+paso "[5/5] Diagnóstico del motor"
 "$VPY" "$APP_DIR/video_worker.py" --diagnostico
 
-if [ "$#" -gt 0 ]; then
-    paso "Descargando modelos: $*"
-    "$VPY" "$APP_DIR/runpod/descargar_modelo.py" "$@"
+if [ -n "$DESCARGA_PID" ]; then
+    paso "Esperando a que terminen los modelos..."
+    tail -n +1 -f "$CONTENTAPP_DATA_DIR/logs/descarga_modelos.log" --pid="$DESCARGA_PID" 2>/dev/null || true
+    wait "$DESCARGA_PID" || falla "Falló la descarga de modelos (ver $CONTENTAPP_DATA_DIR/logs/descarga_modelos.log)."
 fi
 
 echo
 echo "============================================================"
-echo " Listo. Arranca la app con:   bash runpod/iniciar.sh"
+echo " Listo en $(( $(date +%s) - T0 )) s. Arranca con:   bash runpod/iniciar.sh"
 echo "============================================================"
