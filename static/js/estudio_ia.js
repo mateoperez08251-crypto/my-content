@@ -24,6 +24,7 @@ function openEstudioIA() {
                 overlay.innerHTML = html;
                 initEstudioEventHandlers(); // Iniciar botones
                 cargarModelos(); // Cargar modelos disponibles para llenar el dropdown
+                comprobarMotorVideo(false);
             })
             .catch(error => {
                 console.error("Error al cargar Estudio IA:", error);
@@ -61,81 +62,59 @@ function initEstudioEventHandlers() {
     if (btnProcessGen) {
         btnProcessGen.addEventListener('click', () => {
             const promptValue = document.getElementById('prompt-input-gen').value.trim();
-            if(!promptValue) {
+            if (!promptValue) {
                 mostrarToast("Falta el Prompt", "Por favor ingresa un Prompt de Video antes de generar.", true);
                 return;
             }
-            btnProcessGen.innerText = "Procesando...";
-            const upscale = document.getElementById('toggle-upscale-gen')?.classList.contains('active');
-            const fps60 = document.getElementById('toggle-60fps-gen')?.classList.contains('active');
-            const lipsync = document.getElementById('toggle-lipsync-gen')?.classList.contains('active');
-            const resolution = document.getElementById('select-resolution-gen')?.value || '1080p';
-            const duration = document.getElementById('select-duration-gen')?.value || '10';
-            const modelId = document.getElementById('select-active-model')?.value || '';
-            
-            if (!modelId) {
-                mostrarToast("Modelo Requerido", "Por favor, selecciona un modelo en el apartado 'Modelo Activo' antes de generar.", true);
-                btnProcessGen.innerText = "Generar Video Ahora";
+            if (promptValue.startsWith('[SIMULADO')) {
+                mostrarToast("Prompt no válido", "Ese texto es un aviso, no un prompt. Escribe tu idea o usa el Director IA.", true);
                 return;
             }
-            
+            const modelId = document.getElementById('select-active-model')?.value || '';
+            if (!modelId) {
+                mostrarToast("Modelo Requerido", "Descarga un modelo en el Gestor de Modelos y selecciónalo en 'Modelo Activo'.", true);
+                return;
+            }
+            const lipsync = document.getElementById('toggle-lipsync-gen')?.classList.contains('active');
             const formData = new FormData();
             formData.append('model_id', modelId);
             formData.append('prompt', promptValue);
-            formData.append('resolution', resolution);
-            formData.append('duration', duration);
-            formData.append('upscale', upscale);
-            formData.append('fps60', fps60);
-            formData.append('lipsync', lipsync);
+            formData.append('resolution', document.getElementById('select-resolution-gen')?.value || '1080p');
+            formData.append('duration', document.getElementById('select-duration-gen')?.value || '5');
+            formData.append('upscale', !!document.getElementById('toggle-upscale-gen')?.classList.contains('active'));
+            formData.append('fps60', !!document.getElementById('toggle-60fps-gen')?.classList.contains('active'));
+            formData.append('lipsync', !!lipsync);
 
             const baseImageInput = document.getElementById('base-image-input');
             if (baseImageInput && baseImageInput.files.length > 0) {
                 formData.append('base_image', baseImageInput.files[0]);
             }
-
             if (lipsync) {
                 const audioFile = document.getElementById('audio-file').files[0];
                 if (!audioFile) {
                     mostrarToast("Falta Audio", "Para activar Lip-Sync debes seleccionar un archivo de audio (MP3/WAV).", true);
-                    btnProcessGen.innerText = "Generar Video Ahora";
                     return;
                 }
                 formData.append('audio', audioFile);
             }
-            
-            // Generación en segundo plano (No bloqueante)
-            btnProcessGen.innerHTML = `<i class="ph-bold ph-spinner ph-spin"></i> Generando Video (Procesando IA)...`;
-            btnProcessGen.disabled = true;
-            btnProcessGen.style.boxShadow = "0 0 20px var(--accent-primary)";
-            btnProcessGen.style.opacity = "0.8";
-            mostrarToast("Generación Iniciada", "La IA está procesando tu video. Esto tomará varios minutos, no cierres la aplicación.", false);
 
-            fetch('/api/ia/generar_video', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                btnProcessGen.innerHTML = "Generar Video Ahora";
-                btnProcessGen.disabled = false;
-                btnProcessGen.style.boxShadow = "none";
-                btnProcessGen.style.opacity = "1";
-                if(data.success) {
-                    // El backend responde al iniciar; se consulta el estado real hasta que termine.
+            ponerBotonGenerando(true);
+            fetch('/api/ia/generar_video', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) {
+                        ponerBotonGenerando(false);
+                        mostrarToast("No se pudo generar", data.error || "Error desconocido", true);
+                        return;
+                    }
+                    window.videoTareaActual = data.task_id;
+                    abrirTimelineVideo();
                     esperarTareaVideo(data.task_id);
-                    // Opcional: window.switchEstudioView('edicion'); // No forzar cambio si el usuario está en otra cosa
-                } else {
-                    mostrarToast("Error", data.error, true);
-                }
-            })
-            .catch(error => {
-                btnProcessGen.innerHTML = "Generar Video Ahora";
-                btnProcessGen.disabled = false;
-                btnProcessGen.style.boxShadow = "none";
-                btnProcessGen.style.opacity = "1";
-                console.error("Error en la petición:", error);
-                mostrarToast("Error de conexión", "No se pudo comunicar con el backend local.", true);
-            });
+                })
+                .catch(() => {
+                    ponerBotonGenerando(false);
+                    mostrarToast("Error de conexión", "No se pudo comunicar con el backend local.", true);
+                });
         });
     }
 
@@ -572,7 +551,8 @@ function renderizarModelos(modelos) {
         item.innerHTML = `
             <div style="flex: 1;">
                 <h4 style="margin: 0; color: #fff; font-size: 0.9rem;">${m.name} <span style="font-size: 0.7rem; color: #94a3b8; margin-left: 8px;">(${m.size_gb} GB)</span></h4>
-                <p style="margin: 5px 0 0 0; color: #94a3b8; font-size: 0.75rem; line-height: 1.4;">${m.description}</p>
+                <p style="margin: 5px 0 0 0; color: #94a3b8; font-size: 0.75rem; line-height: 1.4;">${escEstudio(m.description)}${m.vram_gb ? ` · VRAM: ${escEstudio(m.vram_gb)} GB` : ''}</p>
+                ${m.error ? `<p style="margin: 5px 0 0 0; color: #ff4d5f; font-size: 0.72rem;">Error: ${escEstudio(m.error)} (pulsa Descargar para reintentar)</p>` : ''}
             </div>
             <div style="margin-left: 15px;">
                 ${botonHtml}
@@ -673,8 +653,8 @@ window.mostrarToast = function(titulo, mensaje, isError = false) {
             <i class="ph-fill ${iconClass}"></i>
         </div>
         <div class="estudio-toast-content">
-            <div class="estudio-toast-title">${titulo}</div>
-            <div class="estudio-toast-msg">${mensaje}</div>
+            <div class="estudio-toast-title">${escEstudio(titulo)}</div>
+            <div class="estudio-toast-msg">${escEstudio(mensaje)}</div>
         </div>
     `;
     
@@ -717,7 +697,7 @@ window.generarPromptMagico = function() {
         if (data.success) {
             inputArea.value = data.prompt;
             inputArea.scrollTop = 0; // Evitar que se baje y desaparezca el inicio
-            mostrarToast("¡Listo!", "Tu prompt ha sido mejorado por el Director IA.", false);
+            mostrarToast("¡Listo!", "Prompt mejorado" + (data.motor ? " con " + data.motor : "") + ".", false);
         } else {
             mostrarToast("Error", data.error || "Ocurrió un error al generar el prompt", true);
         }
@@ -749,24 +729,130 @@ window.toggleStyle = function(btn) {
 };
 
 
+// ---- Generación de video: progreso real, cancelar y estado del motor ----
+function escEstudio(v) {
+    return String(v ?? '').replace(/[&<>"'`]/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
+    }[c]));
+}
+
+function ponerBotonGenerando(activo) {
+    const btn = document.getElementById('btn-process-gen');
+    if (!btn) return;
+    btn.disabled = activo;
+    btn.style.opacity = activo ? "0.8" : "1";
+    btn.style.boxShadow = activo ? "0 0 20px var(--accent-primary)" : "none";
+    btn.innerHTML = activo
+        ? '<i class="ph-bold ph-spinner ph-spin"></i> Generando video...'
+        : "Generar Video Ahora";
+}
+
+function abrirTimelineVideo() {
+    const modal = document.getElementById('modalTimelineGeneracion');
+    if (modal) modal.style.display = 'flex';
+    const cancelar = document.getElementById('btn-cancelar-video');
+    if (cancelar) cancelar.style.display = '';
+    const cerrar = document.getElementById('btn-cerrar-timeline');
+    if (cerrar) cerrar.innerText = 'Seguir en segundo plano';
+    actualizarTimeline({ progreso: 0, paso: 1, mensaje: 'Iniciando motor de video...' });
+}
+
+window.cerrarTimelineVideo = function () {
+    const modal = document.getElementById('modalTimelineGeneracion');
+    if (modal) modal.style.display = 'none';
+};
+
+window.cancelarVideoActual = function () {
+    const id = window.videoTareaActual;
+    if (!id) return;
+    fetch('/api/ia/cancelar_video/' + encodeURIComponent(id), { method: 'POST' })
+        .then(() => mostrarToast("Cancelando", "Deteniendo la generación...", false));
+};
+
+function actualizarTimeline(t) {
+    const pct = Math.max(0, Math.min(100, Number(t.progreso) || 0));
+    const bar = document.getElementById('timeline-progress-bar');
+    if (bar) bar.style.width = pct + '%';
+    const txt = document.getElementById('timeline-status-text');
+    if (txt) txt.textContent = `${pct.toFixed(0)}% · ${t.mensaje || ''}`;
+    const paso = Number(t.paso) || 1;
+    for (let i = 1; i <= 4; i++) {
+        const step = document.getElementById('step-' + i);
+        if (!step) continue;
+        const icon = step.querySelector('.step-icon');
+        const text = step.querySelector('.step-text');
+        const hecho = i < paso || t.estado === 'terminado';
+        const activo = i === paso && t.estado !== 'terminado';
+        if (icon) icon.style.background = hecho ? '#2dcc70' : (activo ? '#a855f7' : '#334155');
+        if (text) text.style.color = hecho || activo ? '#fff' : '#94a3b8';
+    }
+    const av = document.getElementById('timeline-avisos');
+    if (av) {
+        const avisos = t.avisos || [];
+        av.style.display = avisos.length ? 'block' : 'none';
+        av.textContent = avisos.join(' · ');
+    }
+}
+
+function finTimeline(textoBoton) {
+    const cancelar = document.getElementById('btn-cancelar-video');
+    if (cancelar) cancelar.style.display = 'none';
+    const cerrar = document.getElementById('btn-cerrar-timeline');
+    if (cerrar) cerrar.innerText = textoBoton || 'Cerrar';
+    ponerBotonGenerando(false);
+}
+
 // Consulta el estado de una generación de video hasta que termina.
 function esperarTareaVideo(taskId, intentos) {
     intentos = intentos || 0;
-    if (!taskId) { cargarHistorial(); return; }
+    if (!taskId) { ponerBotonGenerando(false); cargarHistorial(); return; }
     fetch('/api/ia/tarea_video/' + encodeURIComponent(taskId))
         .then(r => r.json())
         .then(t => {
+            actualizarTimeline(t);
             if (t.estado === 'terminado') {
-                const extra = t.simulado ? " (simulación: aún no hay motor de video instalado)" : "";
-                mostrarToast("¡Video Completado!", "Tu video está en la biblioteca." + extra, false);
+                finTimeline('Ver mis videos');
+                mostrarToast("¡Video Completado!", "Tu video está en 'Mis Videos Generados'.", false);
                 cargarHistorial();
-            } else if (t.estado === 'error' || t.success === false) {
-                mostrarToast("Error", t.error || "La generación falló.", true);
-            } else if (intentos < 600) {
-                setTimeout(() => esperarTareaVideo(taskId, intentos + 1), 2000);
+                const cerrar = document.getElementById('btn-cerrar-timeline');
+                if (cerrar) cerrar.onclick = () => { cerrarTimelineVideo(); switchEstudioView('edicion'); cerrar.onclick = cerrarTimelineVideo; };
+            } else if (t.estado === 'error' || t.estado === 'cancelada' || t.success === false) {
+                finTimeline('Cerrar');
+                const txt = document.getElementById('timeline-status-text');
+                if (txt) { txt.textContent = t.error || 'La generación falló.'; txt.style.color = '#ff4d5f'; }
+                mostrarToast(t.estado === 'cancelada' ? "Cancelado" : "Error al generar", t.error || "La generación falló.", t.estado !== 'cancelada');
+            } else {
+                const txt = document.getElementById('timeline-status-text');
+                if (txt) txt.style.color = '#94a3b8';
+                setTimeout(() => esperarTareaVideo(taskId, intentos + 1), 1500);
             }
         })
         .catch(() => {
-            if (intentos < 600) setTimeout(() => esperarTareaVideo(taskId, intentos + 1), 3000);
+            if (intentos < 2000) setTimeout(() => esperarTareaVideo(taskId, intentos + 1), 3000);
         });
 }
+
+window.comprobarMotorVideo = function (refrescar) {
+    const box = document.getElementById('estado-motor-video');
+    if (!box) return;
+    if (refrescar) box.textContent = 'Comprobando (puede tardar ~1 min la primera vez)...';
+    fetch('/api/ia/motor_estado' + (refrescar ? '?refrescar=1' : ''))
+        .then(r => r.json())
+        .then(m => {
+            if (m.estado === 'detectando') {
+                box.textContent = 'Comprobando el motor de video...';
+                setTimeout(() => comprobarMotorVideo(false), 3000);
+            } else if (m.estado === 'listo') {
+                box.innerHTML = `<span style="color:#2dcc70; font-weight:bold;">● Listo</span><br>` +
+                    `${escEstudio(m.gpu)} · ${escEstudio(m.vram_gb)} GB VRAM<br>` +
+                    `<span style="opacity:0.7">RAM libre: ${escEstudio(m.ram_libre_gb)} GB</span>`;
+            } else if (m.estado === 'sin_gpu') {
+                box.innerHTML = `<span style="color:#fbbf24; font-weight:bold;">● Sin GPU CUDA</span><br>` +
+                    `El motor está instalado pero no ve una GPU NVIDIA. Actualiza los drivers.`;
+            } else {
+                box.innerHTML = `<span style="color:#ff4d5f; font-weight:bold;">● No instalado</span><br>` +
+                    `Ejecuta <b>${escEstudio(m.instalador || 'instalar_motor_video.bat')}</b> en la carpeta de la app y pulsa "Comprobar motor".`;
+            }
+        })
+        .catch(() => { box.textContent = 'No se pudo consultar el motor.'; });
+};
