@@ -1406,6 +1406,9 @@ def run_smart_split_thread(data):
                 raise RuntimeError("Para transcribir en tu GPU descarga un modelo Whisper en el Gestor de "
                                    "Modelos (Estudio IA): 'Whisper large-v3' o 'Whisper large-v3-turbo'.")
             cfg_datos["whisper_local"] = carpeta_whisper
+            # El modelo de video que quedó cargado (RunPod) no deja sitio a Whisper en la VRAM
+            from modulo_ia import liberar_gpu
+            liberar_gpu()
             cfg_datos["python_motor"] = motor_ia_local["python_cmd"]
             cfg_datos["script_local"] = os.path.join(os.path.dirname(motor_ia_local["worker"]),
                                                      "transcripcion_local.py")

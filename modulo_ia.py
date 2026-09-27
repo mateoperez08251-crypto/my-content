@@ -1105,6 +1105,25 @@ def _obtener_motor_vivo(motor):
     return p
 
 
+def liberar_gpu(esperar=600):
+    """Cierra el motor persistente (y su modelo en la VRAM) para que otro programa use la GPU,
+    p. ej. Whisper del Smart Split. Espera a que termine una generación en curso."""
+    if not _gpu_lock.acquire(timeout=esperar):
+        return False
+    try:
+        p = _motor_vivo["proc"]
+        if p is not None and p.poll() is None:
+            try:
+                p.stdin.close()  # el motor sale solo al cerrar su entrada
+                p.wait(timeout=20)
+            except Exception:
+                p.kill()
+        _motor_vivo.update(proc=None, python=None)
+        return True
+    finally:
+        _gpu_lock.release()
+
+
 def _ejecutar_worker(task_id, motor, cfg_path):
     proc = None
     persistente = _persistente_activo()
