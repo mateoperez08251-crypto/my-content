@@ -309,15 +309,16 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
 
     _liberar_vram(torch)
     libre = vram_libre_gb(torch, gpu)
-    # memoria de trabajo para generar los frames (fp32 ocupa el doble)
-    margen = 4.0 if dtype == torch.float32 else 3.0
+    # memoria de trabajo para generar los frames
+    # bf16: 3 GB (rápido), fp16: 3.5 GB (tensor cores), fp32: 4.5 GB (lento)
+    margen = 4.5 if dtype == torch.float32 else (3.5 if dtype == torch.float16 else 3.0)
     estrategia = ""
     # LTX en gráficas antiguas (Pascal): offload secuencial desde el inicio
     if motor == "ltx" and gpu["cc"] < (8, 0):
         pipe.enable_sequential_cpu_offload()
         estrategia = "secuencial"
         aviso("LTX en esta gráfica: se carga por partes (lento, pero sin OOM).")
-    elif peso_gb + margen <= libre * 0.95:
+    elif peso_gb + margen <= libre * 0.92:
         try:
             pipe.to("cuda")
             estrategia = "gpu"
@@ -326,13 +327,13 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
                 raise
             pipe.to("cpu")
             _liberar_vram(torch)
-    if not estrategia and peso_gb + 1.0 <= libre:
+    if not estrategia and peso_gb + 0.8 <= libre:
         pipe.enable_model_cpu_offload()
         estrategia = "offload"
     elif not estrategia:
         pipe.enable_sequential_cpu_offload()
         estrategia = "secuencial"
-        aviso("El modelo es más grande que la VRAM: se carga por partes (bastante más lento).")
+        aviso("El modelo es más grande que la VRAM: se carga por partes (más lento).")
     vae = getattr(pipe, "vae", None)
     for metodo in ("enable_tiling", "enable_slicing"):
         if vae is not None and hasattr(vae, metodo):
@@ -342,6 +343,8 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
                 pass
     pipe._estrategia = estrategia
     pipe._dtype = dtype
+    nom_est = {"gpu": "GPU entera", "offload": "GPU + RAM", "secuencial": "por partes"}
+    progreso(15, 1, f"Modelo cargado ({nom_est.get(estrategia, estrategia)}).")
     return pipe
 
 
