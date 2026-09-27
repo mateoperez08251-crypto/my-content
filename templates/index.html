@@ -2864,7 +2864,7 @@
                                 <option value="large-v3">Whisper large-v3 — el más preciso (RTX 5000, A40, 4090, H100)</option>
                                 <option value="turbo">Whisper large-v3-turbo — rápido (gráficas de 8-12 GB)</option>
                             </select>
-                            <small style="color: var(--text-muted); font-size: 0.75rem;">Necesita el motor de video instalado. La 1ª vez baja el modelo (~1.5-3 GB).</small>
+                            <small style="color: var(--text-muted); font-size: 0.75rem;">Necesita el motor de video y un modelo Whisper descargado en Estudio IA → Gestor de Modelos.</small>
                         </div>
                     </div>
                     <div class="form-group" style="margin-top: 20px;">
@@ -3539,9 +3539,34 @@
             }
         });
 
+        // Modo servidor (RunPod): no hay explorador de Windows; se elige el archivo en el navegador y se sube.
+        function subirDesdeNavegador(accept, campo) {
+            return new Promise((resolve) => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = accept || '*/*';
+                input.onchange = async () => {
+                    const f = input.files[0];
+                    if (!f) return resolve('');
+                    const el = campo ? document.getElementById(campo) : null;
+                    if (el) el.value = 'Subiendo ' + f.name + '...';
+                    const fd = new FormData();
+                    fd.append('archivo', f);
+                    try {
+                        const r = await fetch('/api/subir_archivo', { method: 'POST', body: fd });
+                        const d = await r.json();
+                        if (!d.success) { alert(d.error || 'No se pudo subir el archivo.'); if (el) el.value = ''; return resolve(''); }
+                        resolve(d.path);
+                    } catch (e) { alert('Error de conexión al subir el archivo.'); if (el) el.value = ''; resolve(''); }
+                };
+                input.click();
+            });
+        }
+
         async function browseFileSmartSplit() {
             const res = await fetch('/api/browse?type=media');
             const data = await res.json();
+            if (data.subir) data.path = await subirDesdeNavegador('video/*,audio/*', 'smart_split_source');
             if (data.path) {
                 document.getElementById('smart_split_source').value = data.path;
                 loadVideoDuration(data.path);
@@ -3946,6 +3971,7 @@
                     document.getElementById(inputId).value = data.folder;
                 } else if (data.error && data.error !== "No se seleccionó ninguna carpeta") {
                     console.error(data.error);
+                    if (data.error.startsWith("En el servidor")) alert(data.error);
                 }
             } catch (err) {
                 console.error("Error seleccionando carpeta:", err);
@@ -3957,6 +3983,11 @@
             try {
                 const res = await fetch(`/api/browse?type=${type}`);
                 const data = await res.json();
+                if (data.subir) {
+                    const acepta = (type === 'video' || type === 'media') ? 'video/*,audio/*'
+                        : ((type === 'audio' || type === 'bg_music_smart') ? 'audio/*' : 'image/*');
+                    data.path = await subirDesdeNavegador(acepta, document.getElementById(type + '_path') ? type + '_path' : type);
+                }
                 if (data.path) {
                     const el = document.getElementById(type + '_path') || document.getElementById(type);
                     if (el) el.value = data.path;

@@ -26,7 +26,7 @@ def elegir_modelo(nombre, torch):
     """auto: large-v3 en GPUs modernas con 16 GB o más (RTX 5000, A40, 4090, H100); turbo en el resto."""
     if nombre in MODELOS_WHISPER:
         return MODELOS_WHISPER[nombre]
-    if nombre and "/" in nombre:  # un repo de Hugging Face concreto
+    if nombre and ("/" in nombre or "\\" in nombre):  # carpeta descargada en el Gestor o repo de HF
         return nombre
     try:
         if torch.cuda.is_available():

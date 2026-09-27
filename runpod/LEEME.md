@@ -37,6 +37,20 @@ HF_TOKEN=hf_tu_token MODELOS="ltx25_distilled" AUTOBORRAR_MIN=60 CONTENTAPP_BASE
 **MiniMax H3:** su licencia de pesos abiertos solo cubre la UE, el Reino Unido, Corea del Sur y
 EE. UU. (ver `docs/QA-about-License.md` en su repo). Revísala antes de usarlo.
 
+## Imágenes y Audio a imágenes
+| Modelo | Para qué | GPU |
+|---|---|---|
+| `zimage_turbo` | Imágenes rápidas (8 pasos) | 16 GB+ (A40, RTX 5000...) |
+| `qwen_image_2512` | Imágenes de máxima calidad, buen texto dentro de la imagen | H100 (en 48 GB va por partes) |
+| `whisper_large_v3` | Transcripción local (Smart Split y Audio a imágenes) | 16 GB+ |
+| `whisper_large_v3_turbo` | Transcripción local rápida | 8 GB+ |
+
+Ejemplo con todo lo necesario para "Audio a imágenes" en una A40:
+```bash
+MODELOS="zimage_turbo whisper_large_v3" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp bash my-content/runpod/arranque_rapido.sh
+```
+En el Estudio IA elige **¿Qué quieres crear? → Audio a imágenes**, sube el audio y pulsa el botón.
+
 ## Modo con disco persistente
 Útil si lo usas muchas veces al mes: los modelos quedan guardados y arranca en 1 minuto,
 pero el disco cobra aunque el pod esté apagado.

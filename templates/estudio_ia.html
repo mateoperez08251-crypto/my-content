@@ -39,6 +39,42 @@
                         <i class="ph-bold ph-hard-drives"></i> Abrir Gestor de Modelos
                     </button>
 
+                    <div class="ai-feature" style="margin-bottom: 20px;">
+                        <div class="ai-feature-title" style="margin-bottom: 8px;">¿Qué quieres crear?</div>
+                        <select id="select-modo-gen" onchange="cambiarModoEstudio(this.value)"
+                            style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(168,85,247,0.5); color: #fff; padding: 10px; border-radius: 8px; font-family: 'Outfit';">
+                            <option value="video" selected>🎬 Video (texto o imagen a video)</option>
+                            <option value="imagen">🖼️ Imágenes (texto a imagen)</option>
+                            <option value="audio_imagenes">🎙️ Audio a imágenes (secuencia + video)</option>
+                        </select>
+                        <div id="opciones-imagen" style="display:none; margin-top: 12px;">
+                            <div class="ai-feature-title" style="margin-bottom: 6px; font-size: 0.85rem;">Cantidad de imágenes</div>
+                            <select id="select-cantidad-img" style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                <option value="1">1</option><option value="2">2</option>
+                                <option value="4" selected>4 (variaciones)</option>
+                            </select>
+                        </div>
+                        <div id="opciones-audio-img" style="display:none; margin-top: 12px; padding: 12px; border: 1px dashed rgba(168, 85, 247, 0.5); border-radius: 8px; background: rgba(0,0,0,0.3);">
+                            <div style="font-size: 0.8rem; color: #cbd5e1; margin-bottom: 8px;">Sube un audio: la IA lo transcribe, lo divide en escenas y crea una imagen por escena. Al final arma un video con esas imágenes y tu audio. El texto de abajo es el <b>estilo</b> (opcional).</div>
+                            <input type="file" id="audio-secuencia-file" accept="audio/*,video/*" style="display:none"
+                                onchange="document.getElementById('audio-secuencia-nombre').textContent = this.files[0] ? this.files[0].name : 'Ningún audio'">
+                            <button onclick="document.getElementById('audio-secuencia-file').click()" style="background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: 'Outfit'; font-size: 0.85rem;">Seleccionar audio</button>
+                            <span id="audio-secuencia-nombre" style="font-size: 0.8rem; color: #94a3b8; margin-left: 8px;">Ningún audio</span>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
+                                <select id="select-escena-seg" title="Cada cuánto cambia la imagen" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                    <option value="3">Imagen cada ~3 s</option>
+                                    <option value="5" selected>Imagen cada ~5 s</option>
+                                    <option value="8">Imagen cada ~8 s</option>
+                                    <option value="12">Imagen cada ~12 s</option>
+                                </select>
+                                <select id="select-transcripcion-img" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">
+                                    <option value="local" selected>Transcribir en tu GPU (Whisper)</option>
+                                    <option value="groq">Transcribir con Groq (nube)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="ai-feature">
                         <div class="ai-feature-title" style="margin-bottom: 8px;">Modelo Activo</div>
                         <select id="select-active-model"
