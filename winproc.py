@@ -120,17 +120,41 @@ def matar_arbol(proc: subprocess.Popen | None) -> None:
             pass
 
 
+def _memoria_linux_gb():
+    """(total, disponible) en GB. En Linux MemFree no cuenta la caché de disco (tras bajar
+    un modelo de 26 GB la RAM parece llena) y en contenedores (RunPod) manda el cgroup."""
+    info = {}
+    with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        for linea in f:
+            clave, _, valor = linea.partition(":")
+            info[clave] = int(valor.split()[0]) * 1024
+    total = info.get("MemTotal", 0)
+    libre = info.get("MemAvailable", info.get("MemFree", 0))
+    for lim, uso in (("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+                     ("/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                      "/sys/fs/cgroup/memory/memory.usage_in_bytes")):
+        try:
+            with open(lim, "r", encoding="utf-8") as f:
+                limite = f.read().strip()
+            if limite == "max" or int(limite) >= total:
+                break
+            with open(uso, "r", encoding="utf-8") as f:
+                usado = int(f.read().strip())
+            total = int(limite)
+            libre = min(libre, max(0, total - usado))
+            break
+        except (OSError, ValueError):
+            continue
+    return total / 1024 ** 3, libre / 1024 ** 3
+
+
 def estado_memoria() -> dict:
     """Devuelve GB de RAM total, RAM libre y commit libre (RAM + archivo de paginación)."""
     if not ES_WINDOWS:
         try:
-            paginas = os.sysconf("SC_PHYS_PAGES")
-            libres = os.sysconf("SC_AVPHYS_PAGES")
-            tam = os.sysconf("SC_PAGE_SIZE")
-            total = paginas * tam / 1024 ** 3
-            libre = libres * tam / 1024 ** 3
+            total, libre = _memoria_linux_gb()
             return {"ram_total_gb": total, "ram_libre_gb": libre, "commit_libre_gb": libre}
-        except (ValueError, OSError, AttributeError):
+        except (ValueError, OSError):
             return {"ram_total_gb": 8.0, "ram_libre_gb": 4.0, "commit_libre_gb": 4.0}
 
     class MEMORYSTATUSEX(ctypes.Structure):

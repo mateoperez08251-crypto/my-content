@@ -421,7 +421,14 @@ window.descargarVideoActualEstudio = function() {
         fetch('/api/ia/abrir_video/' + encodeURIComponent(window.estudioCurrentFile), { method: 'POST' })
         .then(res => res.json())
         .then(data => {
-            if(data.success) {
+            if (data.success && data.descargar) {  // modo servidor (RunPod): descarga por el navegador
+                const a = document.createElement('a');
+                a.href = data.descargar;
+                a.download = window.estudioCurrentFile;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            } else if(data.success) {
                 mostrarToast("Carpeta Abierta", "Se abrió la carpeta con tu archivo generado.", false);
             } else {
                 mostrarToast("Error", data.error || "No se pudo abrir la ubicación.", true);
@@ -859,13 +866,13 @@ window.comprobarMotorVideo = function (refrescar) {
                     `<span style="opacity:0.6; font-size:0.72rem; word-break:break-all;">Motor: ${escEstudio(m.python_cmd || '')}</span>`;
             } else if (m.error && m.torch) {
                 box.innerHTML = `<span style="color:#ff4d5f; font-weight:bold;">● Error del motor</span><br>${escEstudio(m.error)}<br>` +
-                    `Vuelve a ejecutar <b>instalar_motor_video.bat</b>.`;
+                    `Vuelve a ejecutar <b>${escEstudio(m.instalador || 'instalar_motor_video.bat')}</b>.`;
             } else if (m.estado === 'sin_gpu') {
                 const cpu = String(m.torch || '').includes('+cpu') || !String(m.torch || '').includes('+');
                 box.innerHTML = `<span style="color:#fbbf24; font-weight:bold;">● Sin GPU CUDA</span><br>` +
                     (cpu ? `El Python encontrado tiene PyTorch <b>solo para CPU</b> (${escEstudio(m.torch)}). `
                          : `PyTorch ${escEstudio(m.torch)} no ve la GPU: actualiza los drivers de NVIDIA. `) +
-                    `Ejecuta <b>instalar_motor_video.bat</b> y pulsa "Comprobar motor".<br>` +
+                    `Ejecuta <b>${escEstudio(m.instalador || 'instalar_motor_video.bat')}</b> y pulsa "Comprobar motor".<br>` +
                     `<span style="opacity:0.6; font-size:0.72rem; word-break:break-all;">Python: ${escEstudio(m.python_cmd || m.python || '')}</span>`;
             } else {
                 box.innerHTML = `<span style="color:#ff4d5f; font-weight:bold;">● No instalado</span><br>` +

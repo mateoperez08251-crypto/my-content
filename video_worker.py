@@ -62,12 +62,21 @@ ALTURAS = {"4k": 2160, "1080p": 1080, "720p": 720, "480p": 480}
 #   te_gb      RAM del codificador de texto en bf16 (se usa solo al principio)
 #   params     miles de millones de parámetros del transformer (el que dibuja el video)
 #   vram_min   VRAM mínima razonable
+#   trabajo    GB de VRAM de trabajo al generar (en bf16/fp16; en fp32 x1.5). Depende de
+#              cuántos "tokens" tiene el video: LTX comprime mucho (poco), Wan/Hunyuan más.
+#   tr / vae   clases de diffusers para cargarlos DIRECTO en la GPU (sin pasar por la RAM)
 MODELOS = {
-    "ltx": {"clase": "LTXPipeline", "te_gb": 9.0, "params": 1.9, "vram_min": 8},
-    "wan": {"clase": "WanPipeline", "te_gb": 10.6, "params": 1.4, "vram_min": 8},
-    "cogvideox": {"clase": "CogVideoXPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8, "fp32": False},
-    "cogvideox_i2v": {"clase": "CogVideoXImageToVideoPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8, "fp32": False},
-    "hunyuan": {"clase": "HunyuanVideoPipeline", "te_gb": 16.5, "params": 12.8, "vram_min": 24, "fp32": False},
+    "ltx": {"clase": "LTXPipeline", "te_gb": 9.0, "params": 1.9, "vram_min": 8, "trabajo": 1.4,
+            "tr": "LTXVideoTransformer3DModel", "vae": "AutoencoderKLLTXVideo"},
+    "wan": {"clase": "WanPipeline", "te_gb": 10.6, "params": 1.4, "vram_min": 8, "trabajo": 2.0,
+            "tr": "WanTransformer3DModel", "vae": "AutoencoderKLWan"},
+    "cogvideox": {"clase": "CogVideoXPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8, "fp32": False,
+                  "trabajo": 2.5, "tr": "CogVideoXTransformer3DModel", "vae": "AutoencoderKLCogVideoX"},
+    "cogvideox_i2v": {"clase": "CogVideoXImageToVideoPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8,
+                      "fp32": False, "trabajo": 2.5, "tr": "CogVideoXTransformer3DModel",
+                      "vae": "AutoencoderKLCogVideoX"},
+    "hunyuan": {"clase": "HunyuanVideoPipeline", "te_gb": 16.5, "params": 12.8, "vram_min": 24, "fp32": False,
+                "trabajo": 4.0, "tr": "HunyuanVideoTransformer3DModel", "vae": "AutoencoderKLHunyuanVideo"},
 }
 COMPONENTES_TEXTO = ("text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2")
 
@@ -88,9 +97,37 @@ def memoria_libre_gb():
             m.dwLength = ctypes.sizeof(MS)
             ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
             return m.ullAvailPageFile / 1024 ** 3
-        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
+        return _memoria_linux_gb()[1]
     except Exception:
         return 0.0
+
+
+def _memoria_linux_gb():
+    """(total, disponible) en GB. En Linux MemFree no cuenta la caché de disco (tras bajar
+    un modelo de 26 GB la RAM parece llena) y en contenedores (RunPod) manda el cgroup."""
+    info = {}
+    with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        for linea in f:
+            clave, _, valor = linea.partition(":")
+            info[clave] = int(valor.split()[0]) * 1024
+    total = info.get("MemTotal", 0)
+    libre = info.get("MemAvailable", info.get("MemFree", 0))
+    for lim, uso in (("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+                     ("/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                      "/sys/fs/cgroup/memory/memory.usage_in_bytes")):
+        try:
+            with open(lim, "r", encoding="utf-8") as f:
+                limite = f.read().strip()
+            if limite == "max" or int(limite) >= total:
+                break
+            with open(uso, "r", encoding="utf-8") as f:
+                usado = int(f.read().strip())
+            total = int(limite)
+            libre = min(libre, max(0, total - usado))
+            break
+        except (OSError, ValueError):
+            continue
+    return total / 1024 ** 3, libre / 1024 ** 3
 
 
 def info_gpu(torch):
@@ -290,24 +327,38 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
 
     nulos = _nulos(carpeta, COMPONENTES_TEXTO)
     clase = getattr(diffusers, info["clase"])
-    progreso(10, 1, f"Cargando el modelo de video en la GPU ({gpu['dtype_nombre']})...")
-    if motor == "wan":
-        vae = diffusers.AutoencoderKLWan.from_pretrained(carpeta, subfolder="vae", torch_dtype=torch.float32)
-        pipe = clase.from_pretrained(carpeta, vae=vae, torch_dtype=dtype, **nulos)
-    elif motor == "hunyuan":
-        transformer = diffusers.HunyuanVideoTransformer3DModel.from_pretrained(
-            carpeta, subfolder="transformer", torch_dtype=dtype)
-        pipe = clase.from_pretrained(carpeta, transformer=transformer, torch_dtype=dtype, **nulos)
-    else:
-        pipe = clase.from_pretrained(carpeta, torch_dtype=dtype, **nulos)
+    vae_dtype = torch.float32 if motor == "wan" else dtype  # el VAE de Wan pide fp32
 
     _liberar_vram(torch)
     libre = vram_libre_gb(torch, gpu)
-    # memoria de trabajo para generar los frames
-    # bf16: 3 GB (rápido), fp16: 3.5 GB (tensor cores), fp32: 4.5 GB (lento)
-    margen = 4.5 if dtype == torch.float32 else (3.5 if dtype == torch.float16 else 3.0)
+    # VRAM de trabajo para generar los frames, según el modelo y el formato (+0.5 GB de reserva)
+    margen = info.get("trabajo", 3.0) * (1.5 if dtype == torch.float32 else 1.0) + 0.5
+    cabe_entero = peso_gb + margen <= libre - 0.3
+
+    # Si cabe entero: transformer y VAE van DIRECTO a la GPU (device_map). Antes se cargaban
+    # primero en la RAM (varios GB) y después se copiaban: más RAM y más lento.
+    piezas = {}
+    if cabe_entero:
+        progreso(10, 1, f"Cargando el modelo directo en la GPU ({gpu['dtype_nombre']})...")
+        try:
+            piezas["transformer"] = getattr(diffusers, info["tr"]).from_pretrained(
+                carpeta, subfolder="transformer", torch_dtype=dtype, device_map="cuda")
+            piezas["vae"] = getattr(diffusers, info["vae"]).from_pretrained(
+                carpeta, subfolder="vae", torch_dtype=vae_dtype, device_map="cuda")
+        except Exception as e:
+            print(f"[aviso] carga directa en la GPU falló ({type(e).__name__}: {str(e)[:120]}); "
+                  "se usa la carga normal.", flush=True)
+            piezas = {}
+            _liberar_vram(torch)
+    else:
+        progreso(10, 1, f"Cargando el modelo ({gpu['dtype_nombre']}, GPU + RAM)...")
+    if not piezas and motor == "wan":
+        piezas["vae"] = diffusers.AutoencoderKLWan.from_pretrained(carpeta, subfolder="vae",
+                                                                   torch_dtype=torch.float32)
+    pipe = clase.from_pretrained(carpeta, torch_dtype=dtype, **piezas, **nulos)
+
     estrategia = ""
-    if peso_gb + margen <= libre * 0.92:
+    if cabe_entero:
         try:
             pipe.to("cuda")
             estrategia = "gpu"
@@ -316,7 +367,8 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
                 raise
             pipe.to("cpu")
             _liberar_vram(torch)
-    if not estrategia and peso_gb + 0.8 <= libre:
+    # GPU + RAM: en cada paso el transformer entero está en la GPU, así que debe caber él + el trabajo
+    if not estrategia and info["params"] * bytes_por_param + margen <= libre:
         pipe.enable_model_cpu_offload()
         estrategia = "offload"
     elif not estrategia:
@@ -402,22 +454,57 @@ def _codificador(ffmpeg, crf):
     return ["-c:v", "libx264", "-crf", str(crf), "-preset", "medium"]
 
 
-def escribir_video(frames, ruta, fps, ffmpeg):
-    """Escribe frames PIL a MP4 enviándolos en crudo a ffmpeg (sin depender de imageio)."""
+def _escalar_gpu(frames, alto, torch):
+    """Upscale en la GPU (bicúbico) por lotes; antes lo hacía ffmpeg en la CPU (lento)."""
+    import numpy as np
+    import torch.nn.functional as F
+
     w, h = frames[0].size
+    ancho = int(round(w * alto / h / 2)) * 2
+
+    def lote(i):
+        arr = np.stack([np.asarray(f.convert("RGB")) for f in frames[i:i + 8]])
+        t = torch.from_numpy(arr).to("cuda").permute(0, 3, 1, 2).float()
+        t = F.interpolate(t, size=(alto, ancho), mode="bicubic", align_corners=False)
+        return t.clamp_(0, 255).round_().to(torch.uint8).permute(0, 2, 3, 1).contiguous().cpu().numpy()
+
+    primero = lote(0)  # se prueba YA: si la GPU no puede, el llamador usa ffmpeg
+
+    def cuadros():
+        for i in range(0, len(frames), 8):
+            for cuadro in (primero if i == 0 else lote(i)):
+                yield cuadro.tobytes()
+        torch.cuda.empty_cache()
+    return cuadros()
+
+
+def escribir_video(frames, ruta, fps, ffmpeg, alto=None, torch=None):
+    """Escribe frames PIL a MP4 enviándolos en crudo a ffmpeg (sin depender de imageio).
+    Con `alto`, los escala antes en la GPU."""
+    w, h = frames[0].size
+    datos = (f.convert("RGB").tobytes() for f in frames)
+    if alto and torch is not None:
+        try:
+            datos = _escalar_gpu(frames, alto, torch)
+            w, h = int(round(w * alto / h / 2)) * 2, alto
+        except Exception as e:
+            print(f"[aviso] upscale en GPU no disponible ({e}); se hará con ffmpeg.", flush=True)
+            alto = None
+            datos = (f.convert("RGB").tobytes() for f in frames)
     cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
            "-s", f"{w}x{h}", "-r", str(fps), "-i", "-", *_codificador(ffmpeg, 16), "-pix_fmt", "yuv420p", ruta]
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
     try:
-        for f in frames:
-            proc.stdin.write(f.convert("RGB").tobytes())
+        for bloque in datos:
+            proc.stdin.write(bloque)
         proc.stdin.close()
     except BrokenPipeError:
         pass
     err = proc.stderr.read().decode("utf-8", "replace")
     if proc.wait() != 0:
         raise RuntimeError(f"ffmpeg no pudo escribir el video: {err[:300]}")
+    return h
 
 
 def postprocesar(entrada, salida, cfg, alto_nativo, ffmpeg):
@@ -572,12 +659,18 @@ def generar(cfg):
 
     progreso(87, 3, f"Uniendo {len(frames_total)} frames...")
     crudo = salida + ".crudo.mp4"
-    escribir_video(frames_total, crudo, perfil["fps"], ffmpeg)
+    # Upscale en la GPU al escribir (la GPU ya está libre: el modelo terminó)
+    alto = ALTURAS.get(str(cfg.get("resolucion", "")).lower())
+    alto_gpu = alto if cfg.get("upscale") and alto and alto > frames_total[0].size[1] else None
+    if alto_gpu:
+        del pipe, pipe_img
+        _liberar_vram(torch)
+    alto_escrito = escribir_video(frames_total, crudo, perfil["fps"], ffmpeg, alto_gpu, torch)
 
     progreso(92, 4, "Aplicando upscale / 60 FPS / audio...")
     if cfg.get("audio"):
         aviso("Lip-sync real no disponible todavía: se añadió el audio al video.")
-    postprocesar(crudo, salida, cfg, frames_total[0].size[1], ffmpeg)
+    postprocesar(crudo, salida, cfg, alto_escrito, ffmpeg)
     progreso(100, 4, "¡Video listo!")
     emitir("resultado", archivo=salida, avisos=AVISOS)
 

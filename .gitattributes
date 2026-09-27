@@ -1,0 +1,2 @@
+# Los scripts de Linux (RunPod) deben tener finales de línea LF
+*.sh text eol=lf
