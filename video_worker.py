@@ -632,6 +632,9 @@ def main(argv):
         import traceback
         traceback.print_exc(file=sys.stdout)  # queda en logs/motor_video.log
         msg = str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}"
+        if isinstance(e, MemoryError):
+            msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Usa Wan2.1 1.3B, cierra "
+                   "otros programas y aumenta la memoria virtual de Windows a 32 GB o más.")
         if "out of memory" in msg.lower() or "CUDA out of memory" in msg:
             msg = ("La GPU se quedó sin memoria (VRAM). Prueba con menos duración, un modelo más "
                    "ligero (Wan2.1 1.3B) o cierra otros programas que usen la GPU.")
