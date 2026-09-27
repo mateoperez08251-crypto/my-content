@@ -186,7 +186,7 @@ set INTENTO=0
 :reintento_diffusers
 set /a INTENTO+=1
 echo  [*] Instalando diffusers y dependencias (intento %INTENTO% de 3)...
-"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy pillow imageio-ffmpeg --retries 10 --timeout 120
+"%VPY%" -m pip install "diffusers>=0.33" "transformers>=4.48" "accelerate>=1.3" sentencepiece protobuf ftfy gguf pillow imageio-ffmpeg --retries 10 --timeout 120
 if not errorlevel 1 goto comprobar
 if %INTENTO% geq 3 (
     echo  [X] Fallo la instalacion de diffusers. Revisa tu internet y vuelve a ejecutar.

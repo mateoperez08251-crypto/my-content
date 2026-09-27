@@ -16,6 +16,7 @@ safetensors
 sentencepiece
 protobuf
 ftfy
+gguf>=0.10  # Wan 2.2 14B en GGUF (como ComfyUI)
 # Descargas rápidas de Hugging Face (Xet)
 huggingface_hub
 hf_xet

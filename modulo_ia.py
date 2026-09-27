@@ -432,6 +432,28 @@ PATRONES_DIFFUSERS = ["model_index.json", "transformer/*", "vae/*", "text_encode
 
 AVAILABLE_MODELS = [
     {
+        "id": "wan22_i2v_14b",
+        "name": "Wan 2.2 14B Lightning (4 pasos) - calidad ComfyUI, recomendado A40",
+        "type": "both",
+        "motor": "wan22_14b",
+        "description": "El flujo de ComfyUI: Wan 2.2 Imagen-a-Video 14B destilado por lightx2v (abril 2026) "
+                       "en GGUF Q8 (casi sin pérdida). Anima tu foto o, si no subes ninguna, primero crea "
+                       "la imagen con Z-Image. Admite foto final. Mejor con 'Movimiento suave' y "
+                       "'Mejorar resolución'. 16 GB+ de VRAM (en la A40 va entero en la GPU).",
+        "size_gb": 43.0,
+        "vram_gb": 16,
+        "repo": "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
+        # Del repo oficial solo lo pequeño; los dos modelos grandes vienen en GGUF (ya destilados)
+        "patrones": ["model_index.json", "scheduler/*", "text_encoder/*", "tokenizer/*", "vae/*",
+                     "transformer/config.json", "transformer_2/config.json"],
+        "extras": [
+            ("high_noise_260412/wan2.2_i2v_A14b_high_noise_lightx2v_4step_720p_260412-Q8_0.gguf", 15416449664,
+             "https://huggingface.co/jayn7/WAN2.2-I2V_A14B-DISTILL-LIGHTX2V-4STEP-GGUF/resolve/main/high_noise_260412/wan2.2_i2v_A14b_high_noise_lightx2v_4step_720p_260412-Q8_0.gguf"),
+            ("low_noise_260412/wan2.2_i2v_A14b_low_noise_lightx2v_4step_720p_260412-Q8_0.gguf", 15416449664,
+             "https://huggingface.co/jayn7/WAN2.2-I2V_A14B-DISTILL-LIGHTX2V-4STEP-GGUF/resolve/main/low_noise_260412/wan2.2_i2v_A14b_low_noise_lightx2v_4step_720p_260412-Q8_0.gguf"),
+        ],
+    },
+    {
         "id": "ltx25_distilled",
         "name": "LTX-2.5 22B (con audio, hasta 1536p) - calidad brutal",
         "type": "both",
@@ -581,6 +603,28 @@ AVAILABLE_MODELS = [
                      "tokenizer_config.json", "special_tokens_map.json", "tokenization_voxcpm2.py"],
     },
     {
+        "id": "rife47",
+        "name": "RIFE 4.7 (movimiento suave) - mejora",
+        "type": "mejora",
+        "motor": "rife",
+        "description": "Inventa los cuadros intermedios: 16 fps -> 32 fps (o 24 -> 48) con movimiento fluido, "
+                       "como en ComfyUI. Se usa con 'Movimiento suave'. 21 MB.",
+        "size_gb": 0.03,
+        "filename": "rife47.pth",
+        "url": "https://huggingface.co/marduk191/rife/resolve/main/rife47.pth",
+    },
+    {
+        "id": "realesrgan_x2",
+        "name": "Real-ESRGAN x2 (mejorar resolución) - mejora",
+        "type": "mejora",
+        "motor": "esrgan",
+        "description": "Agranda el video con IA (más detalle que el reescalado normal): 720p -> 1080p o más. "
+                       "Se usa con 'Mejorar resolución'. 67 MB.",
+        "size_gb": 0.07,
+        "filename": "RealESRGAN_x2plus.pth",
+        "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
+    },
+    {
         "id": "director_ia_prompts",
         "type": "other",
         "name": "Director IA (Llama 3 8B)",
@@ -726,6 +770,7 @@ def _manifiesto(m):
     if not archivos:
         raise RuntimeError("El repositorio no tiene archivos en formato diffusers.")
     archivos = _sin_shards_repetidos(m, archivos)
+    archivos += [tuple(x) for x in m.get("extras", [])]  # archivos de otros repos (p. ej. GGUF)
     os.makedirs(carpeta, exist_ok=True)
     if m.pop("_indices_ok", True):
         with open(cache, "w", encoding="utf-8") as f:
@@ -862,7 +907,7 @@ def _incompatible(m):
     gpu = _motor_info.get("gpu") or "tu GPU"
     if _motor_info.get("formato") == "fp32" and m.get("motor") in ("cogvideox", "cogvideox_i2v", "hunyuan",
                                                                  "wan22_turbo", "ltx25", "minimax_h3",
-                                                                 "zimage", "qwenimage"):
+                                                                 "zimage", "qwenimage", "wan22_14b"):
         return f"Necesita una gráfica RTX (serie 20 o más nueva). En tu {gpu} usa Wan2.1 1.3B o LTX-Video."
     vram = _motor_info.get("vram_gb") or 0
     if vram and vram + 0.5 < m.get("vram_gb", 0):
@@ -1217,7 +1262,7 @@ def generar_video():
         return jsonify({"success": False, "error": "Escribe un prompt."}), 400
 
     m = _modelo(data.get("model_id", ""))
-    if not m or m.get("type") in ("other", "stt", "tts", "t2i"):
+    if not m or m.get("type") in ("other", "stt", "tts", "t2i", "mejora"):
         return jsonify({"success": False, "error": "Selecciona un modelo de video en 'Modelo Activo'."}), 400
     motor, error = _comprobar_generacion(m)
     if error:
@@ -1242,13 +1287,30 @@ def generar_video():
             "upscale": str(data.get("upscale", "")).lower() == "true",
             "fps60": str(data.get("fps60", "")).lower() == "true",
             "salida": _salida_video(task_id), "ffmpeg": _ffmpeg(),
+            **_rutas_mejora(),
         }
+        if request.files.get("final_image"):  # foto final (Wan 14B): el video termina en ella
+            cfg["imagen_final"] = _guardar_upload(request.files["final_image"], "img")
         _lanzar_tarea(task_id, m, motor, cfg)
     except Exception as e:
         _gpu_lock.release()
         return jsonify({"success": False, "error": str(e)}), 500
     return jsonify({"success": True, "task_id": task_id, "estado": "en_curso",
                     "mensaje": f"Generando con {m['name']}..."})
+
+
+def _rutas_mejora():
+    """Rutas de los modelos de mejora descargados (RIFE, Real-ESRGAN) y de Z-Image, que crea la
+    primera imagen cuando el modelo de video solo anima fotos."""
+    rutas = {}
+    for id_, clave in (("rife47", "rife"), ("realesrgan_x2", "esrgan")):
+        m = _modelo(id_)
+        if m and _instalado(m):
+            rutas[clave] = os.path.join(MODELS_DIR, m["filename"])
+    z = _modelo("zimage_turbo")
+    if z and _instalado(z):
+        rutas["carpeta_zimage"] = _carpeta_modelo(z)
+    return rutas
 
 
 def _salida_video(task_id):

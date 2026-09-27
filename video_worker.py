@@ -85,6 +85,10 @@ PERFILES = {
     # tocan sus pasos ni se le pone caché (ya está optimizado).
     "wan22_turbo": {"w": 1280, "h": 704, "frames": 121, "fps": 24, "pasos": 4, "cfg": 1.0, "imagen": True,
                     "destilado": True},
+    # Wan 2.2 I2V 14B destilado (lightx2v, 4 pasos sin CFG): 81 cuadros a 16 fps = 5 s por tramo.
+    # Se genera a 720p (480p con menos de 30 GB) y después RIFE + Real-ESRGAN lo suavizan y agrandan.
+    "wan22_14b": {"w": 1280, "h": 720, "frames": 81, "fps": 16, "pasos": 4, "cfg": 1.0, "imagen": True,
+                  "destilado": True},
     "cogvideox": {"w": 720, "h": 480, "frames": 49, "fps": 8, "pasos": 50, "cfg": 6.0, "imagen": False},
     "cogvideox_i2v": {"w": 720, "h": 480, "frames": 49, "fps": 8, "pasos": 50, "cfg": 6.0, "imagen": True},
     "hunyuan": {"w": 848, "h": 480, "frames": 61, "fps": 24, "pasos": 30, "cfg": 6.0, "imagen": False},
@@ -100,7 +104,7 @@ NEGATIVO_WAN = ("Bright tones, overexposed, oversaturated, static, blurred detai
                 "extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, "
                 "misshapen limbs, fused fingers, still picture, messy background, three legs, "
                 "many people in the background, walking backwards")
-NEGATIVOS = {"wan": NEGATIVO_WAN, "wan22_turbo": NEGATIVO_WAN}
+NEGATIVOS = {"wan": NEGATIVO_WAN, "wan22_turbo": NEGATIVO_WAN, "wan22_14b": NEGATIVO_WAN}
 
 ALTURAS = {"4k": 2160, "1080p": 1080, "720p": 720, "480p": 480}
 
@@ -120,6 +124,10 @@ MODELOS = {
             "tr": "WanTransformer3DModel", "vae": "AutoencoderKLWan"},
     "wan22_turbo": {"clase": "WanPipeline", "te_gb": 10.6, "params": 5.0, "vram_min": 12, "fp32": False,
                     "trabajo": 3.0, "tr": "WanTransformer3DModel", "vae": "AutoencoderKLWan"},
+    # GGUF Q8: 2 x 15.4 GB (alto y bajo ruido; solo uno trabaja a la vez). params = GB/2 para las cuentas.
+    "wan22_14b": {"clase": "WanImageToVideoPipeline", "te_gb": 10.6, "params": 15.5, "vram_min": 16,
+                  "fp32": False, "trabajo": 6.0, "tr": "WanTransformer3DModel", "vae": "AutoencoderKLWan",
+                  "gguf": True},
     "cogvideox": {"clase": "CogVideoXPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8, "fp32": False,
                   "trabajo": 2.5, "tr": "CogVideoXTransformer3DModel", "vae": "AutoencoderKLCogVideoX"},
     "cogvideox_i2v": {"clase": "CogVideoXImageToVideoPipeline", "te_gb": 9.0, "params": 5.6, "vram_min": 8,
@@ -279,6 +287,7 @@ TEXTO = {
     "ltx": ("T5EncoderModel", "T5Tokenizer"),
     "wan": ("UMT5EncoderModel", "AutoTokenizer"),
     "wan22_turbo": ("UMT5EncoderModel", "AutoTokenizer"),
+    "wan22_14b": ("UMT5EncoderModel", "AutoTokenizer"),
     "cogvideox": ("T5EncoderModel", "T5Tokenizer"),
     "cogvideox_i2v": ("T5EncoderModel", "T5Tokenizer"),
 }
@@ -339,7 +348,7 @@ def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
 
     info = MODELOS[motor]
     clase = getattr(diffusers, info["clase"])
-    nulos = _nulos(carpeta, ("transformer", "vae"))
+    nulos = _nulos(carpeta, ("transformer", "transformer_2", "vae"))
     dtype_gpu = torch.bfloat16 if gpu["dtype"] == torch.bfloat16 else torch.float16
 
     if motor in TEXTO and vram_libre_gb(torch, gpu) >= info["te_gb"] + 0.4:
@@ -423,7 +432,7 @@ def _codificar_persistente(motor, carpeta, prompt, negativo, torch, gpu):
             carpeta, subfolder="text_encoder", torch_dtype=dtype_gpu, device_map="cuda", low_cpu_mem_usage=True)
         tok = getattr(transformers, clase_tok).from_pretrained(carpeta, subfolder="tokenizer")
         txt = getattr(diffusers, info["clase"]).from_pretrained(
-            carpeta, text_encoder=te, tokenizer=tok, **_nulos(carpeta, ("transformer", "vae")))
+            carpeta, text_encoder=te, tokenizer=tok, **_nulos(carpeta, ("transformer", "transformer_2", "vae")))
         PERSISTENTE.update(txt=txt, txt_dtype=dtype_gpu)
     else:
         progreso(4, 1, "Leyendo el prompt (lector ya cargado)...")
@@ -463,6 +472,8 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
     import diffusers
 
     info = MODELOS[motor]
+    if info.get("gguf"):
+        return _cargar_wan14b(carpeta, torch, gpu)
     dtype = gpu["dtype"]
     bytes_por_param = {torch.float32: 4, torch.float16: 2, torch.bfloat16: 2}[dtype]
     peso_gb = info["params"] * bytes_por_param + 0.5  # + VAE
@@ -531,6 +542,109 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
     return pipe
 
 
+def _ggufs(carpeta):
+    """Los dos GGUF de Wan 14B: (alto ruido, bajo ruido)."""
+    alto = bajo = None
+    for raiz, _, archivos in os.walk(carpeta):
+        for a in archivos:
+            if a.endswith(".gguf"):
+                ruta = os.path.join(raiz, a)
+                if "high_noise" in a.lower() or "highnoise" in a.lower():
+                    alto = ruta
+                elif "low_noise" in a.lower() or "lownoise" in a.lower():
+                    bajo = ruta
+    if not alto or not bajo:
+        raise RuntimeError("Faltan los archivos GGUF de Wan 14B: vuelve a descargarlo en el Gestor.")
+    return alto, bajo
+
+
+def _programador_lightning(torch):
+    """Receta de lightx2v: Euler con shift 5 y pasos fijos 1000/750/500/250 (2 de alto ruido + 2 de
+    bajo ruido). Con el programador normal los 4 pasos caían en otros tiempos y salía borroso."""
+    from diffusers import FlowMatchEulerDiscreteScheduler
+    prog = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=5.0)
+    original = prog.set_timesteps
+
+    def fijos(num_inference_steps=None, device=None, **_):
+        n = max(1, int(num_inference_steps or 4))
+        return original(sigmas=[1.0 - i / n for i in range(n)], device=device)
+    prog.set_timesteps = fijos
+    return prog
+
+
+def _cargar_wan14b(carpeta, torch, gpu):
+    """Wan 2.2 I2V 14B en GGUF (como ComfyUI): cada modelo pesa 15 GB en vez de 28 en bf16."""
+    import diffusers
+    from diffusers import GGUFQuantizationConfig
+    try:
+        import gguf  # noqa: F401
+    except ImportError:  # instalaciones anteriores: se añade solo, una vez
+        progreso(6, 1, "Instalando soporte GGUF (solo la primera vez)...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "gguf>=0.10"], check=False,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    alto, bajo = _ggufs(carpeta)
+    peso = (os.path.getsize(alto) + os.path.getsize(bajo)) / 1024 ** 3
+    _liberar_vram(torch)
+    libre = vram_libre_gb(torch, gpu)
+    entero = peso + 0.6 + MODELOS["wan22_14b"]["trabajo"] <= libre - 0.3
+    progreso(8, 1, "Cargando Wan 14B (GGUF)" + (" entero en la GPU..." if entero else ", GPU + RAM..."))
+    q = GGUFQuantizationConfig(compute_dtype=torch.bfloat16)
+    tr = diffusers.WanTransformer3DModel.from_single_file(
+        alto, quantization_config=q, config=carpeta, subfolder="transformer", torch_dtype=torch.bfloat16)
+    tr2 = diffusers.WanTransformer3DModel.from_single_file(
+        bajo, quantization_config=q, config=carpeta, subfolder="transformer_2", torch_dtype=torch.bfloat16)
+    vae = diffusers.AutoencoderKLWan.from_pretrained(carpeta, subfolder="vae", torch_dtype=torch.float32)
+    pipe = diffusers.WanImageToVideoPipeline.from_pretrained(
+        carpeta, transformer=tr, transformer_2=tr2, vae=vae, text_encoder=None, tokenizer=None,
+        scheduler=_programador_lightning(torch), torch_dtype=torch.bfloat16)
+    estrategia = ""
+    if entero:
+        try:
+            pipe.to("cuda")
+            estrategia = "gpu"
+        except Exception as e:
+            if not _es_oom(e):
+                raise
+            pipe.to("cpu")
+            _liberar_vram(torch)
+    if not estrategia:
+        # Solo un modelo (15 GB) en la GPU a la vez: el otro espera en la RAM
+        pipe.enable_model_cpu_offload()
+        estrategia = "offload"
+    try:
+        pipe.vae.enable_tiling()
+    except Exception:
+        pass
+    pipe._estrategia = estrategia
+    pipe._dtype = torch.bfloat16
+    progreso(15, 1, "Wan 14B cargado (" + ("GPU entera" if estrategia == "gpu" else "GPU + RAM") + ").")
+    return pipe
+
+
+def _primera_imagen(cfg, formato, perfil, torch, gpu):
+    """Wan 14B solo anima fotos: sin foto, se crea con Z-Image (paso 1 del flujo de ComfyUI)."""
+    carpeta = cfg.get("carpeta_zimage")
+    if not carpeta:
+        raise RuntimeError("Wan 14B anima una foto: sube una imagen base o descarga 'Z-Image Turbo' en el "
+                           "Gestor para que la cree sola desde tu prompt.")
+    w, h = TAMANOS_IMAGEN["zimage"].get(formato, TAMANOS_IMAGEN["zimage"]["vertical"])
+    if perfil["w"] > perfil["h"]:
+        w, h = max(w, h), min(w, h)
+    elif perfil["w"] < perfil["h"]:
+        w, h = min(w, h), max(w, h)
+    progreso(3, 1, "Creando la imagen inicial con Z-Image...")
+    pipe = _pipe_imagen("zimage", carpeta, torch, gpu)
+    semilla = int(cfg.get("semilla", -1))
+    img = _una_imagen(pipe, "zimage", cfg["prompt"], w, h, semilla if semilla >= 0 else int(time.time()) % 2 ** 31,
+                      9, torch)
+    del pipe
+    _vaciar_persistente(torch)  # Z-Image fuera: Wan 14B necesita la VRAM
+    ruta = os.path.splitext(cfg["salida"])[0] + "_inicio.png"
+    img.save(ruta)
+    print(f"[imagen inicial] {ruta}", flush=True)
+    return ruta
+
+
 def bajar_estrategia(pipe, torch):
     """Si la VRAM se llena: GPU entera -> GPU + RAM -> por partes. False si ya no hay más."""
     actual = getattr(pipe, "_estrategia", "gpu")
@@ -582,7 +696,7 @@ def pipeline_imagen(motor, pipe):
         elif getattr(pipe, "_estrategia", "gpu") == "secuencial":
             p.enable_sequential_cpu_offload()
         return p
-    if motor == "cogvideox_i2v":
+    if motor in ("cogvideox_i2v", "wan22_14b"):
         return pipe
     return None
 
@@ -765,6 +879,16 @@ def generar(cfg):
                            f"{gpu['vram']:.0f} GB. Usa Wan2.1 1.3B o LTX-Video.")
     if motor in ("ltx25", "minimax_h3"):
         return _generar_grande(cfg, motor, perfil, torch, gpu, salida, ffmpeg)
+    if motor == "wan22_14b":
+        if gpu["vram"] < 30 or str(cfg.get("resolucion", "")).lower() == "480p":
+            # 480p en gráficas de 16-24 GB; el Real-ESRGAN lo sube después
+            corto, largo = 480, 832
+            perfil["w"], perfil["h"] = (largo, corto) if perfil["w"] > perfil["h"] else \
+                ((corto, largo) if perfil["w"] < perfil["h"] else (624, 624))
+        elif perfil["w"] == perfil["h"]:
+            perfil["w"] = perfil["h"] = 960
+        if not cfg.get("imagen"):
+            cfg["imagen"] = _primera_imagen(cfg, formato, perfil, torch, gpu)
 
     negativo = cfg.get("negativo") or NEGATIVOS.get(motor, NEGATIVO)
     clave = (motor, cfg["carpeta_modelo"])
@@ -787,6 +911,8 @@ def generar(cfg):
     # Los vectores deben tener el MISMO formato que el transformer (fp16 del codificador vs fp32
     # del transformer en Pascal daba "expected ... same dtype"). Las máscaras no se convierten.
     dtype_tr = getattr(getattr(pipe, "transformer", None), "dtype", gpu["dtype"])
+    if info.get("gguf") or not getattr(dtype_tr, "is_floating_point", True):
+        dtype_tr = torch.bfloat16  # los pesos GGUF son bytes; el cálculo va en bf16
     vectores_gpu = {}
     for k, v in vectores.items():
         if hasattr(v, "to"):
@@ -832,6 +958,10 @@ def generar(cfg):
         aviso("Este modelo no puede continuar un clip desde el anterior: los segmentos se "
               "generan por separado y se unen (puede notarse el corte).")
 
+    final = None
+    if cfg.get("imagen_final") and motor == "wan22_14b":
+        from PIL import Image
+        final = ajustar_imagen(Image.open(cfg["imagen_final"]), perfil["w"], perfil["h"])
     frames_total = []
     ultimo = imagen
     for i in range(n_seg):
@@ -858,6 +988,8 @@ def generar(cfg):
         usar_img = ultimo is not None and pipe_img is not None
         if usar_img:
             kwargs["image"] = ultimo
+        if final is not None and i == n_seg - 1 and usar_img and motor == "wan22_14b":
+            kwargs["last_image"] = final  # el video termina en la foto final (FLF)
         while True:
             p = pipe_img if usar_img else pipe
             oom = False
@@ -892,6 +1024,18 @@ def generar(cfg):
         except Exception:
             pass
 
+    fps = perfil["fps"]
+    if cfg.get("fps60") and cfg.get("rife") and os.path.exists(cfg["rife"]):
+        progreso(86, 3, f"Movimiento suave (RIFE): {fps} -> {fps * 2} fps...")
+        try:
+            import mejora_video
+            frames_total = mejora_video.interpolar_rife(frames_total, 2, cfg["rife"], torch)
+            fps *= 2
+            cfg["fps60"] = False  # ya hecho: no repetir con ffmpeg
+        except Exception as e:
+            _liberar_vram(torch)
+            print(f"[aviso] RIFE no disponible ({type(e).__name__}: {e}); se usa ffmpeg.", flush=True)
+
     progreso(87, 3, f"Uniendo {len(frames_total)} frames...")
     crudo = salida + ".crudo.mp4"
     # Upscale en la GPU al escribir (la GPU ya está libre: el modelo terminó)
@@ -903,7 +1047,16 @@ def generar(cfg):
     if alto_gpu and not _persistente():  # el persistente se queda cargado (el upscale ocupa poco)
         del pipe, pipe_img
         _liberar_vram(torch)
-    escribir_video(frames_total, crudo, perfil["fps"], ffmpeg, alto_gpu, torch)
+    if alto_gpu and cfg.get("esrgan") and os.path.exists(cfg["esrgan"]):
+        progreso(89, 3, f"Mejorando la resolución con IA (Real-ESRGAN) a {objetivo}p...")
+        try:
+            import mejora_video
+            frames_total = mejora_video.escalar_esrgan(frames_total, alto_gpu, cfg["esrgan"], torch)
+            alto_gpu = None
+        except Exception as e:
+            _liberar_vram(torch)
+            print(f"[aviso] Real-ESRGAN no disponible ({type(e).__name__}: {e}); reescalado normal.", flush=True)
+    escribir_video(frames_total, crudo, fps, ffmpeg, alto_gpu, torch)
 
     progreso(92, 4, "Aplicando upscale / 60 FPS / audio...")
     if cfg.get("audio"):
