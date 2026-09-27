@@ -19,6 +19,12 @@ if len(sys.argv) > 1 and sys.argv[1] in ("--run-editor", "--run-subidor", "--run
     import smart_editor
     sys.exit(smart_editor.main(sys.argv[2:]))
 
+# Modo servidor (RunPod / Linux sin pantalla): sin ventana ni bandeja, escucha en la red
+# y pide contraseña. Se activa con --servidor o CONTENTAPP_SERVIDOR=1.
+MODO_SERVIDOR = "--servidor" in sys.argv or os.environ.get("CONTENTAPP_SERVIDOR") == "1"
+if MODO_SERVIDOR:
+    os.environ["CONTENTAPP_SERVIDOR"] = "1"
+
 import collections
 import datetime
 import faulthandler
@@ -68,8 +74,11 @@ threading.excepthook = lambda a: _registrar_excepcion(
 # ---------------------------------------------------------------------------
 # Firebase (opcional)
 # ---------------------------------------------------------------------------
-import firebase_admin  # noqa: E402
-from firebase_admin import credentials, firestore  # noqa: E402
+try:
+    import firebase_admin  # noqa: E402
+    from firebase_admin import credentials, firestore  # noqa: E402
+except ImportError:  # sin firebase-admin: la app funciona igual, sin telemetría
+    firebase_admin = credentials = firestore = None
 
 FIREBASE_KEY_PATH = paths.res_path("firebase-key.json")
 if not os.path.exists(FIREBASE_KEY_PATH):
@@ -79,7 +88,7 @@ firebase_db = None
 
 def init_firebase_async():
     global firebase_db
-    if os.path.exists(FIREBASE_KEY_PATH):
+    if firebase_admin is not None and os.path.exists(FIREBASE_KEY_PATH):
         try:
             cred = credentials.Certificate(FIREBASE_KEY_PATH)
             if not firebase_admin._apps:
@@ -154,6 +163,41 @@ def log_error_telemetry(error_msg, details=""):
 
 app = Flask(__name__, template_folder=paths.res_path("templates"), static_folder=paths.res_path("static"))
 app.register_blueprint(ia_bp)
+
+
+def _clave_servidor():
+    """Contraseña del modo servidor: CONTENTAPP_CLAVE o, si no hay, una generada y guardada."""
+    clave = os.environ.get("CONTENTAPP_CLAVE", "").strip()
+    if clave:
+        return clave
+    ruta = paths.data_path("clave_servidor.txt")
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            clave = f.read().strip()
+    except OSError:
+        clave = ""
+    if not clave:
+        import secrets as _secrets
+        clave = _secrets.token_urlsafe(12)
+        with open(ruta, "w", encoding="utf-8") as f:
+            f.write(clave)
+    os.environ["CONTENTAPP_CLAVE"] = clave
+    return clave
+
+
+@app.before_request
+def exigir_clave():
+    """En modo servidor la app queda expuesta a internet: todo pide usuario y contraseña
+    (usuario: cualquiera, contraseña: la clave). El navegador la recuerda."""
+    if not MODO_SERVIDOR or request.remote_addr in ("127.0.0.1", "::1") and \
+            not request.headers.get("X-Forwarded-For"):
+        return None
+    import hmac
+    auth = request.authorization
+    if auth and auth.password and hmac.compare_digest(auth.password.encode(), _clave_servidor().encode()):
+        return None
+    return ("Se necesita la contraseña de Content App.", 401,
+            {"WWW-Authenticate": 'Basic realm="Content App", charset="UTF-8"'})
 
 
 @app.before_request
@@ -1561,6 +1605,28 @@ def _salir_limpio():
     winproc.matar_arbol(proc)
     os._exit(0)
 
+
+def _arrancar_servidor():
+    """RunPod / Linux: servidor web en 0.0.0.0 con contraseña, sin ventana."""
+    puerto = int(os.environ.get("CONTENTAPP_PUERTO") or PUERTO_PREFERIDO)
+    clave = _clave_servidor()
+    threading.Thread(target=init_firebase_async, daemon=True, name="firebase").start()
+    threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
+    threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
+    pod = os.environ.get("RUNPOD_POD_ID")
+    url = f"https://{pod}-{puerto}.proxy.runpod.net" if pod else f"http://<IP-del-servidor>:{puerto}"
+    aviso = (f"\n  Content App en modo servidor\n  Abre: {url}\n"
+             f"  Usuario: cualquiera   Contraseña: {clave}\n"
+             f"  (la contraseña también está en {paths.data_path('clave_servidor.txt')})\n")
+    print(aviso, flush=True)
+    _arranque(f"Modo servidor en el puerto {puerto} ({url})")
+    app.run(host="0.0.0.0", port=puerto, debug=False, use_reloader=False, threaded=True)
+
+
+if __name__ == "__main__" and MODO_SERVIDOR:
+    _arranque(f"Arrancando Content App en modo servidor (datos en {paths.DATA_DIR})")
+    _arrancar_servidor()
+    sys.exit(0)
 
 if __name__ == "__main__":
     hidden_mode = "--hidden" in sys.argv

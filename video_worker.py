@@ -88,9 +88,37 @@ def memoria_libre_gb():
             m.dwLength = ctypes.sizeof(MS)
             ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
             return m.ullAvailPageFile / 1024 ** 3
-        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
+        return _memoria_linux_gb()[1]
     except Exception:
         return 0.0
+
+
+def _memoria_linux_gb():
+    """(total, disponible) en GB. En Linux MemFree no cuenta la caché de disco (tras bajar
+    un modelo de 26 GB la RAM parece llena) y en contenedores (RunPod) manda el cgroup."""
+    info = {}
+    with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        for linea in f:
+            clave, _, valor = linea.partition(":")
+            info[clave] = int(valor.split()[0]) * 1024
+    total = info.get("MemTotal", 0)
+    libre = info.get("MemAvailable", info.get("MemFree", 0))
+    for lim, uso in (("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+                     ("/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                      "/sys/fs/cgroup/memory/memory.usage_in_bytes")):
+        try:
+            with open(lim, "r", encoding="utf-8") as f:
+                limite = f.read().strip()
+            if limite == "max" or int(limite) >= total:
+                break
+            with open(uso, "r", encoding="utf-8") as f:
+                usado = int(f.read().strip())
+            total = int(limite)
+            libre = min(libre, max(0, total - usado))
+            break
+        except (OSError, ValueError):
+            continue
+    return total / 1024 ** 3, libre / 1024 ** 3
 
 
 def info_gpu(torch):

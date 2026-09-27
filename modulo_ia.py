@@ -754,6 +754,9 @@ _motor_lock = threading.Lock()
 _motor_info = {"estado": "sin_detectar"}
 
 
+INSTALADOR = "instalar_motor_video.bat" if os.name == "nt" else "runpod/instalar.sh"
+
+
 def _candidatos_python():
     cands = []
     if os.environ.get("CONTENTAPP_VIDEO_PYTHON"):
@@ -762,6 +765,7 @@ def _candidatos_python():
     # disco que la app (p. ej. D:\ContentApp\motor_video) y la de versiones anteriores.
     if os.environ.get("CONTENTAPP_MOTOR_DIR"):
         cands.append(os.path.join(os.environ["CONTENTAPP_MOTOR_DIR"], "Scripts", "python.exe"))
+        cands.append(os.path.join(os.environ["CONTENTAPP_MOTOR_DIR"], "bin", "python"))  # Linux / RunPod
     unidad = os.path.splitdrive(os.path.abspath(paths.EXEC_DIR))[0]
     if unidad:
         cands.append(os.path.join(unidad + os.sep, "ContentApp", "motor_video", "Scripts", "python.exe"))
@@ -839,7 +843,7 @@ def motor_estado():
     info = _motor(forzar=request.args.get("refrescar") == "1")
     mem = estado_memoria()
     info["ram_libre_gb"] = round(mem["commit_libre_gb"], 1)
-    info["instalador"] = "instalar_motor_video.bat"
+    info["instalador"] = INSTALADOR
     return jsonify({"success": True, **{k: v for k, v in info.items() if k != "worker"}})
 
 
@@ -962,10 +966,10 @@ def generar_video():
         return jsonify({"success": False, "error": "Comprobando el motor de video... espera unos segundos y vuelve a intentarlo."}), 409
     if motor.get("estado") == "no_instalado":
         return jsonify({"success": False, "error": "Falta el motor de video (Python con torch + diffusers). "
-                                                    "Ejecuta 'instalar_motor_video.bat' en la carpeta de la app y reinicia."}), 400
+                                                    f"Ejecuta '{INSTALADOR}' en la carpeta de la app y reinicia."}), 400
     if motor.get("estado") == "error":
         return jsonify({"success": False, "error": f"El motor de video no funciona con tu GPU: {motor.get('error')}. "
-                                                    "Vuelve a ejecutar 'instalar_motor_video.bat'."}), 400
+                                                    f"Vuelve a ejecutar '{INSTALADOR}'."}), 400
     if motor.get("estado") == "sin_gpu":
         return jsonify({"success": False, "error": "El motor está instalado pero no ve una GPU NVIDIA con CUDA. "
                                                     "Actualiza los drivers de NVIDIA o reinstala el motor."}), 400
@@ -1078,6 +1082,9 @@ def abrir_video(filename):
     ruta = os.path.join(VIDEOS_DIR, os.path.basename(filename))
     if not os.path.isfile(ruta):
         return jsonify({"success": False, "error": "Archivo no encontrado"}), 404
+    if os.environ.get("CONTENTAPP_SERVIDOR") == "1":
+        # En RunPod no hay Explorador: el navegador descarga el video.
+        return jsonify({"success": True, "descargar": "/api/ia/video/" + urllib.parse.quote(os.path.basename(ruta))})
     try:
         if os.name == "nt":
             subprocess.Popen(["explorer", "/select,", ruta])
