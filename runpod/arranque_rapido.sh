@@ -21,6 +21,10 @@ MODELOS="${MODELOS:-wan21_t2v_13b}"
 bash runpod/instalar.sh $MODELOS
 
 export CONTENTAPP_AUTOBORRAR_MIN="${AUTOBORRAR_MIN:-60}"
+# se recuerda para cuando se reinicie la app con iniciar.sh
+BASE="${CONTENTAPP_BASE:-/workspace/contentapp}"
+grep -q CONTENTAPP_AUTOBORRAR_MIN "$BASE/entorno.sh" 2>/dev/null \
+    || echo "export CONTENTAPP_AUTOBORRAR_MIN=\"\${CONTENTAPP_AUTOBORRAR_MIN:-$CONTENTAPP_AUTOBORRAR_MIN}\"" >> "$BASE/entorno.sh"
 bash runpod/iniciar.sh
 if [ "$CONTENTAPP_AUTOBORRAR_MIN" != "0" ]; then
     echo " Autoborrado: el pod se BORRA tras $CONTENTAPP_AUTOBORRAR_MIN min sin uso."

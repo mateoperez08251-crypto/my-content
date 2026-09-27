@@ -2,7 +2,11 @@
 # Arranca (o reinicia) Content App en modo servidor en segundo plano.
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE="${CONTENTAPP_BASE:-/workspace/contentapp}"
+BASE="${CONTENTAPP_BASE:-}"
+if [ -z "$BASE" ]; then
+    for b in /workspace/contentapp /root/contentapp; do [ -f "$b/entorno.sh" ] && BASE="$b" && break; done
+    BASE="${BASE:-/workspace/contentapp}"
+fi
 [ -f "$BASE/entorno.sh" ] || { echo "[X] Primero ejecuta: bash runpod/instalar.sh"; exit 1; }
 # shellcheck disable=SC1091
 source "$BASE/entorno.sh"

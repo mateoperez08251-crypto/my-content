@@ -168,9 +168,14 @@ app.register_blueprint(ia_bp)
 def _clave_servidor():
     """Contraseña del modo servidor: CONTENTAPP_CLAVE o, si no hay, una generada y guardada."""
     clave = os.environ.get("CONTENTAPP_CLAVE", "").strip()
-    if clave:
-        return clave
     ruta = paths.data_path("clave_servidor.txt")
+    if clave:
+        try:  # se guarda para que al reiniciar la app siga siendo la misma
+            with open(ruta, "w", encoding="utf-8") as f:
+                f.write(clave)
+        except OSError:
+            pass
+        return clave
     try:
         with open(ruta, "r", encoding="utf-8") as f:
             clave = f.read().strip()
