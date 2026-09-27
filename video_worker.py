@@ -31,8 +31,36 @@ def emitir(tipo, **datos):
     print(json.dumps({"tipo": tipo, **datos}, ensure_ascii=False), flush=True)
 
 
+_T0 = [time.time()]
+_FASE = [None]
+
+# Motor persistente (RunPod, --servidor): el modelo se queda cargado en la GPU entre videos.
+# Antes cada video abría un proceso nuevo y volvía a leer ~21 GB del disco (2-3 min).
+PERSISTENTE = {"clave": None, "pipe": None, "pipe_img": None, "txt": None, "txt_dtype": None}
+
+
+def _persistente():
+    return os.environ.get("CONTENTAPP_MOTOR_PERSISTENTE") == "1"
+
+
+def _vaciar_persistente(torch=None):
+    PERSISTENTE.update(clave=None, pipe=None, pipe_img=None, txt=None, txt_dtype=None)
+    import gc
+    gc.collect()
+    try:
+        if torch is None:
+            import torch
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def progreso(pct, paso, msg):
     emitir("progreso", pct=round(max(0.0, min(100.0, pct)), 1), paso=paso, msg=msg)
+    fase = msg.split("·")[0].strip()
+    if fase != _FASE[0]:  # tiempos por fase en motor_video.log (para medir, no adivinar)
+        _FASE[0] = fase
+        print(f"[t={time.time() - _T0[0]:6.1f}s] {fase}", flush=True)
 
 
 def aviso(msg):
@@ -347,6 +375,64 @@ def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
     return vectores
 
 
+def _codificar_persistente(motor, carpeta, prompt, negativo, torch, gpu):
+    """Como codificar_texto, pero el lector del prompt SE QUEDA en la GPU para el próximo video.
+    Solo si caben a la vez lector + modelo + trabajo; si no, devuelve None (se usa el normal)."""
+    if motor not in TEXTO:
+        return None
+    info = MODELOS[motor]
+    txt = PERSISTENTE.get("txt")
+    dtype_gpu = torch.bfloat16 if gpu["dtype"] == torch.bfloat16 else torch.float16
+    if txt is None:
+        bpp = 4 if gpu["dtype"] == torch.float32 else 2
+        necesita = (info["te_gb"] + info["params"] * bpp + 0.5
+                    + info.get("trabajo", 3.0) * (1.5 if bpp == 4 else 1.0) + 1.0)
+        if PERSISTENTE.get("pipe") is not None:  # el modelo ya está dentro de la VRAM libre
+            necesita = info["te_gb"] + 1.0
+        if vram_libre_gb(torch, gpu) < necesita:
+            return None
+        import diffusers
+        import transformers
+        progreso(4, 1, "Cargando el lector del prompt en la GPU (se queda cargado)...")
+        clase_te, clase_tok = TEXTO[motor]
+        te = getattr(transformers, clase_te).from_pretrained(
+            carpeta, subfolder="text_encoder", torch_dtype=dtype_gpu, device_map="cuda", low_cpu_mem_usage=True)
+        tok = getattr(transformers, clase_tok).from_pretrained(carpeta, subfolder="tokenizer")
+        txt = getattr(diffusers, info["clase"]).from_pretrained(
+            carpeta, text_encoder=te, tokenizer=tok, **_nulos(carpeta, ("transformer", "vae")))
+        PERSISTENTE.update(txt=txt, txt_dtype=dtype_gpu)
+    else:
+        progreso(4, 1, "Leyendo el prompt (lector ya cargado)...")
+    vectores = _encode(txt, motor, prompt, negativo, torch, "cuda", PERSISTENTE["txt_dtype"])
+    if _hay_nan(vectores, torch):
+        PERSISTENTE.update(txt=None)
+        _liberar_vram(torch)
+        return None
+    return {k: v.to("cpu") if hasattr(v, "to") else v for k, v in vectores.items()}
+
+
+def _poner_cache(pipe, umbral):
+    """Activa/cambia/quita la caché de velocidad (el modelo persistente ya puede tener una)."""
+    tr = getattr(pipe, "transformer", None)
+    if tr is None:
+        return
+    try:
+        if getattr(tr, "is_cache_enabled", False):
+            tr.disable_cache()
+    except Exception:
+        pass
+    if not umbral:
+        return
+    try:
+        import diffusers
+        conf = getattr(diffusers, "FirstBlockCacheConfig", None)
+        if conf is None:
+            from diffusers.hooks import FirstBlockCacheConfig as conf
+        tr.enable_cache(conf(threshold=umbral))
+    except Exception as e:
+        print(f"[aviso] caché de velocidad no disponible ({type(e).__name__}: {e})", flush=True)
+
+
 def cargar_pipeline(motor, carpeta, torch, gpu):
     """FASE 2: carga solo la parte que dibuja el video (sin codificador de texto) en el
     formato adecuado para la gráfica y, si cabe, ENTERA en la GPU (lo más rápido)."""
@@ -634,9 +720,24 @@ def generar(cfg):
         raise RuntimeError(f"Este modelo necesita una GPU de {info['vram_min']} GB y la tuya tiene "
                            f"{gpu['vram']:.0f} GB. Usa Wan2.1 1.3B o LTX-Video.")
 
-    vectores = codificar_texto(motor, cfg["carpeta_modelo"], cfg["prompt"],
-                               cfg.get("negativo") or NEGATIVOS.get(motor, NEGATIVO), torch, gpu)
-    pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, gpu)
+    negativo = cfg.get("negativo") or NEGATIVOS.get(motor, NEGATIVO)
+    clave = (motor, cfg["carpeta_modelo"])
+    if _persistente() and PERSISTENTE["clave"] not in (None, clave):
+        progreso(3, 1, "Cambiando de modelo: liberando el anterior...")
+        _vaciar_persistente(torch)
+    vectores = None
+    if _persistente():
+        PERSISTENTE["clave"] = clave
+        vectores = _codificar_persistente(motor, cfg["carpeta_modelo"], cfg["prompt"], negativo, torch, gpu)
+    if vectores is None:
+        vectores = codificar_texto(motor, cfg["carpeta_modelo"], cfg["prompt"], negativo, torch, gpu)
+    if _persistente() and PERSISTENTE["pipe"] is not None:
+        pipe = PERSISTENTE["pipe"]
+        progreso(15, 1, "Modelo ya cargado en la GPU.")
+    else:
+        pipe = cargar_pipeline(motor, cfg["carpeta_modelo"], torch, gpu)
+        if _persistente():
+            PERSISTENTE.update(pipe=pipe, pipe_img=None)
     # Los vectores deben tener el MISMO formato que el transformer (fp16 del codificador vs fp32
     # del transformer en Pascal daba "expected ... same dtype"). Las máscaras no se convierten.
     dtype_tr = getattr(getattr(pipe, "transformer", None), "dtype", gpu["dtype"])
@@ -653,11 +754,16 @@ def generar(cfg):
 
     pipe_img = None
     if imagen is not None or perfil["imagen"]:
-        try:
-            pipe_img = pipeline_imagen(motor, pipe)
-        except Exception as e:  # sin imagen de partida: cada tramo se genera por separado
-            print(f"[aviso] modo imagen-a-video no disponible ({type(e).__name__}: {e})", flush=True)
-            pipe_img = None
+        if _persistente() and PERSISTENTE.get("pipe_img") is not None:
+            pipe_img = PERSISTENTE["pipe_img"]
+        else:
+            try:
+                pipe_img = pipeline_imagen(motor, pipe)
+            except Exception as e:  # sin imagen de partida: cada tramo se genera por separado
+                print(f"[aviso] modo imagen-a-video no disponible ({type(e).__name__}: {e})", flush=True)
+                pipe_img = None
+            if _persistente():
+                PERSISTENTE["pipe_img"] = pipe_img
     if imagen is not None and pipe_img is None:
         aviso("Este modelo solo genera desde texto: se ignoró la imagen base.")
         imagen = None
@@ -668,15 +774,7 @@ def generar(cfg):
     if perfil.get("destilado"):  # ya viene optimizado (pocos pasos): no se toca
         ajuste = VELOCIDADES["calidad"]
     perfil["pasos"] = max(10, round(perfil["pasos"] * ajuste["pasos"]))
-    if ajuste["cache"]:
-        try:
-            import diffusers
-            conf = getattr(diffusers, "FirstBlockCacheConfig", None)
-            if conf is None:
-                from diffusers.hooks import FirstBlockCacheConfig as conf
-            pipe.transformer.enable_cache(conf(threshold=ajuste["cache"]))
-        except Exception as e:
-            print(f"[aviso] caché de velocidad no disponible ({type(e).__name__}: {e})", flush=True)
+    _poner_cache(pipe, ajuste["cache"])
 
     seg_seg = perfil["frames"] / perfil["fps"]
     duracion = max(1.0, float(cfg.get("duracion", seg_seg)))
@@ -698,6 +796,9 @@ def generar(cfg):
             total = max(1, perfil["pasos"])
             progreso(base_pct + ancho_pct * (paso + 1) / total, 2,
                      f"Generando segmento {i + 1}/{n_seg} · paso {paso + 1}/{total}")
+            if paso + 1 == total:
+                print(f"[t={time.time() - _T0[0]:6.1f}s] pasos del segmento {i + 1} listos; "
+                      "decodificando cuadros (VAE)", flush=True)
             return kw
 
         generador = torch.Generator(device="cpu").manual_seed(semilla + i)
@@ -727,6 +828,8 @@ def generar(cfg):
                 raise RuntimeError("CUDA out of memory incluso cargando el modelo por partes.")
             if pipe_img is not None and pipe_img is not pipe:
                 pipe_img = pipeline_imagen(motor, pipe)
+                if _persistente():
+                    PERSISTENTE["pipe_img"] = pipe_img
             kwargs["generator"] = torch.Generator(device="cpu").manual_seed(semilla + i)
         if i > 0 and usar_img:
             frames = frames[1:]  # el primer frame repite el último del segmento anterior
@@ -742,7 +845,7 @@ def generar(cfg):
     # Upscale en la GPU al escribir (la GPU ya está libre: el modelo terminó)
     alto = ALTURAS.get(str(cfg.get("resolucion", "")).lower())
     alto_gpu = alto if cfg.get("upscale") and alto and alto > frames_total[0].size[1] else None
-    if alto_gpu:
+    if alto_gpu and not _persistente():  # el persistente se queda cargado (el upscale ocupa poco)
         del pipe, pipe_img
         _liberar_vram(torch)
     alto_escrito = escribir_video(frames_total, crudo, perfil["fps"], ffmpeg, alto_gpu, torch)
@@ -794,15 +897,45 @@ def main(argv):
         pass
     if argv[:1] == ["--diagnostico"]:
         return diagnostico()
+    if argv[:1] == ["--servidor"]:
+        return servidor()
     if len(argv) < 2 or argv[0] != "--config":
-        emitir("error", msg="Uso: video_worker.py --config <tarea.json>")
+        emitir("error", msg="Uso: video_worker.py --config <tarea.json> | --servidor")
         return 1
     with open(argv[1], "r", encoding="utf-8") as f:
         cfg = json.load(f)
+    return ejecutar_tarea(cfg)
+
+
+def servidor():
+    """Motor persistente: una tarea JSON por línea en stdin; cada una termina con {"tipo": "fin"}.
+    Sale cuando se cierra stdin (la app terminó), así no queda ocupando la GPU."""
+    os.environ["CONTENTAPP_MOTOR_PERSISTENTE"] = "1"
+    for linea in sys.stdin:
+        linea = linea.strip()
+        if not linea:
+            continue
+        _T0[0] = time.time()
+        _FASE[0] = None
+        AVISOS.clear()
+        try:
+            cfg = json.loads(linea)
+        except ValueError:
+            emitir("error", msg="Tarea inválida")
+            emitir("fin")
+            continue
+        ejecutar_tarea(cfg)
+        emitir("fin")
+    return 0
+
+
+def ejecutar_tarea(cfg):
     try:
         generar(cfg)
         return 0
     except Exception as e:
+        if _persistente():  # tras un error no se reutiliza nada (estado dudoso)
+            _vaciar_persistente()
         import traceback
         traceback.print_exc(file=sys.stdout)  # queda en logs/motor_video.log
         msg = str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}"

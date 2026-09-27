@@ -911,24 +911,58 @@ def _ffmpeg():
         return shutil.which("ffmpeg") or "ffmpeg"
 
 
+# Motor persistente (solo modo servidor / RunPod): un proceso que deja el modelo cargado en la
+# GPU entre videos. Antes cada video abría un proceso y releía ~21 GB del disco (2-3 min).
+# En el PC (Windows) sigue un proceso por video: libera la GPU y la RAM al terminar.
+_motor_vivo = {"proc": None, "python": None}
+
+
+def _persistente_activo():
+    return (os.environ.get("CONTENTAPP_SERVIDOR") == "1"
+            and os.environ.get("CONTENTAPP_MOTOR_PERSISTENTE", "1") != "0")
+
+
+def _obtener_motor_vivo(motor):
+    p = _motor_vivo["proc"]
+    if p is not None and p.poll() is None and _motor_vivo["python"] == motor["python_cmd"]:
+        return p
+    p = subprocess.Popen([motor["python_cmd"], motor["worker"], "--servidor"],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, encoding="utf-8", errors="replace", cwd=paths.RES_DIR,
+                         creationflags=SIN_VENTANA, bufsize=1)
+    winproc.adjuntar_a_job(p)
+    _motor_vivo.update(proc=p, python=motor["python_cmd"])
+    return p
+
+
 def _ejecutar_worker(task_id, motor, cfg_path):
     proc = None
+    persistente = _persistente_activo()
     try:
-        proc = subprocess.Popen([motor["python_cmd"], motor["worker"], "--config", cfg_path],
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                encoding="utf-8", errors="replace", cwd=paths.RES_DIR,
-                                creationflags=SIN_VENTANA)
-        winproc.adjuntar_a_job(proc)  # muere con la app aunque esta crashee
+        if persistente:
+            proc = _obtener_motor_vivo(motor)
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                tarea = json.load(f)
+            proc.stdin.write(json.dumps(tarea, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+        else:
+            proc = subprocess.Popen([motor["python_cmd"], motor["worker"], "--config", cfg_path],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    encoding="utf-8", errors="replace", cwd=paths.RES_DIR,
+                                    creationflags=SIN_VENTANA)
+            winproc.adjuntar_a_job(proc)  # muere con la app aunque esta crashee
         _set_tarea(task_id, proceso=proc)
         ultimas = []
         try:
             registro = open(os.path.join(paths.LOGS_DIR, "motor_video.log"), "w", encoding="utf-8")
         except OSError:
             registro = None
-        for linea in proc.stdout:
+        for linea in iter(proc.stdout.readline, ""):
             linea = linea.strip()
             if not linea:
                 continue
+            if persistente and linea == '{"tipo": "fin"}':
+                break  # tarea terminada; el motor sigue vivo con el modelo cargado
             if registro and '"tipo": "progreso"' not in linea:
                 registro.write(linea + "\n")
                 registro.flush()
@@ -950,7 +984,11 @@ def _ejecutar_worker(task_id, motor, cfg_path):
                            archivo=os.path.basename(ev.get("archivo", "")), mensaje="¡Video listo!")
             elif tipo == "error":
                 _set_tarea(task_id, estado="error", error=ev.get("msg", "Error desconocido"))
-        codigo = proc.wait()
+        codigo = proc.poll() if persistente else proc.wait()
+        if persistente and codigo is None:
+            codigo = 0  # sigue vivo: la tarea acabó con {"tipo": "fin"}
+        elif persistente:
+            codigo = proc.wait()
         if registro:
             registro.write(f"[codigo de salida {codigo}]\n")
             registro.close()
