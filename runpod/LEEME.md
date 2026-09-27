@@ -14,7 +14,8 @@ En la terminal del pod nuevo:
 cd /root && git clone https://github.com/mateoperez08251-crypto/my-content.git
 MODELOS="wan22_ti2v_5b_turbo" AUTOBORRAR_MIN=60 CONTENTAPP_BASE=/root/contentapp bash my-content/runpod/arranque_rapido.sh
 ```
-- `MODELOS`: los que quieras, separados por espacio.
+- `MODELOS`: los que quieras, separados por espacio. Cada modelo ocupa 20–40 GB: con 100 GB de
+  Container Disk caben 2; para 3 o más pon 150–200 GB.
 - `AUTOBORRAR_MIN=0` desactiva el autoborrado.
 
 ## Modo con disco persistente

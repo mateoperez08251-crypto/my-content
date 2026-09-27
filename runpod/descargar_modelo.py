@@ -11,6 +11,7 @@ import sys
 import time
 
 os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")  # antes de importar huggingface_hub
+os.environ.setdefault("HF_XET_CHUNK_CACHE_SIZE_BYTES", "0")  # sin caché extra: no llena el disco
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import modulo_ia as mi  # noqa: E402
