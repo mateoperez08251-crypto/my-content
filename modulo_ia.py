@@ -1080,6 +1080,7 @@ def generar_video():
             "imagen": imagen, "audio": audio, "duracion": duracion,
             "resolucion": str(data.get("resolution", "1080p")),
             "velocidad": str(data.get("velocidad", "rapido")),
+            "formato": str(data.get("formato", "vertical")),
             "upscale": str(data.get("upscale", "")).lower() == "true",
             "fps60": str(data.get("fps60", "")).lower() == "true",
             "salida": salida, "ffmpeg": _ffmpeg(),

@@ -654,14 +654,24 @@ def escribir_video(frames, ruta, fps, ffmpeg, alto=None, torch=None):
     return h
 
 
-def postprocesar(entrada, salida, cfg, alto_nativo, ffmpeg):
-    """60 FPS (interpolación), upscale y audio con ffmpeg."""
+def _tamano_video(ruta, ffmpeg):
+    r = subprocess.run([ffmpeg, "-hide_banner", "-i", ruta], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    import re
+    m = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", r.stderr or "")
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def postprocesar(entrada, salida, cfg, ffmpeg):
+    """60 FPS (interpolación), upscale (si no se hizo ya en la GPU) y audio con ffmpeg."""
     filtros = []
     if cfg.get("fps60"):
         filtros.append("minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:vsbmc=1")
-    alto = ALTURAS.get(str(cfg.get("resolucion", "")).lower())
-    if cfg.get("upscale") and alto and alto > alto_nativo:
-        filtros.append(f"scale=-2:{alto}:flags=lanczos")
+    objetivo = ALTURAS.get(str(cfg.get("resolucion", "")).lower())  # lado corto deseado
+    if cfg.get("upscale") and objetivo:
+        w, h = _tamano_video(entrada, ffmpeg)
+        if w and h and objetivo > min(w, h):
+            filtros.append(f"scale=-2:{objetivo}:flags=lanczos" if w >= h else f"scale={objetivo}:-2:flags=lanczos")
     audio = cfg.get("audio") or ""
 
     if not filtros and not audio:
@@ -692,6 +702,14 @@ def generar(cfg):
     ffmpeg = cfg.get("ffmpeg") or "ffmpeg"
     motor = cfg["motor"]
     perfil = dict(PERFILES[motor])
+    formato = str(cfg.get("formato") or "horizontal").lower()
+    if motor in ("cogvideox", "cogvideox_i2v"):
+        if formato != "horizontal":
+            aviso("CogVideoX solo genera en horizontal (720x480).")
+    elif formato == "vertical":  # 9:16 para TikTok / Reels / Shorts
+        perfil["w"], perfil["h"] = perfil["h"], perfil["w"]
+    elif formato == "cuadrado":
+        perfil["w"] = perfil["h"] = min(perfil["w"], perfil["h"])
     salida = cfg["salida"]
     os.makedirs(os.path.dirname(salida), exist_ok=True)
 
@@ -843,17 +861,20 @@ def generar(cfg):
     progreso(87, 3, f"Uniendo {len(frames_total)} frames...")
     crudo = salida + ".crudo.mp4"
     # Upscale en la GPU al escribir (la GPU ya está libre: el modelo terminó)
-    alto = ALTURAS.get(str(cfg.get("resolucion", "")).lower())
-    alto_gpu = alto if cfg.get("upscale") and alto and alto > frames_total[0].size[1] else None
+    objetivo = ALTURAS.get(str(cfg.get("resolucion", "")).lower())  # lado corto deseado
+    w0, h0 = frames_total[0].size
+    alto_gpu = None
+    if cfg.get("upscale") and objetivo and objetivo > min(w0, h0):
+        alto_gpu = int(round(h0 * objetivo / min(w0, h0) / 2)) * 2
     if alto_gpu and not _persistente():  # el persistente se queda cargado (el upscale ocupa poco)
         del pipe, pipe_img
         _liberar_vram(torch)
-    alto_escrito = escribir_video(frames_total, crudo, perfil["fps"], ffmpeg, alto_gpu, torch)
+    escribir_video(frames_total, crudo, perfil["fps"], ffmpeg, alto_gpu, torch)
 
     progreso(92, 4, "Aplicando upscale / 60 FPS / audio...")
     if cfg.get("audio"):
         aviso("Lip-sync real no disponible todavía: se añadió el audio al video.")
-    postprocesar(crudo, salida, cfg, alto_escrito, ffmpeg)
+    postprocesar(crudo, salida, cfg, ffmpeg)
     progreso(100, 4, "¡Video listo!")
     emitir("resultado", archivo=salida, avisos=AVISOS)
 
