@@ -767,6 +767,11 @@ def escribir_video(frames, ruta, fps, ffmpeg, alto=None, torch=None):
     """Escribe frames PIL a MP4 enviándolos en crudo a ffmpeg (sin depender de imageio).
     Con `alto`, los escala antes en la GPU."""
     w, h = frames[0].size
+    if any(f.size != (w, h) for f in frames):
+        # Un cuadro de otro tamaño desalinea el video crudo (salían varias imágenes apiladas)
+        from PIL import Image
+        print(f"[aviso] cuadros de distinto tamaño: se ajustan todos a {w}x{h}", flush=True)
+        frames = [f if f.size == (w, h) else f.convert("RGB").resize((w, h), Image.LANCZOS) for f in frames]
     datos = (f.convert("RGB").tobytes() for f in frames)
     if alto and torch is not None:
         try:
@@ -1421,9 +1426,12 @@ def _narrar(cfg, textos, torch):
                 salida.writeframes(w.readframes(w.getnframes()))
             fin = t + d + (pausa if i < len(partes) - 1 else 0.4)
             salida.writeframes(b"\x00\x00" * int(sr * (fin - t - d)))
-            escenas.append({"texto": textos[i], "inicio": t, "fin": fin})
+            escenas.append({"texto": textos[i], "inicio": t, "fin": fin, "habla": d})
             t = fin
     cfg["audio"] = audio
+    import subtitulos
+    cfg["_palabras"] = [w for e in escenas for w in
+                        subtitulos.palabras_estimadas(e["texto"], e["inicio"], e["inicio"] + e["habla"])]
     print(f"[voz] {len(textos)} partes, {t:.1f} s de narración", flush=True)
     return escenas
 
@@ -1448,6 +1456,7 @@ def _escenas_desde_audio(cfg, torch):
     palabras, segmentos = cv.transcribir(audio, idioma=cfg.get("idioma") or "es", proveedor=proveedor,
                                          modelo_local=cfg.get("whisper_local") or "auto")
     _liberar_vram(torch)
+    cfg["_palabras"] = palabras  # para los subtítulos
     frs = cv.frases(palabras, segmentos, max_seg=max(objetivo * 1.5, 6.0)) if palabras or segmentos else []
     while True:
         escenas, actual = [], []
@@ -1489,8 +1498,17 @@ def _prompts_escenas(escenas, cfg):
         "camera framing, 40-80 words. Vary the shots like a film editor (wide establishing, medium, close-up, "
         "detail, over-the-shoulder) so consecutive images never look the same. Keep the sequence coherent: the "
         "same visual style and, if there are recurring characters, describe them identically every time "
-        "(age, hair, clothes). "
-        f"Requested style: {estilo}. Never put text, letters, signs or captions in the images. "
+        "(age, hair, clothes). Make every image EXPRESSIVE: faces with clear, strong emotions that match "
+        "what is being said (fear, joy, surprise, anger, sadness, determination), dynamic poses and gestures, "
+        "and details that literally show the words of the narration. "
+        f"Requested style: {estilo}. " + (
+            "When it helps tell the story, include ONE short text (1-4 words, in the SAME language as the "
+            "narration, taken from what is said) rendered INSIDE the scene as a real object: a neon sign, a "
+            "poster, a shop sign, a newspaper headline, a handwritten note or a screen. Write that text exactly "
+            "between double quotes in the prompt, e.g. a glowing neon sign that says \"OFERTA\". Never add "
+            "subtitles or captions. "
+            if cfg.get("texto_en_imagen", True) else
+            "Never put text, letters, signs or captions in the images. ") +
         "Also pick a camera motion for each scene that fits it: zoom_in (tension, focus on a detail), zoom_out "
         "(reveal), pan_left/pan_right (travel, landscapes), pan_up/pan_down (tall subjects), diag_in/diag_out. "
         'Reply ONLY with JSON: {"style": "short shared style description", '
@@ -1530,7 +1548,10 @@ def _prompts_escenas(escenas, cfg):
         aviso("No hay Director IA (Ollama/Groq): cada imagen usa el texto de su escena con tu estilo.")
     prompts = []
     for i, e in enumerate(escenas):
-        base = _sin_letreros((por_n.get(i + 1) or e["texto"] or estilo).strip()).rstrip(".")
+        base = (por_n.get(i + 1) or e["texto"] or estilo).strip()
+        if not cfg.get("texto_en_imagen", True):
+            base = _sin_letreros(base)  # sin letreros: el modelo dibujaría letras sin sentido
+        base = base.rstrip(".")
         prompts.append(f"{base}. Style: {estilo_global}")
     return prompts
 
@@ -1590,6 +1611,62 @@ def _video_secuencia(imgs, escenas, audio, salida, w, h, ffmpeg, fps=30):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _audio_final(cfg, escenas, estilo, ffmpeg):
+    """Subtítulos (se preparan aquí para poner un 'pop' en cada emoji) y audio final:
+    voz + música (que baja sola cuando se habla) + efectos en los cortes, normalizado a -14 LUFS."""
+    import audio_mix
+    import subtitulos
+    estilo = estilo or {}
+    from PIL import Image
+    w, h = Image.open(cfg["_imagenes"][0]).size
+    import montaje
+    W, H = montaje.tamano_salida(w, h)
+    sub_id = cfg.get("subtitulos") or estilo.get("subtitulos", "una_palabra")
+    subs = None
+    if sub_id != "ninguno" and cfg.get("_palabras"):
+        emojis = None
+        if cfg.get("sub_emojis", True) and cfg.get("groq_key"):
+            try:  # emojis elegidos por la IA según el sentido de la frase
+                import clips_virales as cv
+                os.environ["GROQ_API_KEY"] = cfg["groq_key"]
+                previos = subtitulos.agrupar(cfg["_palabras"], dict(subtitulos.ESTILOS.get(sub_id, {})))
+                emojis = cv.emojis_para([" ".join(x["word"] for x in g["palabras"]) for g in previos], "pro")
+            except Exception as e:
+                print(f"[aviso] emojis por IA no disponibles ({e}); se usan los de palabras clave.", flush=True)
+        subs = subtitulos.Subtitulos(cfg["_palabras"], W, H, sub_id, cfg.get("sub_opciones") or {},
+                                     emojis=bool(cfg.get("sub_emojis", True)), emojis_por_sub=emojis)
+    cfg["_subs"] = subs
+    duracion = float(escenas[-1]["fin"])
+    musica = str(cfg.get("musica") or "auto")
+    archivo = cfg.get("musica_archivo") if musica == "archivo" else ""
+    ambiente = "" if musica in ("ninguna", "archivo") else (estilo.get("musica", "suave") if musica == "auto" else musica)
+    eventos = []
+    if cfg.get("efectos", True):
+        fx = estilo.get("sfx") or {}
+        vol = float(estilo.get("vol_efectos", 0.8))
+        if fx.get("inicio"):
+            eventos.append((0.05, fx["inicio"], vol))
+        for k, t in enumerate(montaje.tiempos_transicion(escenas)):
+            nombre = fx.get("fuerte") if fx.get("fuerte") and k % 3 == 2 else fx.get("transicion")
+            if nombre:
+                eventos.append((t, nombre, vol))
+        if fx.get("emoji") and subs is not None:
+            eventos += [(s_["inicio"], fx["emoji"], vol * 0.8) for s_ in subs.subs if s_.get("emoji")]
+    if not ambiente and not archivo and not eventos:
+        return cfg["audio"]
+    progreso(87, 3, "Mezclando voz, música y efectos...")
+    salida = os.path.splitext(cfg["salida"])[0] + "_mezcla.wav"
+    try:
+        audio_mix.mezclar(cfg["audio"], salida, ffmpeg, duracion, musica=archivo, ambiente_tipo=ambiente,
+                          vol_musica=float(cfg.get("vol_musica") or estilo.get("vol_musica", 0.22)),
+                          eventos=eventos, semilla=int(time.time()) % 1000)
+        cfg["_temporales"] = cfg.get("_temporales", []) + [salida]
+        return salida
+    except Exception as e:
+        print(f"[aviso] mezcla de audio falló ({e}); se usa solo la voz.", flush=True)
+        return cfg["audio"]
+
+
 def generar_imagenes(cfg):
     progreso(1, 1, "Cargando librerías de IA...")
     import torch
@@ -1626,6 +1703,16 @@ def generar_imagenes(cfg):
     carpeta_img = cfg.get("carpeta_imagenes") or os.path.dirname(cfg.get("salida") or ".")
     os.makedirs(carpeta_img, exist_ok=True)
 
+    estilo = None
+    if tarea in ("guion_video", "audio_imagenes"):
+        import estilos_video
+        estilo = estilos_video.resolver(cfg.get("estilo_video") or "viral")
+        if not str(cfg.get("prompt") or "").strip():
+            cfg["prompt"] = estilo["imagen"]  # el estilo visual decide cómo se ven las imágenes
+        else:
+            cfg["prompt"] = f"{cfg['prompt']}, {estilo['imagen']}"
+        if str(cfg.get("escena_seg") or "auto") in ("auto", "0"):
+            cfg["escena_seg"] = estilo["escena_seg"]
     escenas = None
     if tarea == "guion_video":
         textos = _partir_guion(cfg.get("guion"), cfg.get("escena_seg") or 5)
@@ -1670,6 +1757,7 @@ def generar_imagenes(cfg):
         emitir("resultado", archivo=imgs[0], imagenes=imgs, avisos=AVISOS)
         return
     fuentes = imgs
+    cfg["_imagenes"] = imgs
     if cfg.get("esrgan") and os.path.exists(cfg["esrgan"]):
         # Imágenes x2 con IA: el zoom sigue nítido en 1080p
         progreso(85, 3, "Mejorando las imágenes con IA (Real-ESRGAN)...")
@@ -1689,9 +1777,10 @@ def generar_imagenes(cfg):
             print(f"[aviso] Real-ESRGAN no disponible para las imágenes ({type(e).__name__}: {e})", flush=True)
     try:
         import montaje
-        progreso(88, 3, "Montando el video (movimiento suave y transiciones)...")
-        montaje.montar(fuentes, escenas, cfg["audio"], cfg["salida"], ffmpeg, _codificador(ffmpeg, 17), torch,
-                       fps=30, movimientos=cfg.get("_movimientos"),
+        audio_final = _audio_final(cfg, escenas, estilo, ffmpeg)
+        progreso(88, 3, "Montando el video (movimiento, transiciones y subtítulos)...")
+        montaje.montar(fuentes, escenas, audio_final, cfg["salida"], ffmpeg, _codificador(ffmpeg, 17), torch,
+                       fps=30, movimientos=cfg.get("_movimientos"), estilo=estilo, subtitulos=cfg.get("_subs"),
                        progreso=lambda f: progreso(88 + 10 * f, 3, f"Montando el video · {int(f * 100)}%"))
     except Exception as e:
         _liberar_vram(torch)
@@ -1703,6 +1792,11 @@ def generar_imagenes(cfg):
                 os.remove(ruta)
             except OSError:
                 pass
+    for ruta in cfg.get("_temporales", []):
+        try:
+            os.remove(ruta)
+        except OSError:
+            pass
     if tarea == "guion_video":  # la narración queda junto al video; los trozos se borran
         import shutil
         tmp = os.path.dirname(cfg["audio"])

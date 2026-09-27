@@ -476,3 +476,7 @@
     color: #fff;
     box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
 }
+
+/* Opciones del montaje (Guion a video / Audio a imágenes) */
+.etiqueta-montaje { font-size: 0.75rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 4px; }
+.panel-montaje label input[type="checkbox"] { accent-color: #2dd4bf; margin-right: 6px; }

@@ -8,6 +8,7 @@ numpy
 imageio-ffmpeg>=0.5
 moviepy>=2.0,<3
 opencv-python-headless>=4.8
+yt-dlp[default,deno]  # descargas de YouTube/TikTok (Deno: YouTube lo exige)
 # Motor de video
 diffusers>=0.40  # LTX-2.5 y MiniMax H3
 transformers>=5.0  # Gemma 4 (LTX-2.5) y Qwen3-VL (MiniMax H3)

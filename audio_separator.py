@@ -37,8 +37,23 @@ def _python_con_demucs():
                     return py
             except Exception:
                 continue
-        raise Exception("Demucs no está instalado. Ejecuta 'instalar_motor_video.bat' (instala Demucs "
-                        "junto al motor de IA) y vuelve a intentarlo.")
+        # Nadie lo tiene: se instala en el Python del motor (el que tiene torch), una sola vez
+        import dependencias
+        for py in dict.fromkeys(candidatos):
+            try:
+                if subprocess.run([py, "-c", "import torch"], capture_output=True, timeout=180,
+                                  creationflags=SIN_VENTANA).returncode != 0:
+                    continue
+            except Exception:
+                continue
+            if dependencias.instalar(["demucs", "soundfile"], python=py):
+                if subprocess.run([py, "-c", "import demucs"], capture_output=True, timeout=120,
+                                  creationflags=SIN_VENTANA).returncode == 0:
+                    _demucs_py = py
+                    return py
+            break
+        raise Exception("Demucs no está instalado y no se pudo instalar solo. Ejecuta 'instalar_motor_video.bat' "
+                        "(o 'bash runpod/instalar.sh' en RunPod) y vuelve a intentarlo.")
 
 
 def separate_music(source_path, output_dir, stems="2"):

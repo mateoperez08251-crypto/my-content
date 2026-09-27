@@ -22,6 +22,9 @@ if len(sys.argv) > 1 and sys.argv[1] in ("--run-editor", "--run-subidor", "--run
 # Modo servidor (RunPod / Linux sin pantalla): sin ventana ni bandeja, escucha en la red
 # y pide contraseña. Se activa con --servidor o CONTENTAPP_SERVIDOR=1.
 MODO_SERVIDOR = "--servidor" in sys.argv or os.environ.get("CONTENTAPP_SERVIDOR") == "1"
+if not getattr(sys, "frozen", False):
+    # Programas que pip deja junto a este Python (deno para yt-dlp, etc.) deben estar en el PATH
+    os.environ["PATH"] = os.path.dirname(os.path.abspath(sys.executable)) + os.pathsep + os.environ.get("PATH", "")
 if MODO_SERVIDOR:
     os.environ["CONTENTAPP_SERVIDOR"] = "1"
 
@@ -498,8 +501,8 @@ def show_notification(title, message):
 
 def channel_monitor_thread(data):
     global monitor_running
+    _asegurar_yt_dlp()
     import yt_downloader
-
     channels = [c.strip() for c in data.get('monitor_channels', '').split(',') if c.strip()]
     if not channels:
         log("No hay canales configurados para el monitor.")
@@ -695,6 +698,7 @@ def run_automation_thread(data):
 
     try:
         if video.startswith("http"):
+            _asegurar_yt_dlp()
             import yt_downloader
             log("Descargando video desde URL...")
             calidad = data.get('video_quality', '1440')
@@ -1259,12 +1263,19 @@ def get_preview_file():
     return resp
 
 
+def _asegurar_yt_dlp():
+    """yt-dlp (+ Deno, que YouTube ahora exige) se instala solo si falta (p. ej. en RunPod)."""
+    import dependencias
+    dependencias.asegurar("yt_dlp", ["yt-dlp[default,deno]"], avisar=log)
+
+
 @app.route("/api/extract_audio", methods=["POST"])
 def extract_audio_api():
     source = (request.get_json(silent=True) or {}).get("source")
     if not source:
         return jsonify({"success": False, "error": "Ruta o URL no proporcionada."})
     try:
+        _asegurar_yt_dlp()
         import audio_extractor
         result_path = audio_extractor.extract_audio(source, paths.data_path("downloads", "audio"))
         return jsonify({"success": True, "download_url": f"/api/download_audio?file={os.path.basename(result_path)}"})
@@ -1287,6 +1298,7 @@ def separate_audio_api():
     if not source:
         return jsonify({"success": False, "error": "Ruta o URL no proporcionada."})
     try:
+        _asegurar_yt_dlp()
         import audio_separator
         results = audio_separator.separate_music(source, paths.data_path("downloads", "separated"),
                                                  data.get("stems", "2"))
@@ -1358,6 +1370,7 @@ def run_smart_split_thread(data):
     try:
         source = data.get('source', '')
         if source.startswith("http"):
+            _asegurar_yt_dlp()
             import yt_downloader
             log("Descargando video para Smart Split...")
             dl_dir = data.get('custom_output_dir', '') or paths.data_path("videos_descargados")
@@ -1392,6 +1405,15 @@ def run_smart_split_thread(data):
             "titulo_en_video": bool(data.get('titulo_en_video', False)),
             "transcripcion": "local" if data.get('transcripcion') == "local" else "groq",
             "whisper_local": str(data.get('whisper_local', 'auto')),
+            "encuadre": str(data.get('encuadre', 'caras')),
+            "sub_opciones": {k: v for k, v in {
+                "fuente": data.get('sub_fuente') or None, "activo": data.get('sub_activo') or None,
+                "color": data.get('sub_color') or None,
+                "pos": float(data['sub_pos']) if str(data.get('sub_pos', '')).strip() else None,
+                "mayus": data.get('sub_mayus') if isinstance(data.get('sub_mayus'), bool) else None,
+            }.items() if v is not None},
+            "efectos": bool(data.get('efectos', True)),
+            "vol_musica": float(data.get('vol_musica', 0.2) or 0.2),
         }
         if cfg_datos["transcripcion"] == "local":
             # Whisper local corre con el Python del motor de video (torch + GPU)

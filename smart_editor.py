@@ -3,7 +3,7 @@ import sys
 import numpy as np
 # pyrefly: ignore [missing-import]
 import cv2
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import math
 
 # Se requiere moviepy 2.x (API subclipped/with_*).
@@ -12,7 +12,6 @@ from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenat
 import imageio_ffmpeg
 import subprocess
 import json
-import functools
 
 import paths
 
@@ -31,75 +30,14 @@ def _groq_key():
     return key
 
 
-@functools.lru_cache(maxsize=64)
-def _fuente(nombres, tam):
-    """Carga una fuente una sola vez (antes se cargaba en cada frame)."""
-    for n in nombres:
-        try:
-            return ImageFont.truetype(n, tam)
-        except OSError:
-            continue
-    try:
-        return ImageFont.load_default(size=tam)  # Pillow >= 10.1: fuente escalable
-    except TypeError:
-        return ImageFont.load_default()
-
-def _codigo_emoji(emoji):
-    cps = [f"{ord(c):x}" for c in emoji]
-    if "200d" not in cps:
-        cps = [c for c in cps if c != "fe0f"]
-    return "-".join(cps)
-
-
-@functools.lru_cache(maxsize=256)
-def _imagen_emoji(emoji, tam):
-    """Imagen RGBA del emoji (Twemoji, se descarga una vez y queda en caché)."""
-    from PIL import Image
-    emoji = (emoji or "").strip()
-    if not emoji:
-        return None
-    carpeta = os.path.join(paths.DATA_DIR, "emoji_cache")
-    os.makedirs(carpeta, exist_ok=True)
-    codigo = _codigo_emoji(emoji)
-    ruta = os.path.join(carpeta, codigo + ".png")
-    if not os.path.exists(ruta):
-        import requests
-        for base in ("https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/",
-                     "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/"):
-            try:
-                r = requests.get(base + codigo + ".png", timeout=10)
-                if r.status_code == 200 and r.content[:4] == b"\x89PNG":
-                    with open(ruta, "wb") as f:
-                        f.write(r.content)
-                    break
-            except requests.RequestException:
-                continue
-    if os.path.exists(ruta):
-        try:
-            return Image.open(ruta).convert("RGBA").resize((tam, tam), Image.LANCZOS)
-        except Exception:
-            pass
-    # Respaldo: fuente de emojis a color (Windows) dibujada a tamaño fijo y escalada
-    try:
-        fuente = ImageFont.truetype("seguiemj.ttf", 109)
-        lienzo = Image.new("RGBA", (140, 140), (0, 0, 0, 0))
-        ImageDraw.Draw(lienzo).text((10, 5), emoji, font=fuente, embedded_color=True)
-        caja = lienzo.getbbox()
-        if caja:
-            return lienzo.crop(caja).resize((tam, tam), Image.LANCZOS)
-    except Exception:
-        pass
-    return None
-
-
 def _ajustar_titulo(draw, texto, ancho_max, tam_inicial):
     """Devuelve (líneas, fuente) para que el título quepa: primero reduce la letra; si
     sigue sin caber, lo parte en dos líneas."""
-    fuentes = ("impact.ttf", "arialbd.ttf")
+    import subtitulos
     palabras = texto.split()
     tam = tam_inicial
     while tam >= 20:
-        fuente = _fuente(fuentes, tam)
+        fuente = subtitulos.fuente("montserrat", tam)
         ancho = lambda t: draw.textbbox((0, 0), t, font=fuente)[2]
         if ancho(texto) <= ancho_max:
             return [texto], fuente
@@ -113,27 +51,105 @@ def _ajustar_titulo(draw, texto, ancho_max, tam_inicial):
             if mejor[0] <= ancho_max and tam >= tam_inicial * 0.7:
                 return mejor[1], fuente
         tam -= 4
-    return [texto], _fuente(fuentes, 20)
+    return [texto], subtitulos.fuente("montserrat", 20)
 
 
-def group_words_into_phrases(words, max_words=5):
-    phrases = []
-    current_phrase = []
-    for w in words:
-        current_phrase.append(w)
-        if len(current_phrase) >= max_words:
-            phrases.append(current_phrase)
-            current_phrase = []
-    if current_phrase:
-        phrases.append(current_phrase)
-    return phrases
+# Estilos antiguos (style1..8) -> motor nuevo de subtítulos
+ESTILOS_ANTIGUOS = {
+    "style1": ("una_palabra", {"activo": "#22D3EE"}), "style2": ("caja_frase", {}), "style3": ("pop_art", {}),
+    "style4": ("karaoke", {"color": "#A3A3A3", "activo": "#FFFFFF"}), "style5": ("una_palabra", {"activo": "#FFE600"}),
+    "style6": ("resaltador", {"caja_activa": "#DC2626"}), "style7": ("una_palabra", {"activo": "#FF2D2D"}),
+    "style8": ("pop_art", {"alternos": ["#FF2D2D", "#FFFFFF"]}),
+}
+ENCUADRES = ("caras", "difuminado", "dividido", "zoom_dinamico")
 
-def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, clip_et=0.0, subtitle_scale=100, subtitle_style="style5", show_progress_bar=True):
-    pil_img = Image.fromarray(frame)
-    draw = ImageDraw.Draw(pil_img)
-    
-    # Dibujar titulo corto arriba (se ajusta al ancho: 1 o 2 líneas, nunca se sale)
+
+def _crear_subs(palabras, w, h, estilo, escala, opciones, emojis, motor_ia):
+    import subtitulos
+    import clips_virales as cv
+    extra = {}
+    if estilo in ESTILOS_ANTIGUOS:
+        estilo, extra = ESTILOS_ANTIGUOS[estilo]
+    ops = {**extra, **(opciones or {}), "escala": float(escala or 100) / 100.0 * float((opciones or {}).get("escala", 1.0))}
+    subs = subtitulos.Subtitulos(palabras, w, h, estilo, ops, emojis=False)
+    if emojis and subs.subs:
+        try:
+            lista = cv.emojis_para([" ".join(x["word"] for x in g["palabras"]) for g in subs.subs], motor_ia)
+        except Exception:
+            lista = []
+        ultimo = -3
+        for i, g in enumerate(subs.subs):
+            e = (lista[i] if i < len(lista) else "") or subtitulos.emoji_para(" ".join(x["word"] for x in g["palabras"]))
+            if e and i - ultimo >= 2:
+                g["emoji"] = e
+                ultimo = i
+    return subs
+
+
+def _pulsos_zoom(subs):
+    """Momentos de 'zoom dinámico': cada 4 subtítulos o donde hay emoji."""
+    return [(g["inicio"], g["fin"]) for i, g in enumerate(subs.subs) if i % 4 == 0 or g.get("emoji")]
+
+
+def _zoom_en(pulsos, t, fuerza=0.12):
+    z = 0.0
+    for a, b in pulsos:
+        if t < a - 0.05 or t > b + 0.5:
+            continue
+        sube = min(1.0, max(0.0, (t - a) / 0.22))
+        baja = 1.0 if t <= b else max(0.0, 1 - (t - b) / 0.45)
+        e = min(sube, baja)
+        z = max(z, 0.5 - 0.5 * math.cos(math.pi * e))
+    return 1 + fuerza * z
+
+
+def _encuadrar(frame, modo, cx, fixed_crop_w, final_w, final_h, zoom=1.0):
+    """Cuadro vertical 1080x1920 según el encuadre elegido."""
+    orig_h, orig_w = frame.shape[:2]
+    if modo == "difuminado":  # video completo al centro y el mismo video difuminado de fondo
+        esc = max(final_w / orig_w, final_h / orig_h)
+        pw, ph = max(2, int(orig_w * esc / 8)), max(2, int(orig_h * esc / 8))
+        peq = cv2.resize(frame, (pw, ph), interpolation=cv2.INTER_AREA)
+        x0, y0 = (pw - final_w // 8) // 2, (ph - final_h // 8) // 2
+        peq = peq[max(0, y0):max(0, y0) + final_h // 8, max(0, x0):max(0, x0) + final_w // 8]
+        fondo = cv2.GaussianBlur(peq, (0, 0), 6)
+        fondo = cv2.resize(fondo, (final_w, final_h), interpolation=cv2.INTER_LINEAR)
+        fondo = (fondo.astype(np.float32) * 0.55).astype(np.uint8)
+        fw = final_w
+        fh = int(round(orig_h * final_w / orig_w))
+        if fh > final_h:
+            fh, fw = final_h, int(round(orig_w * final_h / orig_h))
+        frente = cv2.resize(frame, (fw, fh), interpolation=cv2.INTER_AREA)
+        y = int((final_h - fh) * 0.42)
+        x = (final_w - fw) // 2
+        fondo[y:y + fh, x:x + fw] = frente
+        return fondo
+    if modo == "dividido":  # dos personas: izquierda arriba, derecha abajo
+        mitad_h = final_h // 2
+        cw = min(orig_w, int(orig_h * final_w / mitad_h))
+        partes = []
+        for centro in (0.27, 0.73):
+            x1 = int(round(orig_w * centro - cw / 2))
+            x1 = max(0, min(x1, orig_w - cw))
+            partes.append(cv2.resize(frame[:, x1:x1 + cw], (final_w, mitad_h), interpolation=cv2.INTER_AREA))
+        salida = np.vstack(partes)
+        salida[mitad_h - 3:mitad_h + 3] = (15, 15, 20)
+        return salida
+    cw, ch = fixed_crop_w / zoom, orig_h / zoom
+    x1 = int(round(cx - cw / 2))
+    x1 = max(0, min(x1, orig_w - int(cw)))
+    y1 = int(round(orig_h * 0.42 - ch / 2)) if zoom > 1.0 else 0  # al hacer zoom, más cerca de la cara
+    y1 = max(0, min(y1, orig_h - int(ch)))
+    recorte = frame[y1:y1 + int(ch), x1:x1 + int(cw)]
+    return cv2.resize(recorte, (final_w, final_h), interpolation=cv2.INTER_AREA if zoom <= 1.0 else cv2.INTER_CUBIC)
+
+
+def _componer(frame, t, subs, gen_title, clip_st, clip_et, w, h, show_progress_bar):
+    """Título (opcional), subtítulos del motor nuevo y barra de progreso."""
+    import subtitulos
     if gen_title:
+        pil_img = Image.fromarray(frame)
+        draw = ImageDraw.Draw(pil_img)
         lineas, title_font = _ajustar_titulo(draw, gen_title, int(w * 0.84), int(h * 0.034))
         t_stroke = max(2, int(title_font.size * 0.1)) if hasattr(title_font, "size") else 3
         ty = int(h * 0.12)
@@ -143,137 +159,20 @@ def draw_text_tiktok_style(frame, phrases, t, w, h, gen_title="", clip_st=0.0, c
             draw.text((tx, ty), linea, font=title_font, fill=(0, 255, 255, 255),
                       stroke_width=t_stroke, stroke_fill=(0, 0, 0, 255))
             ty += int((bbox[3] - bbox[1]) * 1.15)
-
-    # Encontrar la frase actual
-    current_phrase = None
-    for phrase in phrases:
-        if phrase[0]["start"] - 0.5 <= t <= phrase[-1]["end"] + 0.5:
-            current_phrase = phrase
-            break
-            
-    if not current_phrase:
-        return np.array(pil_img)
-        
-    # Aplicar la escala enviada por el usuario (por defecto 100%)
-    scale_multiplier = subtitle_scale / 100.0
-    font_size = int(h * 0.045 * scale_multiplier)
-    
-    font_name = "arialbd.ttf"
-    if subtitle_style in ["style3", "style8"]:
-        font_name = "impact.ttf"
-        
-    fuentes = (font_name, "impact.ttf" if font_name == "arialbd.ttf" else "arialbd.ttf")
-    font = _fuente(fuentes, font_size)
-            
-    # Calcular ancho total de la frase (MAYUSCULAS)
-    texts = [w["word"].upper() for w in current_phrase]
-    full_text = " ".join(texts)
-    
-    # Anti-desbordamiento (Asegurar que el texto no se salga de la pantalla)
-    max_w = int(w * 0.95)
-    while font_size > 15:
-        try:
-            bbox = draw.textbbox((0, 0), full_text, font=font)
-            total_w = bbox[2] - bbox[0]
-            text_h = bbox[3] - bbox[1]
-        except AttributeError:
-            total_w, text_h = draw.textsize(full_text, font=font)
-            
-        if total_w <= max_w:
-            break
-            
-        font_size -= 2
-        font = _fuente(fuentes, font_size)
-        try:
-            bbox = draw.textbbox((0, 0), full_text, font=font)
-            total_w = bbox[2] - bbox[0]
-            text_h = bbox[3] - bbox[1]
-        except AttributeError:
-            total_w, text_h = draw.textsize(full_text, font=font)
-        
-    start_x = (w - total_w) / 2
-    # Subtítulos en la parte inferior (80% de la altura)
-    y = int(h * 0.8)
-    
-    current_x = start_x
-    stroke_width = max(2, int(font_size * 0.1))
-    
-    for word_obj in current_phrase:
-        word = word_obj["word"].upper()
-        # Determinar si es la palabra activa
-        is_active = word_obj["start"] <= t <= word_obj["end"]
-        
-        base_color = (255, 255, 255, 255)
-        active_color = (255, 255, 0, 255)
-        bg_box_color = None
-        current_stroke = stroke_width
-        
-        if subtitle_style == "style1":
-            active_color = (0, 255, 255, 255)
-        elif subtitle_style == "style2":
-            active_color = (255, 255, 255, 255)
-        elif subtitle_style == "style3":
-            active_color = (255, 255, 255, 255)
-            current_stroke = max(3, int(font_size * 0.15))
-        elif subtitle_style == "style4":
-            base_color = (150, 150, 150, 200)
-            active_color = (255, 255, 255, 255)
-        elif subtitle_style == "style6":
-            active_color = (255, 255, 255, 255)
-            bg_box_color = (200, 0, 0, 255)
-        elif subtitle_style in ["style7", "style8"]:
-            active_color = (255, 0, 0, 255)
-            
-        color = active_color if is_active else base_color
-        
-        try:
-            w_bbox = draw.textbbox((0, 0), word + "  ", font=font)
-            word_w = w_bbox[2] - w_bbox[0]
-            word_h = w_bbox[3] - w_bbox[1]
-        except AttributeError:
-            word_w, word_h = draw.textsize(word + "  ", font=font)
-            word_h = font_size
-            
-        if is_active and bg_box_color:
-            padding = int(font_size * 0.1)
-            draw.rectangle([current_x - padding, y - padding, current_x + word_w - padding * 2, y + word_h + padding], fill=bg_box_color)
-            
-        # Dibujar sombra/borde negro
-        try:
-            draw.text((current_x, y), word, font=font, fill=color, stroke_width=current_stroke, stroke_fill=(0,0,0,255))
-        except:
-            # Fallback para Pillow antiguo
-            for dx in [-current_stroke, 0, current_stroke]:
-                for dy in [-current_stroke, 0, current_stroke]:
-                    if dx != 0 or dy != 0:
-                        draw.text((current_x + dx, y + dy), word, font=font, fill=(0,0,0,255))
-            draw.text((current_x, y), word, font=font, fill=color)
-            
-        current_x += word_w
-        
-    # Dibujar emoji arriba de la frase (imagen Twemoji: la fuente de emojis de Windows
-    # no se pinta en color con Pillow y antes el emoji no aparecía)
-    if current_phrase[0].get("emoji"):
-        tam = int(h * 0.075)
-        img_emoji = _imagen_emoji(current_phrase[0]["emoji"], tam)
-        if img_emoji is not None:
-            ex = int((w - img_emoji.width) / 2)
-            ey = max(0, y - int(h * 0.02) - img_emoji.height)
-            pil_img.paste(img_emoji, (ex, ey), img_emoji)
-
-    # Dibujar barra de progreso en la parte inferior si está habilitada
-    frame_cv = np.array(pil_img)
+        frame = np.array(pil_img)
+    else:
+        frame = np.ascontiguousarray(frame)
+    r = subs.en(t) if subs is not None else None
+    if r is not None:
+        frame = subtitulos.pegar_numpy(frame, *r)
     if show_progress_bar and clip_et > clip_st:
-        import cv2
-        progress = (t - clip_st) / (clip_et - clip_st)
-        progress = max(0.0, min(1.0, progress))
+        progress = max(0.0, min(1.0, (t - clip_st) / (clip_et - clip_st)))
         bar_h = int(h * 0.008)
         bar_y = h - bar_h - int(h * 0.02)
-        bar_w = int(w * progress)
-        cv2.rectangle(frame_cv, (0, bar_y), (w, bar_y + bar_h), (50, 50, 50), -1)
-        cv2.rectangle(frame_cv, (0, bar_y), (bar_w, bar_y + bar_h), (255, 255, 0), -1)
-        
-    return frame_cv
+        cv2.rectangle(frame, (0, bar_y), (w, bar_y + bar_h), (50, 50, 50), -1)
+        cv2.rectangle(frame, (0, bar_y), (int(w * progress), bar_y + bar_h), (255, 214, 10), -1)
+    return frame
+
 
 def write_progress(msg, percent=0):
     try:
@@ -298,10 +197,10 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         subtitle_scale=100, subtitle_style="style5", anti_copyright_filter=True,
                         anti_copyright_audio=True, bg_music="", show_progress_bar=True,
                         motor_ia="pro", emojis=True, meta_salida=None, titulo_en_video=False,
-                        transcripcion="groq", whisper_local="auto", python_motor="", script_local=""):
+                        transcripcion="groq", whisper_local="auto", python_motor="", script_local="",
+                        encuadre="caras", sub_opciones=None, efectos=True, vol_musica=0.2):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
-    import json
     import re
     import clips_virales as cv
     import reencuadre
@@ -323,7 +222,6 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             "Transcribiendo en tu GPU (Whisper local)..." if local else f"Transcribiendo audio ({n + 1}/{total})...",
             8 + int(12 * n / max(total, 1))),
         proveedor=transcripcion, python_local=python_motor, script_local=script_local, modelo_local=whisper_local)
-    phrases = group_words_into_phrases(words, max_words=3)  # subtítulos de 3 palabras
     print("Transcripción completada. Total palabras:", len(words))
 
     clip = VideoFileClip(video_path)
@@ -353,9 +251,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         if os.path.exists(dummy_audio_path):
             _dc = AudioFileClip(dummy_audio_path)
             base_dummy_clip = _dc.with_volume_scaled(0.005)
-    base_bg_clip = None
-    if bg_music and os.path.exists(bg_music):
-        base_bg_clip = AudioFileClip(bg_music).with_volume_scaled(0.1)
+    # la música se mezcla al final con ffmpeg (baja sola cuando hablan)
+    encuadre = encuadre if encuadre in ENCUADRES else "caras"
 
     palabras_abs = [{"start": w["start"] + base, "end": w["end"] + base} for w in words]
 
@@ -369,7 +266,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
         # 3. Reencuadre: caras + hablante activo, anticipándose a quien va a hablar
         write_progress(f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0)
-        if fixed_crop_w < orig_w:
+        if fixed_crop_w < orig_w and encuadre in ("caras", "zoom_dinamico"):
             tiempos, centros = reencuadre.calcular_trayectoria(
                 video_path, base + st, base + et, fixed_crop_w, palabras_abs, motor["reencuadre"],
                 progreso=lambda f, p0=p0, tramo=tramo: write_progress(
@@ -377,38 +274,32 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         else:
             tiempos, centros = [0.0], [orig_w / 2]
 
-        # 4. Emojis por frase (imágenes, no fuente)
-        clip_phrases = [ph for ph in phrases if ph[0]["start"] >= st - 0.5 and ph[-1]["end"] <= et + 0.5]
-        for ph in clip_phrases:
-            ph[0].pop("emoji", None)
-        if emojis and clip_phrases:
-            lista = cv.emojis_para([" ".join(w["word"] for w in ph) for ph in clip_phrases], motor_ia)
-            for ph, e in zip(clip_phrases, lista):
-                if e:
-                    ph[0]["emoji"] = e
+        # 4. Subtítulos (motor nuevo) con emojis elegidos por la IA
+        palabras_clip = [w for w in words if w["start"] >= st - 0.3 and w["end"] <= et + 0.3]
+        subs = _crear_subs(palabras_clip, final_w, final_h, subtitle_style, subtitle_scale, sub_opciones,
+                           emojis, motor_ia)
+        pulsos = _pulsos_zoom(subs) if encuadre == "zoom_dinamico" else []
 
         write_progress(f"Renderizando clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.35))
         subclip = clip.subclipped(st, et)
 
-        def process_frame(get_frame, t, st=st, et=et, tiempos=tiempos, centros=centros, gen_title=gen_title):
+        def process_frame(get_frame, t, st=st, et=et, tiempos=tiempos, centros=centros, gen_title=gen_title,
+                          subs=subs, pulsos=pulsos):
             frame = get_frame(t)
             cx = reencuadre.centro_en(tiempos, centros, t)
-            x1 = int(round(cx - fixed_crop_w / 2))
-            x1 = max(0, min(x1, orig_w - fixed_crop_w))
-            recorte = frame[0:orig_h, x1:x1 + fixed_crop_w]
-            recorte = cv2.resize(recorte, (final_w, final_h), interpolation=cv2.INTER_AREA)
+            zoom = _zoom_en(pulsos, st + t) if pulsos else 1.0
+            recorte = _encuadrar(frame, encuadre, cx, fixed_crop_w, final_w, final_h, zoom)
             if anti_copyright_filter:
                 recorte = cv2.convertScaleAbs(recorte, alpha=1.01, beta=1)
                 f32 = recorte.astype(np.float32)
                 f32[:, :, 0] += 1.0
                 f32[:, :, 2] += 0.5
                 recorte = np.clip(f32, 0, 255).astype(np.uint8)
-            return draw_text_tiktok_style(recorte, phrases, st + t, final_w, final_h, gen_title, st, et,
-                                          subtitle_scale, subtitle_style, show_progress_bar)
+            return _componer(recorte, st + t, subs, gen_title, st, et, final_w, final_h, show_progress_bar)
 
         processed_clip = subclip.transform(process_frame)
         final_audio = subclip.audio
-        for extra, vol in ((base_dummy_clip, None), (base_bg_clip, None)):
+        for extra in (base_dummy_clip,):
             if extra is not None and final_audio is not None:
                 try:
                     vueltas = math.ceil(subclip.duration / extra.duration)
@@ -436,6 +327,15 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
         processed_clip.write_videofile(out_name, audio_codec="aac", threads=max(2, os.cpu_count() or 2),
                                        logger=None, **opciones)
+        eventos = [(g["inicio"] - st, "pop", 0.6) for g in subs.subs if g.get("emoji")] if efectos else []
+        if (bg_music and os.path.exists(bg_music)) or eventos:
+            write_progress(f"Mezclando música y efectos · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.95))
+            try:
+                import audio_mix
+                _mezclar_en_video(out_name, bg_music if bg_music and os.path.exists(bg_music) else "", vol_musica,
+                                  eventos, subclip.duration, audio_mix)
+            except Exception as e:
+                print(f"Aviso: no se pudo mezclar la música ({e}); el clip queda con su audio original.")
         generated_files.append(out_name)
 
         # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
@@ -452,7 +352,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                 "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et})
         # processed_clip/subclip comparten el lector del clip padre: no se cierran aquí.
 
-    for c in (base_dummy_clip, base_bg_clip, clip):
+    for c in (base_dummy_clip, clip):
         try:
             if c is not None:
                 c.close()
@@ -461,6 +361,25 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     write_progress("¡Proceso finalizado con éxito!", 100)
     print("¡Proceso finalizado!")
     return generated_files
+
+
+def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
+    """Música que baja sola cuando hablan + efectos, normalizado a -14 LUFS; el video no se recodifica."""
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    base = os.path.splitext(video)[0]
+    mezcla = base + "_mezcla.wav"
+    audio_mix.mezclar(video, mezcla, ffmpeg, duracion, musica=musica, vol_musica=float(vol or 0.2), eventos=eventos)
+    tmp = base + "_tmp.mp4"
+    r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", video, "-i", mezcla, "-map", "0:v:0", "-map", "1:a:0",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", tmp],
+                       capture_output=True, text=True, creationflags=SIN_VENTANA)
+    try:
+        os.remove(mezcla)
+    except OSError:
+        pass
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr[:200])
+    os.replace(tmp, video)
 
 
 def main(argv):
@@ -478,7 +397,9 @@ def main(argv):
                 cfg.get("bg_music", ""), cfg.get("show_progress_bar", True),
                 cfg.get("motor_ia", "pro"), cfg.get("emojis", True), meta,
                 cfg.get("titulo_en_video", False), cfg.get("transcripcion", "groq"),
-                cfg.get("whisper_local", "auto"), cfg.get("python_motor", ""), cfg.get("script_local", ""))
+                cfg.get("whisper_local", "auto"), cfg.get("python_motor", ""), cfg.get("script_local", ""),
+                cfg.get("encuadre", "caras"), cfg.get("sub_opciones") or {}, cfg.get("efectos", True),
+                cfg.get("vol_musica", 0.2))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)

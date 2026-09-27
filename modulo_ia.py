@@ -1345,6 +1345,56 @@ def voces_guion():
                                   "transcripcion": bool(v.get("transcripcion"))} for v in clonadas]})
 
 
+MUESTRA_VOZ = "Hola, así suena mi voz. Con ella voy a narrar la historia de tu video."
+
+
+@ia_bp.route('/muestra_voz', methods=['GET'])
+def muestra_voz():
+    """Audio corto para escuchar una voz antes de usarla. Las clonadas: su grabación.
+    Las de la lista: se crean una vez con VoxCPM2 y quedan guardadas."""
+    from flask import send_file
+    voz = str(request.args.get("voz", ""))
+    tipo, _, id_ = voz.partition(":")
+    if tipo == "clon":
+        ac, _ = _voces_clonadas()
+        ruta = (ac.DIR_VOCES / os.path.basename(id_) / "referencia.wav") if ac else None
+        if not ruta or not ruta.is_file():
+            return jsonify({"success": False, "error": "Esa voz clonada ya no existe."}), 404
+        return send_file(str(ruta), mimetype="audio/wav")
+    preset = next((v for v in VOCES_PRESET if v["id"] == id_), None)
+    if not preset:
+        return jsonify({"success": False, "error": "Voz desconocida."}), 404
+    carpeta = paths.data_path("voces_muestra")
+    os.makedirs(carpeta, exist_ok=True)
+    ruta = os.path.join(carpeta, f"{preset['id']}.wav")
+    if not os.path.exists(ruta):
+        m = _modelo("voxcpm2")
+        if not m or not _instalado(m):
+            return jsonify({"success": False, "error": "Descarga 'VoxCPM2' en el Gestor para escuchar las voces."}), 400
+        motor = _motor()
+        if not motor.get("listo") or not motor.get("python_cmd"):
+            return jsonify({"success": False, "error": "El motor de la GPU no está listo todavía."}), 400
+        if not _gpu_lock.acquire(blocking=False):
+            return jsonify({"success": False, "error": "La GPU está generando un video: escucha la voz al terminar."}), 409
+        try:
+            trabajo = os.path.join(paths.TEMP_DIR, f"muestra_{preset['id']}.json")
+            with open(trabajo, "w", encoding="utf-8") as f:
+                json.dump({"modelo": _carpeta_modelo(m), "bloques": [MUESTRA_VOZ], "salidas": [ruta + ".part.wav"],
+                           "diseno": preset["diseno"], "semilla": 7, "pasos": 10}, f, ensure_ascii=False)
+            worker = os.path.join(os.path.dirname(motor["worker"]), "tts_worker.py")
+            r = subprocess.run([motor["python_cmd"], worker, trabajo], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=600, creationflags=SIN_VENTANA,
+                               env=dict(os.environ, TQDM_DISABLE="1"))
+            if r.returncode != 0 or not os.path.exists(ruta + ".part.wav"):
+                ultimo = [l for l in (r.stdout or "").splitlines() if '"error"' in l]
+                return jsonify({"success": False, "error": "No se pudo crear la muestra: " +
+                                (ultimo[-1] if ultimo else (r.stdout or r.stderr or "")[-200:])}), 500
+            os.replace(ruta + ".part.wav", ruta)
+        finally:
+            _gpu_lock.release()
+    return send_file(ruta, mimetype="audio/wav")
+
+
 def _cfg_voz(voz):
     """'preset:<id>' o 'clon:<id>' -> campos de voz para el motor."""
     tipo, _, id_ = str(voz or "preset:narrador_documental").partition(":")
@@ -1361,6 +1411,51 @@ def _cfg_voz(voz):
         return {"voz_ref": str(ref), "voz_ref_texto": texto or ""}
     preset = next((v for v in VOCES_PRESET if v["id"] == id_), VOCES_PRESET[0])
     return {"voz_diseno": preset["diseno"]}
+
+
+@ia_bp.route('/opciones_video', methods=['GET'])
+def opciones_video():
+    """Estilos de video, estilos de subtítulos, fuentes y ambientes musicales para la interfaz."""
+    import estilos_video
+    import subtitulos
+    import audio_mix
+    return jsonify({"success": True, "estilos": estilos_video.lista(), "subtitulos": subtitulos.lista_estilos(),
+                    "fuentes": subtitulos.lista_fuentes(), "musicas": list(audio_mix.AMBIENTES.keys())})
+
+
+def _opciones_montaje(data):
+    """Opciones del montaje (estilo, subtítulos, música, efectos) que manda la interfaz."""
+    def num(clave, defecto=None):
+        try:
+            return float(data.get(clave))
+        except (TypeError, ValueError):
+            return defecto
+    opciones = {}
+    for clave in ("fuente", "color", "activo", "contorno", "caja"):
+        v = str(data.get("sub_" + clave, "")).strip()
+        if v:
+            opciones[clave] = v
+    if num("sub_pos") is not None:
+        opciones["pos"] = max(0.08, min(0.92, num("sub_pos")))
+    if num("sub_escala") is not None:
+        opciones["escala"] = max(0.5, min(2.0, num("sub_escala")))
+    if str(data.get("sub_mayus", "")) in ("true", "false"):
+        opciones["mayus"] = data.get("sub_mayus") == "true"
+    cfg = {
+        "estilo_video": str(data.get("estilo_video", "viral")),
+        "subtitulos": str(data.get("subtitulos", "")) or None,
+        "sub_opciones": opciones,
+        "sub_emojis": str(data.get("sub_emojis", "true")) != "false",
+        "musica": str(data.get("musica", "auto")),
+        "efectos": str(data.get("efectos", "true")) != "false",
+        "texto_en_imagen": str(data.get("texto_en_imagen", "true")) != "false",
+    }
+    if num("vol_musica") is not None:
+        cfg["vol_musica"] = max(0.0, min(1.0, num("vol_musica")))
+    if request.files.get("musica_archivo"):
+        cfg["musica_archivo"] = _guardar_upload(request.files["musica_archivo"], "audio")
+        cfg["musica"] = "archivo"
+    return cfg
 
 
 def _rutas_mejora():
@@ -1449,7 +1544,11 @@ def generar_imagenes():
             return jsonify({"success": False, "error": "Para narrar descarga 'VoxCPM2' en el Gestor de Modelos "
                                                        "(o en el Clonador de voz → Modelos)."}), 400
         try:
-            voz = _cfg_voz(data.get("voz"))
+            voz_pedida = data.get("voz")
+            if not voz_pedida or voz_pedida == "auto":  # la voz que va con el estilo del video
+                import estilos_video
+                voz_pedida = "preset:" + estilos_video.resolver(str(data.get("estilo_video", "viral")))["voz"]
+            voz = _cfg_voz(voz_pedida)
         except ValueError as e:
             return jsonify({"success": False, "error": str(e)}), 400
         voz["carpeta_voz"] = _carpeta_modelo(mv)
@@ -1483,9 +1582,9 @@ def generar_imagenes():
         task_id = uuid.uuid4().hex[:12]
         audio = _guardar_upload(request.files["audio"], "audio") if modo == "audio_imagenes" else ""
         try:
-            escena = float(data.get("escena_seg", 5))
+            escena = float(data.get("escena_seg", 0)) or "auto"
         except (TypeError, ValueError):
-            escena = 5.0
+            escena = "auto"  # la que va con el estilo
         cfg = {
             "tarea": modo, "motor": m["motor"], "carpeta_modelo": _carpeta_modelo(m), "prompt": prompt,
             "formato": str(data.get("formato", "vertical")), "velocidad": str(data.get("velocidad", "calidad")),
@@ -1493,6 +1592,7 @@ def generar_imagenes():
             "transcripcion": transcripcion, "whisper_local": whisper, "idioma": str(data.get("idioma", "es")),
             "groq_key": groq_key, "carpeta_imagenes": ASSETS_DIR, "salida": _salida_video(task_id),
             "ffmpeg": _ffmpeg(), "guion": guion, **voz, **_rutas_mejora(),
+            **(_opciones_montaje(data) if modo != "imagen" else {}),
         }
         _lanzar_tarea(task_id, m, motor, cfg)
     except Exception as e:
