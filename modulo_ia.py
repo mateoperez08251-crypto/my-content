@@ -779,16 +779,17 @@ def _detectar_motor():
         info["python_cmd"] = py
         info["worker"] = worker
         listo = bool(info.get("torch") and info.get("diffusers") and not info.get("error"))
-        info["listo"] = listo and info.get("cuda")
+        info["listo"] = listo and info.get("cuda") and info.get("kernels_ok", True)
         if info["listo"]:
             mejor = info
             break
-        if listo and mejor is None:
-            mejor = info  # tiene librerías pero sin GPU
+        if (listo or (info.get("torch") and info.get("error"))) and mejor is None:
+            mejor = info  # tiene librerías pero sin GPU, o PyTorch no funciona con la GPU
     with _motor_lock:
         if mejor:
             _motor_info.clear()
-            _motor_info.update(mejor, estado="listo" if mejor.get("listo") else "sin_gpu")
+            estado = "listo" if mejor.get("listo") else ("error" if mejor.get("error") else "sin_gpu")
+            _motor_info.update(mejor, estado=estado)
         else:
             _motor_info.clear()
             _motor_info.update(estado="no_instalado")
@@ -887,8 +888,7 @@ def _ejecutar_worker(task_id, motor, cfg_path):
                 else:
                     texto = " ".join(ultimas).lower()
                     if "memory allocation" in texto or "memoryerror" in texto or codigo in (3221226505, 3221225495):
-                        msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Cierra otros programas, "
-                               "vuelve a ejecutar 'instalar_motor_video.bat' (activa el modo de bajo consumo) "
+                        msg = ("Tu PC se quedó sin memoria RAM al cargar el modelo. Cierra otros programas "
                                "y aumenta la memoria virtual de Windows a 32 GB o más.")
                     elif codigo == 3221225477:
                         msg = "El motor de video falló (acceso a memoria). Actualiza los drivers de NVIDIA y reintenta."
@@ -927,6 +927,9 @@ def generar_video():
     if motor.get("estado") == "no_instalado":
         return jsonify({"success": False, "error": "Falta el motor de video (Python con torch + diffusers). "
                                                     "Ejecuta 'instalar_motor_video.bat' en la carpeta de la app y reinicia."}), 400
+    if motor.get("estado") == "error":
+        return jsonify({"success": False, "error": f"El motor de video no funciona con tu GPU: {motor.get('error')}. "
+                                                    "Vuelve a ejecutar 'instalar_motor_video.bat'."}), 400
     if motor.get("estado") == "sin_gpu":
         return jsonify({"success": False, "error": "El motor está instalado pero no ve una GPU NVIDIA con CUDA. "
                                                     "Actualiza los drivers de NVIDIA o reinstala el motor."}), 400

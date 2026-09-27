@@ -98,6 +98,7 @@ copy /y "generate_prompt_variation.py" "%DIST%\" >nul 2>&1
 copy /y "video_worker.py" "%DIST%\" >nul 2>&1
 copy /y "clips_virales.py" "%DIST%\" >nul 2>&1
 copy /y "reencuadre.py" "%DIST%\" >nul 2>&1
+copy /y "gpu_video.py" "%DIST%\" >nul 2>&1
 copy /y "instalar_motor_video.bat" "%DIST%\" >nul 2>&1
 
 :: ConfiguraciÃ³n y datos

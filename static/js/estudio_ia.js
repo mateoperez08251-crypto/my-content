@@ -845,7 +845,11 @@ window.comprobarMotorVideo = function (refrescar) {
             } else if (m.estado === 'listo') {
                 box.innerHTML = `<span style="color:#2dcc70; font-weight:bold;">● Listo</span><br>` +
                     `${escEstudio(m.gpu)} · ${escEstudio(m.vram_gb)} GB VRAM<br>` +
+                    (m.formato ? `<span style="opacity:0.7">Arquitectura ${escEstudio(m.arquitectura)} · formato ${escEstudio(m.formato)}</span><br>` : '') +
                     `<span style="opacity:0.7">RAM libre: ${escEstudio(m.ram_libre_gb)} GB</span>`;
+            } else if (m.error && m.torch) {
+                box.innerHTML = `<span style="color:#ff4d5f; font-weight:bold;">● Error del motor</span><br>${escEstudio(m.error)}<br>` +
+                    `Vuelve a ejecutar <b>instalar_motor_video.bat</b>.`;
             } else if (m.estado === 'sin_gpu') {
                 box.innerHTML = `<span style="color:#fbbf24; font-weight:bold;">● Sin GPU CUDA</span><br>` +
                     `El motor está instalado pero no ve una GPU NVIDIA. Actualiza los drivers.`;
