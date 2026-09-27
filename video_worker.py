@@ -80,6 +80,14 @@ MODELOS = {
 }
 COMPONENTES_TEXTO = ("text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2")
 
+# Velocidad: menos pasos + First Block Cache (si el primer bloque del transformer apenas
+# cambia entre pasos, se reutiliza el resultado anterior y se salta el resto del modelo).
+VELOCIDADES = {
+    "calidad": {"pasos": 1.0, "cache": 0.0},
+    "rapido": {"pasos": 0.8, "cache": 0.05},
+    "turbo": {"pasos": 0.6, "cache": 0.1},
+}
+
 
 def memoria_libre_gb():
     """Memoria que se puede reservar ahora (RAM libre + archivo de paginación en Windows)."""
@@ -465,6 +473,19 @@ def _codificador(ffmpeg, crf):
     return ["-c:v", "libx264", "-crf", str(crf), "-preset", "medium"]
 
 
+def _a_pil(cuadro):
+    """Un cuadro de video a imagen PIL (algunos pipelines devuelven arrays 0-1 o 0-255)."""
+    if hasattr(cuadro, "convert"):
+        return cuadro
+    import numpy as np
+    from PIL import Image
+    arr = np.asarray(cuadro)
+    if arr.dtype != np.uint8:
+        arr = (np.clip(arr, 0, 1) * 255).round().astype(np.uint8) if arr.max() <= 1.0 else \
+            np.clip(arr, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr)
+
+
 def _escalar_gpu(frames, alto, torch):
     """Upscale en la GPU (bicúbico) por lotes; antes lo hacía ffmpeg en la CPU (lento)."""
     import numpy as np
@@ -610,6 +631,18 @@ def generar(cfg):
     if motor == "cogvideox_i2v" and imagen is None:
         raise RuntimeError("CogVideoX Imagen-a-Video necesita una imagen base (Paso 1).")
 
+    ajuste = VELOCIDADES.get(str(cfg.get("velocidad") or "rapido"), VELOCIDADES["rapido"])
+    perfil["pasos"] = max(10, round(perfil["pasos"] * ajuste["pasos"]))
+    if ajuste["cache"]:
+        try:
+            import diffusers
+            conf = getattr(diffusers, "FirstBlockCacheConfig", None)
+            if conf is None:
+                from diffusers.hooks import FirstBlockCacheConfig as conf
+            pipe.transformer.enable_cache(conf(threshold=ajuste["cache"]))
+        except Exception as e:
+            print(f"[aviso] caché de velocidad no disponible ({type(e).__name__}: {e})", flush=True)
+
     seg_seg = perfil["frames"] / perfil["fps"]
     duracion = max(1.0, float(cfg.get("duracion", seg_seg)))
     n_seg = max(1, min(12, math.ceil(duracion / seg_seg - 0.15)))
@@ -635,6 +668,7 @@ def generar(cfg):
         generador = torch.Generator(device="cpu").manual_seed(semilla + i)
         kwargs = dict(num_frames=perfil["frames"], num_inference_steps=perfil["pasos"],
                       guidance_scale=perfil["cfg"], generator=generador, callback_on_step_end=cb,
+                      output_type="pil",  # Wan devuelve arrays numpy por defecto
                       **vectores_gpu)  # vectores del prompt ya calculados (fase 1)
         if motor not in ("cogvideox", "cogvideox_i2v"):
             kwargs.update(width=perfil["w"], height=perfil["h"])
@@ -646,7 +680,7 @@ def generar(cfg):
             p = pipe_img if usar_img else pipe
             oom = False
             try:
-                frames = p(**kwargs).frames[0]
+                frames = [_a_pil(f) for f in p(**kwargs).frames[0]]
             except Exception as e:
                 if not _es_oom(e):
                     raise

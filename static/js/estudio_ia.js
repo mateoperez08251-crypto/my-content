@@ -81,6 +81,7 @@ function initEstudioEventHandlers() {
             formData.append('prompt', promptValue);
             formData.append('resolution', document.getElementById('select-resolution-gen')?.value || '1080p');
             formData.append('duration', document.getElementById('select-duration-gen')?.value || '5');
+            formData.append('velocidad', document.getElementById('select-velocidad-gen')?.value || 'rapido');
             formData.append('upscale', !!document.getElementById('toggle-upscale-gen')?.classList.contains('active'));
             formData.append('fps60', !!document.getElementById('toggle-60fps-gen')?.classList.contains('active'));
             formData.append('lipsync', !!lipsync);
