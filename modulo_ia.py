@@ -1215,7 +1215,8 @@ def _ejecutar_worker(task_id, motor, cfg_path):
                     tareas_video[task_id].setdefault("avisos", []).append(ev.get("msg", ""))
             elif tipo == "resultado":
                 _set_tarea(task_id, estado="terminado", progreso=100, paso=4,
-                           archivo=os.path.basename(ev.get("archivo", "")), mensaje="¡Video listo!")
+                           archivo=os.path.basename(ev.get("archivo", "")), mensaje="¡Video listo!",
+                           proyecto=os.path.basename(ev.get("proyecto") or ""))
             elif tipo == "error":
                 _set_tarea(task_id, estado="error", error=ev.get("msg", "Error desconocido"))
         codigo = proc.poll() if persistente else proc.wait()
@@ -1609,6 +1610,20 @@ def estado_tarea_video(task_id):
     if not t:
         return jsonify({"success": False, "error": "Tarea no encontrada"}), 404
     return jsonify({"success": True, **t})
+
+
+@ia_bp.route('/descargar_proyecto/<task_id>', methods=['GET'])
+def descargar_proyecto(task_id):
+    """ZIP con escenas, pistas de audio, subtítulos y línea de tiempo (Kdenlive/Shotcut/DaVinci)."""
+    from flask import send_file
+    with _tareas_lock:
+        nombre = (tareas_video.get(task_id) or {}).get("proyecto") or ""
+    if not nombre:
+        nombre = os.path.basename(str(request.args.get("archivo", "")))
+    ruta = os.path.join(VIDEOS_DIR, os.path.basename(nombre))
+    if not nombre.endswith("_proyecto.zip") or not os.path.isfile(ruta):
+        return jsonify({"success": False, "error": "Este video no tiene proyecto editable."}), 404
+    return send_file(ruta, as_attachment=True, download_name=os.path.basename(ruta))
 
 
 @ia_bp.route('/cancelar_video/<task_id>', methods=['POST'])

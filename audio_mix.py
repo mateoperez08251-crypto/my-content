@@ -227,9 +227,10 @@ def pista_efectos(eventos, duracion, sr=SR):
 
 
 def mezclar(voz, salida, ffmpeg, duracion, musica="", ambiente_tipo="", vol_musica=0.22, eventos=None,
-            vol_efectos=0.8, semilla=0, tmp=None):
+            vol_efectos=0.8, semilla=0, tmp=None, pistas=None):
     """voz (archivo) + música (archivo del usuario, o ambiente generado) + efectos -> salida (wav).
-    La música baja sola cuando hay voz (sidechain) y todo se normaliza a -14 LUFS."""
+    La música baja sola cuando hay voz (sidechain) y todo se normaliza a -14 LUFS.
+    pistas: dict que se llena con las rutas de la música y los efectos (se conservan para exportar)."""
     tmp = tmp or os.path.dirname(os.path.abspath(salida))
     entradas, filtros = ["-i", voz], []
     etiquetas = ["[v]"]
@@ -268,11 +269,19 @@ def mezclar(voz, salida, ffmpeg, duracion, musica="", ambiente_tipo="", vol_musi
            "-map", "[out]", "-ar", "48000", "-t", f"{duracion:.3f}", salida]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    for f in ("_ambiente.wav", "_efectos.wav"):
+    for f, clave in (("_ambiente.wav", "musica"), ("_efectos.wav", "efectos")):
+        ruta_f = os.path.join(tmp, f)
+        if pistas is not None and os.path.exists(ruta_f):
+            destino = os.path.splitext(salida)[0] + f
+            os.replace(ruta_f, destino)
+            pistas[clave] = destino
+            continue
         try:
-            os.remove(os.path.join(tmp, f))
+            os.remove(ruta_f)
         except OSError:
             pass
+    if pistas is not None and musica and os.path.exists(musica):
+        pistas["musica"] = musica
     if r.returncode != 0:
         raise RuntimeError(f"No se pudo mezclar el audio: {r.stderr[:300]}")
     return salida
