@@ -11,10 +11,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
-        rel="stylesheet">
+        rel="stylesheet" media="print" onload="this.media='all'">
 
     <!-- Phosphor Icons -->
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script async src="https://unpkg.com/@phosphor-icons/web"></script>
     <script>
         function toggleSocial(inputId, element) {
             const hiddenInput = document.getElementById(inputId);
@@ -1457,9 +1457,6 @@
 
 
     <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 
     <script>
         const firebaseConfig = {
@@ -1472,7 +1469,30 @@
             measurementId: "G-V8T344WJ5V"
         };
 
-        firebase.initializeApp(firebaseConfig);
+        // El SDK de Firebase se carga SIN bloquear la página. Antes eran <script>
+        // síncronos: si gstatic no respondía, la app se quedaba cargando para siempre.
+        window.firebaseListo = new Promise((resolve) => {
+            const urls = [
+                "https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js",
+                "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js",
+                "https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js",
+            ];
+            let i = 0, hecho = false;
+            const fin = (ok) => { if (!hecho) { hecho = true; resolve(ok); } };
+            setTimeout(() => fin(false), 15000);
+            (function siguiente() {
+                if (i >= urls.length) {
+                    try { firebase.initializeApp(firebaseConfig); fin(true); }
+                    catch (e) { console.error("Firebase init:", e); fin(false); }
+                    return;
+                }
+                const sc = document.createElement('script');
+                sc.src = urls[i++];
+                sc.onload = siguiente;
+                sc.onerror = () => fin(false);
+                document.head.appendChild(sc);
+            })();
+        });
     </script>
     <link rel="stylesheet" href="/static/css/estudio_ia.css">
     <script src="/static/js/estudio_ia.js?v=2"></script>
@@ -1770,7 +1790,17 @@
     <script>
         let mySessionId = localStorage.getItem('mySessionId');
 
-        // Check Auth State
+        function avisoSinFirebase() {
+            const errorMsg = document.getElementById('authErrorMsg');
+            if (errorMsg) {
+                errorMsg.innerText = "No se pudo conectar con el servidor de acceso. Revisa tu internet y reinicia la app.";
+                errorMsg.style.display = "block";
+            }
+        }
+
+        // Check Auth State (cuando el SDK termine de cargar)
+        window.firebaseListo.then((ok) => {
+        if (!ok) { avisoSinFirebase(); return; }
         firebase.auth().onAuthStateChanged((user) => {
             if (user) {
                 // Generar ID si no existe
@@ -1824,6 +1854,7 @@
                 document.getElementById('firebaseLoginOverlay').style.display = 'flex';
             }
         });
+        });
 
         function handleFirebaseLogin() {
             const email = document.getElementById('authEmail').value;
@@ -1836,6 +1867,7 @@
                 return;
             }
 
+            if (!window.firebase || !firebase.apps || !firebase.apps.length) { avisoSinFirebase(); return; }
             firebase.auth().signInWithEmailAndPassword(email, password)
                 .then((userCredential) => {
                     // Forzar nuevo ID de sesión al iniciar
@@ -1976,6 +2008,23 @@
         <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 30px; font-family: 'Inter';">Inicializando
             módulos...</p>
     </div>
+    <script>
+        // El splash se quita al terminar de construir la página, sin esperar a recursos
+        // externos (CDNs, fuentes). Antes dependía de window.onload y se quedaba
+        // "cargando" para siempre si un recurso externo no respondía.
+        (function () {
+            function ocultarSplash() {
+                const o = document.getElementById('initialSplash');
+                if (!o || o.dataset.oculto) return;
+                o.dataset.oculto = '1';
+                o.style.opacity = '0';
+                setTimeout(() => { o.style.display = 'none'; }, 500);
+            }
+            window.ocultarSplash = ocultarSplash;
+            document.addEventListener('DOMContentLoaded', () => setTimeout(ocultarSplash, 800));
+            setTimeout(ocultarSplash, 6000); // red de seguridad
+        })();
+    </script>
 
 
 
@@ -3773,12 +3822,8 @@
                 } catch (e) { }
             }
 
-            setTimeout(() => {
-                const overlay = document.getElementById('initialSplash');
-                overlay.style.opacity = '0';
-                setTimeout(() => { overlay.style.display = 'none'; }, 500);
-                if (typeof startLogsPolling === 'function') startLogsPolling();
-            }, 1000);
+            if (window.ocultarSplash) window.ocultarSplash();
+            if (typeof startLogsPolling === 'function') startLogsPolling();
         };
 
         function loadFormFromLocalStorage(formId) {
