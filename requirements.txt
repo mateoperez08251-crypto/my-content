@@ -13,7 +13,7 @@ pyperclip
 demucs
 faster-whisper
 mediapipe
-opencv-python
+opencv-python>=4.8
 pystray
 pywebview>=4.0
 firebase-admin
