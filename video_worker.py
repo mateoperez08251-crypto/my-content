@@ -113,6 +113,27 @@ def info_gpu(torch):
             "dtype": dtype, "dtype_nombre": nombre_dt}
 
 
+def vram_libre_gb(torch, gpu):
+    """VRAM libre REAL (Windows y otros programas ya usan parte de la gráfica)."""
+    try:
+        return torch.cuda.mem_get_info()[0] / 1024 ** 3
+    except Exception:
+        return gpu["vram"]
+
+
+def _es_oom(e):
+    return "out of memory" in str(e).lower() or type(e).__name__ == "OutOfMemoryError"
+
+
+def _liberar_vram(torch):
+    import gc
+    gc.collect()
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def _componentes(carpeta):
     """Componentes que declara el modelo (model_index.json)."""
     try:
@@ -200,7 +221,7 @@ def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
     nulos = _nulos(carpeta, ("transformer", "vae"))
     dtype_gpu = torch.bfloat16 if gpu["dtype"] == torch.bfloat16 else torch.float16
 
-    if motor in TEXTO and gpu["vram"] >= info["te_gb"] + 0.8:
+    if motor in TEXTO and vram_libre_gb(torch, gpu) >= info["te_gb"] + 0.4:
         progreso(4, 1, "Leyendo el prompt con el codificador de texto en la GPU...")
         te = pipe_txt = None
         try:
@@ -225,7 +246,8 @@ def codificar_texto(motor, carpeta, prompt, negativo, torch, gpu):
             except Exception:
                 pass
 
-    if motor not in TEXTO and gpu["dtype"] == torch.bfloat16 and gpu["vram"] >= info["te_gb"] + 1.5:
+    if motor not in TEXTO and gpu["dtype"] == torch.bfloat16 and \
+            vram_libre_gb(torch, gpu) >= info["te_gb"] + 1.5:
         # HunyuanVideo en GPU grande y moderna: cargar el pipeline de texto y subirlo a la GPU
         progreso(4, 1, "Leyendo el prompt con el codificador de texto en la GPU...")
         pipe_txt = clase.from_pretrained(carpeta, torch_dtype=torch.bfloat16, **nulos)
@@ -285,14 +307,24 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
     else:
         pipe = clase.from_pretrained(carpeta, torch_dtype=dtype, **nulos)
 
-    margen = 3.0  # memoria de trabajo para generar los frames
-    if peso_gb + margen <= gpu["vram"] * 0.95:
-        pipe.to("cuda")
-        estrategia = "gpu"
-    elif peso_gb + 1.5 <= gpu["vram"]:
+    _liberar_vram(torch)
+    libre = vram_libre_gb(torch, gpu)
+    # memoria de trabajo para generar los frames (fp32 ocupa el doble)
+    margen = 4.0 if dtype == torch.float32 else 3.0
+    estrategia = ""
+    if peso_gb + margen <= libre * 0.95:
+        try:
+            pipe.to("cuda")
+            estrategia = "gpu"
+        except Exception as e:
+            if not _es_oom(e):
+                raise
+            pipe.to("cpu")
+            _liberar_vram(torch)
+    if not estrategia and peso_gb + 1.0 <= libre:
         pipe.enable_model_cpu_offload()
         estrategia = "offload"
-    else:
+    elif not estrategia:
         pipe.enable_sequential_cpu_offload()
         estrategia = "secuencial"
         aviso("El modelo es más grande que la VRAM: se carga por partes (bastante más lento).")
@@ -306,6 +338,30 @@ def cargar_pipeline(motor, carpeta, torch, gpu):
     pipe._estrategia = estrategia
     pipe._dtype = dtype
     return pipe
+
+
+def bajar_estrategia(pipe, torch):
+    """Si la VRAM se llena: GPU entera -> GPU + RAM -> por partes. False si ya no hay más."""
+    actual = getattr(pipe, "_estrategia", "gpu")
+    if actual == "secuencial":
+        return False
+    try:
+        pipe.remove_all_hooks()
+    except Exception:
+        pass
+    if actual == "gpu":
+        pipe.to("cpu")
+        _liberar_vram(torch)
+        pipe.enable_model_cpu_offload()
+        pipe._estrategia = "offload"
+        aviso("La VRAM se llenó: se continúa usando GPU + RAM (un poco más lento).")
+    else:
+        _liberar_vram(torch)
+        pipe.enable_sequential_cpu_offload()
+        pipe._estrategia = "secuencial"
+        aviso("La VRAM se llenó: se carga el modelo por partes (más lento).")
+    _liberar_vram(torch)
+    return True
 
 
 def pipeline_imagen(motor, pipe):
@@ -478,10 +534,25 @@ def generar(cfg):
             kwargs.update(width=perfil["w"], height=perfil["h"])
 
         usar_img = ultimo is not None and pipe_img is not None
-        p = pipe_img if usar_img else pipe
         if usar_img:
             kwargs["image"] = ultimo
-        frames = p(**kwargs).frames[0]
+        while True:
+            p = pipe_img if usar_img else pipe
+            oom = False
+            try:
+                frames = p(**kwargs).frames[0]
+            except Exception as e:
+                if not _es_oom(e):
+                    raise
+                oom = True
+            if not oom:
+                break
+            _liberar_vram(torch)
+            if not bajar_estrategia(pipe, torch):
+                raise RuntimeError("CUDA out of memory incluso cargando el modelo por partes.")
+            if pipe_img is not None and pipe_img is not pipe:
+                pipe_img = pipeline_imagen(motor, pipe)
+            kwargs["generator"] = torch.Generator(device="cpu").manual_seed(semilla + i)
         if i > 0 and usar_img:
             frames = frames[1:]  # el primer frame repite el último del segmento anterior
         frames_total.extend(frames)
