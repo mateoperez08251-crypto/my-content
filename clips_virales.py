@@ -29,19 +29,19 @@ SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 MOTORES = {
     "ligero": {
         "nombre": "Ligero (Llama 3.1 8B)",
-        "llm": ["llama-3.1-8b-instant"],
+        "llm": ["llama3-8b-8192"],
         "whisper": "whisper-large-v3-turbo",
         "reencuadre": "ligero",
     },
     "equilibrado": {
         "nombre": "Equilibrado (GPT-OSS 20B)",
-        "llm": ["openai/gpt-oss-20b", "llama-3.1-8b-instant"],
+        "llm": ["openai/gpt-oss-20b", "llama3-8b-8192"],
         "whisper": "whisper-large-v3",
         "reencuadre": "equilibrado",
     },
     "pro": {
         "nombre": "Pro (GPT-OSS 120B) - recomendado",
-        "llm": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"],
+        "llm": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama3-8b-8192"],
         "whisper": "whisper-large-v3",
         "reencuadre": "pro",
     },
