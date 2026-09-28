@@ -76,7 +76,8 @@ def separate_music(source_path, output_dir, stems="2"):
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
         download_template = os.path.join(temp_dir, "input.%(ext)s")
         
-        ydl_opts = {
+        import yt_downloader
+        ydl_opts = dict(yt_downloader.opciones_base(), **{
             'format': 'bestaudio/best',
             'outtmpl': download_template,
             'ffmpeg_location': ffmpeg_path,
@@ -86,10 +87,13 @@ def separate_music(source_path, output_dir, stems="2"):
                 'preferredquality': '192',
             }],
             'quiet': False
-        }
+        })
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.extract_info(source_path, download=True)
+            try:
+                ydl.extract_info(source_path, download=True)
+            except Exception as e:
+                raise Exception(yt_downloader.mensaje_error(e)) from None
             input_file = os.path.join(temp_dir, "input.mp3")
             if not os.path.exists(input_file):
                 raise Exception("No se pudo descargar el audio para separar.")
