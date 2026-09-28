@@ -1448,6 +1448,21 @@ def _escribir_progreso_smart(texto):
         pass
 
 
+def _limpiar_origen(texto):
+    """Ruta o enlace del video. Si se pegó texto de más (p. ej. la terminal), saca el primer enlace."""
+    texto = str(texto or "").strip().strip('"\'')
+    if texto.startswith("http") or os.path.isfile(texto):
+        return texto.split()[0] if texto.startswith("http") else texto
+    import re
+    sitios = ("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch", "vimeo.com",
+              "twitter.com", "x.com", "twitch.tv", "kick.com", "dailymotion.com", "reddit.com")
+    for url in re.findall(r"https?://[^\s\"'<>]+", texto):
+        dominio = re.sub(r"^https?://(www\.|m\.)?", "", url).split("/")[0].lower()
+        if any(dominio == d or dominio.endswith("." + d) for d in sitios):
+            return url  # solo enlaces de sitios de video (no el de GitHub de la terminal)
+    return texto
+
+
 def run_smart_split_thread(data):
     """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     _escribir_progreso_smart("Iniciando descargas...|0")
@@ -1455,7 +1470,7 @@ def run_smart_split_thread(data):
         if not get_secret("groq", "api_key", env="GROQ_API_KEY"):
             raise RuntimeError("Falta la clave de Groq (elige los clips con ella). Pulsa '🔑 Configurar clave "
                                "de Groq' en esta ventana y pega tu clave gsk_...")
-        source = data.get('source', '')
+        source = _limpiar_origen(data.get('source', ''))
         if source.startswith("http"):
             _asegurar_yt_dlp()
             import yt_downloader
@@ -1465,7 +1480,8 @@ def run_smart_split_thread(data):
             if not source:
                 raise Exception("Error al descargar video")
         elif not source or not os.path.isfile(source):
-            raise Exception(f"El video no existe: {source}")
+            raise Exception("No encontré el video. Pega solo el enlace (https://...) o elige un archivo "
+                            f"con la carpeta. Recibí: {source[:80]}")
         if _cancelado():
             raise Exception("Cancelado.")
 
