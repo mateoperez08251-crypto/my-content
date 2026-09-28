@@ -480,3 +480,8 @@
 /* Opciones del montaje (Guion a video / Audio a imágenes) */
 .etiqueta-montaje { font-size: 0.75rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 4px; }
 .panel-montaje label input[type="checkbox"] { accent-color: #2dd4bf; margin-right: 6px; }
+#opciones-guion select, #opciones-montaje select, #opciones-audio-img select,
+#opciones-guion textarea, #opciones-audio-img textarea { box-sizing: border-box; max-width: 100%; }
+#opciones-guion select, #opciones-audio-img select { width: 100%; }
+#select-voz-guion { width: auto !important; flex: 1 1 0; min-width: 0; }
+#opciones-guion div, #opciones-montaje div, #opciones-montaje label { min-width: 0; }
