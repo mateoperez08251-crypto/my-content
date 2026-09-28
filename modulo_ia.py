@@ -1741,6 +1741,8 @@ def get_assets_library():
     Antes solo listaba los subidos: los videos generados no aparecían en ningún lado."""
     os.makedirs(ASSETS_DIR, exist_ok=True)
     os.makedirs(VIDEOS_DIR, exist_ok=True)
+    import proyectos_smart
+    proyectos_smart.migrar_antiguos()  # los clips de Smart Split van al Centro de proyectos
     # generados (vid_*) y resultados del Smart Split / editor que viven en la misma carpeta
     items = [{"url": f"/api/ia/video/{f}", "name": f, "type": "video",
               "origen": "generado" if f.startswith("vid_") else "editado"}

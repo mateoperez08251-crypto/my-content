@@ -1466,6 +1466,8 @@ def _limpiar_origen(texto):
 def run_smart_split_thread(data):
     """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     _escribir_progreso_smart("Iniciando descargas...|0")
+    import proyectos_smart
+    proyecto = None
     try:
         if not get_secret("groq", "api_key", env="GROQ_API_KEY"):
             raise RuntimeError("Falta la clave de Groq (elige los clips con ella). Pulsa '🔑 Configurar clave "
@@ -1485,7 +1487,11 @@ def run_smart_split_thread(data):
         if _cancelado():
             raise Exception("Cancelado.")
 
-        output_dir = data.get('custom_output_dir', '') or paths.data_path("videos_procesados")
+        # Cada Smart Split es un proyecto propio (Centro de proyectos), aparte de los videos del Estudio IA
+        proyecto = proyectos_smart.nuevo(data.get('source', '') or source, {
+            "duracion_min": data.get('clip_duration', 60), "clips": data.get('num_clips', 1),
+            "estilo": data.get('style', ''), "encuadre": data.get('encuadre', '')})
+        output_dir = data.get('custom_output_dir', '') or proyecto["carpeta"]
         os.makedirs(output_dir, exist_ok=True)
         filename = "smart_" + os.path.splitext(os.path.basename(source))[0] + ".mp4"
         output_path = os.path.join(output_dir, filename)
@@ -1570,7 +1576,10 @@ def run_smart_split_thread(data):
         if codigo != 0 or not result_paths:
             raise Exception("No se pudo generar el video Smart Split (revisa el log de arriba)")
 
-        log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips.")
+        import imageio_ffmpeg
+        proyectos_smart.terminar(proyecto["id"], source, resultado["meta"], result_paths,
+                                 imageio_ffmpeg.get_ffmpeg_exe())
+        log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips (Centro de proyectos).")
         show_notification("Smart Split Completado", f"Se han generado {len(result_paths)} clips con éxito.")
 
         tiktok = bool(data.get('subir_tiktok', False))
@@ -1597,8 +1606,86 @@ def run_smart_split_thread(data):
     except Exception as e:
         log(f"PROCESO SMART SPLIT ABORTADO: {e}")
         _escribir_progreso_smart(f"Error: {e}|-1")
+        if proyecto:
+            proyectos_smart.descartar(proyecto["id"])
     finally:
         _terminar_trabajo()
+
+
+# ---------------------------------------------------------------------------
+# Centro de proyectos (clips de Smart Split): ver, descargar y borrar
+# ---------------------------------------------------------------------------
+@app.route("/api/proyectos", methods=["GET"])
+def proyectos_lista():
+    import proyectos_smart
+    return jsonify({"success": True, "servidor": MODO_SERVIDOR,
+                    "proyectos": [proyectos_smart.publico(p, MODO_SERVIDOR) for p in proyectos_smart.lista()]})
+
+
+@app.route("/api/proyectos/<pid>", methods=["GET", "DELETE"])
+def proyecto_uno(pid):
+    import proyectos_smart
+    try:
+        if request.method == "DELETE":
+            proyectos_smart.borrar(pid)
+            return jsonify({"success": True})
+        p = proyectos_smart.obtener(pid)
+    except ValueError:
+        return jsonify({"success": False, "error": "Proyecto inválido"}), 400
+    if not p:
+        return jsonify({"success": False, "error": "El proyecto ya no existe."}), 404
+    return jsonify({"success": True, "proyecto": proyectos_smart.publico(proyectos_smart._existentes(p), MODO_SERVIDOR)})
+
+
+@app.route("/api/proyectos/<pid>/clip/<archivo>", methods=["GET", "DELETE"])
+def proyecto_clip(pid, archivo):
+    import proyectos_smart
+    from flask import send_file
+    try:
+        if request.method == "DELETE":
+            return jsonify({"success": proyectos_smart.borrar_clip(pid, archivo)})
+        _, c = proyectos_smart.clip(pid, archivo)
+    except ValueError:
+        return jsonify({"success": False, "error": "Proyecto inválido"}), 400
+    if not c:
+        return jsonify({"success": False, "error": "El clip ya no existe."}), 404
+    return send_file(c["ruta"], mimetype="video/mp4", conditional=True,
+                     as_attachment=request.args.get("descargar") == "1", download_name=c["archivo"])
+
+
+@app.route("/api/proyectos/<pid>/miniatura/<archivo>", methods=["GET"])
+def proyecto_miniatura(pid, archivo):
+    import imageio_ffmpeg
+    import proyectos_smart
+    from flask import send_file
+    try:
+        ruta = proyectos_smart.miniatura(pid, archivo, imageio_ffmpeg.get_ffmpeg_exe())
+    except ValueError:
+        ruta = None
+    if not ruta:
+        return send_from_directory(paths.res_path("static"), "logo.png")
+    return send_file(ruta, mimetype="image/jpeg", max_age=3600)
+
+
+@app.route("/api/proyectos/<pid>/clip/<archivo>/carpeta", methods=["POST"])
+def proyecto_carpeta(pid, archivo):
+    """PC: abre el Explorador con el clip seleccionado."""
+    import proyectos_smart
+    _, c = proyectos_smart.clip(pid, archivo)
+    if not c:
+        return jsonify({"success": False, "error": "El clip ya no existe."}), 404
+    if MODO_SERVIDOR:
+        return jsonify({"success": False, "error": "En el servidor usa Descargar."}), 400
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", c["ruta"]])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", c["ruta"]])
+        else:
+            subprocess.Popen(["xdg-open", os.path.dirname(c["ruta"])])
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/smart_split", methods=["POST"])

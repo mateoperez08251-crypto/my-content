@@ -1495,7 +1495,7 @@
         });
     </script>
     <link rel="stylesheet" href="/static/css/estudio_ia.css?v=6">
-    <link rel="stylesheet" href="/static/css/tema.css?v=6">
+    <link rel="stylesheet" href="/static/css/tema.css?v=7">
     <script src="/static/js/estudio_ia.js?v=6"></script>
 </head>
 
@@ -2052,6 +2052,40 @@
 
 
     <!-- Audio Extraction Modal Overlay -->
+    <div id="proyectoModal" class="modal-proyecto" style="display: none;">
+        <div class="panel ventana-proyecto">
+            <div class="ventana-cabecera">
+                <div style="min-width:0;">
+                    <h2 id="proyectoTitulo">Proyecto</h2>
+                    <div id="proyectoMeta" class="proyecto-meta"></div>
+                </div>
+                <div class="ventana-acciones">
+                    <button type="button" class="btn btn-secondary" id="proyectoRehacer"><i class="ph ph-arrow-counter-clockwise"></i> Rehacer</button>
+                    <button type="button" class="btn btn-secondary btn-peligro" id="proyectoBorrar"><i class="ph ph-trash"></i> Borrar proyecto</button>
+                    <button type="button" class="btn-cerrar-ventana" onclick="cerrarProyecto()" title="Cerrar (Esc)"><i class="ph-bold ph-x"></i></button>
+                </div>
+            </div>
+            <div id="proyectoClips" class="clips-grid"></div>
+        </div>
+    </div>
+
+    <div id="reproductorModal" class="modal-proyecto modal-reproductor" style="display: none;" onclick="if (event.target === this) cerrarReproductor()">
+        <div class="panel ventana-reproductor">
+            <video id="reproductorVideo" controls playsinline preload="metadata"></video>
+            <div class="reproductor-lado">
+                <div class="ventana-cabecera">
+                    <h2 id="reproductorTitulo"></h2>
+                    <button type="button" class="btn-cerrar-ventana" onclick="cerrarReproductor()" title="Cerrar (Esc)"><i class="ph-bold ph-x"></i></button>
+                </div>
+                <div id="reproductorTexto" class="reproductor-texto"></div>
+                <div class="ventana-acciones">
+                    <button type="button" class="btn btn-secondary" onclick="navigator.clipboard.writeText(document.getElementById('reproductorTexto').textContent)"><i class="ph ph-copy"></i> Copiar texto</button>
+                    <a id="reproductorDescargar" class="btn btn-primary" href="#"><i class="ph ph-download-simple"></i> Descargar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="claveGroqModal"
         style="display: none; align-items: center; justify-content: center; z-index: 1000001; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;">
         <div class="panel" style="width: 540px; max-width: 95%; padding: 28px; display: flex; flex-direction: column; gap: 14px;">
@@ -2786,6 +2820,7 @@
                         style="margin: 0; color: white; font-size: 1.4rem; display: flex; align-items: center; gap: 10px;">
                         <i class="ph-duotone ph-scissors" style="color: var(--accent-primary);"></i> Smart Split (Auto
                         Reframe)</h2>
+                    <button type="button" class="btn btn-secondary btn-mis-proyectos" onclick="renderProjects(); document.getElementById('misProyectosSmart').scrollIntoView({behavior:'smooth'})"><i class="ph-duotone ph-folders"></i> Mis proyectos <span class="proyectos-contador"></span></button>
                     <button onclick="closeSmartSplitModal()"
                         style="background: none; border: none; color: white; cursor: pointer; font-size: 1.5rem; transition: color 0.2s;"
                         onmouseover="this.style.color='#ff4444'" onmouseout="this.style.color='white'"><i
@@ -3201,6 +3236,14 @@
                         Smart Split</button>
                 </div>
 
+                <div class="proyectos-en-smart" id="misProyectosSmart">
+                    <div class="projects-header">
+                        <h2><i class="ph-duotone ph-folders" style="color: var(--accent-primary);"></i> Mis proyectos <span class="proyectos-contador"></span></h2>
+                        <button type="button" class="btn btn-secondary" onclick="renderProjects()"><i class="ph ph-arrows-clockwise"></i> Actualizar</button>
+                    </div>
+                    <div class="projects-grid proyectos-smart-grid"></div>
+                </div>
+
             </div>
 
 
@@ -3301,10 +3344,10 @@
             <!-- Centro de Proyectos -->
             <div class="projects-section">
                 <div class="projects-header">
-                    <h2>Centro de proyectos</h2>
-                    <span><i class="ph-duotone ph-info"></i> El historial de proyectos se guardará localmente</span>
+                    <h2>Centro de proyectos <span class="proyectos-contador"></span></h2>
+                    <span><i class="ph-duotone ph-info"></i> Clips de Smart Split: ábrelos para verlos, descargarlos o borrarlos</span>
                 </div>
-                <div class="projects-grid" id="projectsGrid">
+                <div class="projects-grid proyectos-smart-grid" id="projectsGrid">
                     <!-- Generado por JS -->
                 </div>
             </div>
@@ -3863,7 +3906,7 @@
                         }
                         if (pct === 100 || pct === -1) {
                             if (pct === 100) {
-                                addProject(document.getElementById('smart_split_source').value, document.getElementById('smart_split_clips').value);
+                                renderProjects().then(() => { if (proyectosCache[0]) abrirProyecto(proyectosCache[0].id); });
                             }
                             clearInterval(smartSplitProgressInterval);
                             setTimeout(() => {
@@ -4439,44 +4482,15 @@
             }
         }, 1000);
 
-        // --- Centro de Proyectos (LocalStorage) ---
-        function getProjects() {
-            try {
-                const stored = localStorage.getItem('smart_projects');
-                return stored ? JSON.parse(stored) : [];
-            } catch (e) {
-                return [];
-            }
-        }
+        // --- Centro de proyectos: clips de Smart Split guardados en el servidor ---
+        let proyectosCache = [];
+        let proyectoAbierto = null;
+        const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const fmtDur = (s) => { s = Math.round(s || 0); return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s} s`; };
+        const fmtFecha = (t) => t ? new Date(t * 1000).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+        const colorNota = (n) => n >= 85 ? 'nota-alta' : (n >= 70 ? 'nota-media' : 'nota-baja');
 
-        function saveProjects(projects) {
-            localStorage.setItem('smart_projects', JSON.stringify(projects));
-        }
-
-        function addProject(source, numClips) {
-            const projects = getProjects();
-            const filename = source.split('\\').pop().split('/').pop();
-            const newProject = {
-                id: Date.now().toString(),
-                title: filename,
-                source: source,
-                numClips: numClips,
-                date: new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
-                thumbnail: '/api/preview_img?path=' + encodeURIComponent(source)
-            };
-            projects.unshift(newProject);
-            saveProjects(projects);
-            renderProjects();
-        }
-
-        function deleteProject(id) {
-            if (confirm('¿Seguro que deseas borrar este proyecto del historial?')) {
-                let projects = getProjects();
-                projects = projects.filter(p => p.id !== id);
-                saveProjects(projects);
-                renderProjects();
-            }
-        }
+        function addProject() { renderProjects(); }  // compatibilidad: el servidor ya lo guardó
 
         function loadVideoDuration(source) {
             // Function stub - previously used to load video length for the UI
@@ -4491,42 +4505,168 @@
         }
 
         function restartProject(source) {
+            cerrarProyecto();
             openSmartSplitModal();
             document.getElementById('smart_split_source').value = source;
             loadVideoDuration(source);
         }
 
-        function renderProjects() {
-            const grid = document.getElementById('projectsGrid');
-            if (!grid) return;
-            const projects = getProjects();
-
-            if (projects.length === 0) {
-                grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.9rem; grid-column:1/-1;">No hay proyectos recientes.</p>';
-                return;
-            }
-
-            grid.innerHTML = projects.map(p => `
-                <div class="project-card">
-                    <div class="project-thumb-container" style="cursor:pointer;" onclick="openFilePreview('${p.source.replace(/\\/g, '\\\\')}')" title="Haz clic para ver el video">
-                        <img src="${p.thumbnail}" class="project-thumb" onerror="this.src='/static/logo.png'">
-                        <div class="project-badge">${p.numClips} videos cortos</div>
-                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.7; pointer-events: none;" class="preview-play">
-                            <i class="ph-fill ph-play-circle" style="font-size: 3rem; color: white; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));"></i>
-                        </div>
+        function tarjetaProyecto(p) {
+            const n = p.clips.length;
+            const procesando = p.estado === 'procesando';
+            return `
+                <div class="project-card proyecto-card" onclick="abrirProyecto('${p.id}')" title="Ver los clips">
+                    <div class="project-thumb-container">
+                        ${p.miniatura ? `<img src="${p.miniatura}" class="project-thumb" loading="lazy" onerror="this.src='/static/logo.png'">`
+                                      : `<div class="proyecto-procesando"><i class="ph ph-spinner ph-spin"></i></div>`}
+                        <div class="project-badge">${procesando ? 'Procesando…' : `${n} clip${n === 1 ? '' : 's'} · ${fmtDur(p.duracion_total)}`}</div>
                         <div class="project-actions">
-                            <button class="action-btn" title="Ver Vista Previa" onclick="event.stopPropagation(); openFilePreview('${p.source.replace(/\\/g, '\\\\')}')"><i class="ph ph-play"></i></button>
-                            <button class="action-btn" title="Reiniciar/Editar" onclick="event.stopPropagation(); restartProject('${p.source.replace(/\\/g, '\\\\')}')"><i class="ph ph-arrow-counter-clockwise"></i></button>
-                            <button class="action-btn delete" title="Eliminar" onclick="event.stopPropagation(); deleteProject('${p.id}')"><i class="ph ph-trash"></i></button>
+                            <button class="action-btn" title="Ver clips" onclick="event.stopPropagation(); abrirProyecto('${p.id}')"><i class="ph ph-play"></i></button>
+                            <button class="action-btn delete" title="Borrar proyecto" onclick="event.stopPropagation(); borrarProyecto('${p.id}')"><i class="ph ph-trash"></i></button>
                         </div>
                     </div>
                     <div class="project-info">
-                        <div class="project-title" title="${p.title}">${p.title}</div>
-                        <div class="project-date">${p.date}</div>
+                        <div class="project-title" title="${esc(p.titulo)}">${esc(p.titulo)}</div>
+                        <div class="project-date">${fmtFecha(p.creado)}</div>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
         }
+
+        async function renderProjects() {
+            const grids = document.querySelectorAll('.proyectos-smart-grid');
+            if (!grids.length) return;
+            try {
+                const d = await (await fetch('/api/proyectos')).json();
+                proyectosCache = d.proyectos || [];
+            } catch (e) { return; }
+            const html = proyectosCache.length ? proyectosCache.map(tarjetaProyecto).join('')
+                : `<div class="proyectos-vacio"><i class="ph-duotone ph-film-slate"></i><b>Aún no hay proyectos</b><span>Los clips que crees con Smart Split aparecerán aquí para verlos, descargarlos o borrarlos.</span></div>`;
+            grids.forEach(g => g.innerHTML = html);
+            document.querySelectorAll('.proyectos-contador').forEach(el => el.textContent = proyectosCache.length ? `${proyectosCache.length}` : '');
+        }
+
+        function tarjetaClip(p, c, k) {
+            const texto = c.publicacion || [c.descripcion, (c.hashtags || []).join(' ')].filter(Boolean).join(' ');
+            return `
+                <div class="clip-card">
+                    <div class="clip-thumb" onclick="verClip(${k})">
+                        <img src="${c.miniatura}" loading="lazy" onerror="this.src='/static/logo.png'">
+                        <span class="clip-play"><i class="ph-fill ph-play"></i></span>
+                        <span class="clip-dur">${fmtDur(c.duracion)}</span>
+                        ${c.puntuacion ? `<span class="clip-nota ${colorNota(c.puntuacion)}">🔥 ${c.puntuacion}</span>` : ''}
+                    </div>
+                    <div class="clip-cuerpo">
+                        <div class="clip-titulo" title="${esc(c.titulo)}">${esc(c.titulo)}</div>
+                        <div class="clip-texto">${esc(texto) || '<i>Sin descripción</i>'}</div>
+                        <div class="clip-botones">
+                            <button class="btn-clip" title="Ver" onclick="verClip(${k})"><i class="ph ph-play"></i></button>
+                            <a class="btn-clip" title="Descargar" href="${c.descargar}"><i class="ph ph-download-simple"></i></a>
+                            <button class="btn-clip" title="Copiar descripción y hashtags" onclick="copiarTextoClip(${k}, this)"><i class="ph ph-copy"></i></button>
+                            ${p.servidor ? '' : `<button class="btn-clip" title="Mostrar en la carpeta" onclick="carpetaClip(${k})"><i class="ph ph-folder-open"></i></button>`}
+                            <button class="btn-clip borrar" title="Borrar este clip" onclick="borrarClip(${k})"><i class="ph ph-trash"></i></button>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function abrirProyecto(id) {
+            const m = document.getElementById('proyectoModal');
+            if (m.parentElement !== document.body) document.body.appendChild(m);
+            m.style.display = 'flex';
+            const cuerpo = document.getElementById('proyectoClips');
+            cuerpo.innerHTML = '<div class="cargando-suave" style="height:220px; grid-column:1/-1;"></div>';
+            try {
+                const d = await (await fetch('/api/proyectos/' + encodeURIComponent(id))).json();
+                if (!d.success) throw new Error(d.error);
+                proyectoAbierto = d.proyecto;
+            } catch (e) {
+                cuerpo.innerHTML = `<p style="color:var(--text-muted)">${esc(e.message || 'No se pudo abrir el proyecto.')}</p>`;
+                return;
+            }
+            const p = proyectoAbierto;
+            document.getElementById('proyectoTitulo').textContent = p.titulo;
+            const aj = p.ajustes || {};
+            document.getElementById('proyectoMeta').innerHTML = [
+                fmtFecha(p.creado), `${p.clips.length} clip${p.clips.length === 1 ? '' : 's'}`, fmtDur(p.duracion_total),
+                aj.duracion_min ? `mín. ${aj.duracion_min} s por clip` : ''].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('');
+            document.getElementById('proyectoRehacer').onclick = () => restartProject(p.fuente);
+            document.getElementById('proyectoRehacer').style.display = p.fuente && p.fuente !== 'Clips anteriores' ? '' : 'none';
+            document.getElementById('proyectoBorrar').onclick = () => borrarProyecto(p.id);
+            cuerpo.innerHTML = p.clips.length ? p.clips.map((c, k) => tarjetaClip(p, c, k)).join('')
+                : `<div class="proyectos-vacio">${p.estado === 'procesando' ? 'Smart Split aún está creando estos clips…' : 'Este proyecto no tiene clips.'}</div>`;
+        }
+
+        function cerrarProyecto() {
+            const m = document.getElementById('proyectoModal');
+            if (m) m.style.display = 'none';
+            proyectoAbierto = null;
+        }
+
+        const clipDe = (k) => proyectoAbierto ? proyectoAbierto.clips[k] : null;
+        const urlClip = (c) => `/api/proyectos/${proyectoAbierto.id}/clip/${encodeURIComponent(c.archivo)}`;
+
+        function verClip(k) {
+            const c = clipDe(k);
+            if (!c) return;
+            const m = document.getElementById('reproductorModal');
+            if (m.parentElement !== document.body) document.body.appendChild(m);
+            const v = document.getElementById('reproductorVideo');
+            v.src = c.video;
+            document.getElementById('reproductorTitulo').textContent = c.titulo;
+            document.getElementById('reproductorTexto').textContent = c.publicacion || [c.descripcion, (c.hashtags || []).join(' ')].filter(Boolean).join(' ');
+            document.getElementById('reproductorDescargar').href = c.descargar;
+            m.style.display = 'flex';
+            v.play().catch(() => { });
+        }
+
+        function cerrarReproductor() {
+            const v = document.getElementById('reproductorVideo');
+            v.pause();
+            v.removeAttribute('src');
+            v.load();
+            document.getElementById('reproductorModal').style.display = 'none';
+        }
+
+        async function copiarTextoClip(k, btn) {
+            const c = clipDe(k);
+            const texto = c ? (c.publicacion || [c.descripcion, (c.hashtags || []).join(' ')].filter(Boolean).join(' ')) : '';
+            try { await navigator.clipboard.writeText(texto); } catch (e) {
+                const t = document.createElement('textarea'); t.value = texto; document.body.appendChild(t); t.select();
+                document.execCommand('copy'); t.remove();
+            }
+            if (btn) { const html = btn.innerHTML; btn.innerHTML = '<i class="ph ph-check"></i>'; setTimeout(() => btn.innerHTML = html, 1200); }
+        }
+
+        async function carpetaClip(k) {
+            const c = clipDe(k);
+            if (!c) return;
+            const d = await (await fetch(urlClip(c) + '/carpeta', { method: 'POST' })).json();
+            if (!d.success) showCustomStatusAlert('error', d.error || 'No se pudo abrir la carpeta.');
+        }
+
+        async function borrarClip(k) {
+            const c = clipDe(k);
+            if (!c || !confirm(`¿Borrar el clip "${c.titulo}"? Se elimina del disco.`)) return;
+            const pid = proyectoAbierto.id;
+            await fetch(urlClip(c), { method: 'DELETE' });
+            if (proyectoAbierto.clips.length <= 1) cerrarProyecto(); else abrirProyecto(pid);
+            renderProjects();
+        }
+
+        async function borrarProyecto(id) {
+            const p = proyectosCache.find(x => x.id === id) || proyectoAbierto;
+            const n = p ? p.clips.length : 0;
+            if (!confirm(`¿Borrar el proyecto "${p ? p.titulo : ''}" y sus ${n} clip${n === 1 ? '' : 's'}? Se eliminan del disco.`)) return;
+            await fetch('/api/proyectos/' + encodeURIComponent(id), { method: 'DELETE' });
+            cerrarProyecto();
+            renderProjects();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (document.getElementById('reproductorModal')?.style.display === 'flex') cerrarReproductor();
+            else if (document.getElementById('proyectoModal')?.style.display === 'flex') cerrarProyecto();
+        });
 
         // Initial render
         document.addEventListener('DOMContentLoaded', () => {
