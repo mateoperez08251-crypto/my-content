@@ -1078,6 +1078,16 @@ def _motor(forzar=False):
         return dict(_motor_info)
 
 
+def motor_listo(esperar=180):
+    """Como _motor(), pero espera a que termine de detectarse (la 1.ª vez tarda unos segundos)."""
+    fin = time.time() + esperar
+    info = _motor()
+    while info.get("estado") == "detectando" and time.time() < fin:
+        time.sleep(1)
+        info = _motor()
+    return info
+
+
 @ia_bp.route('/motor_estado', methods=['GET'])
 def motor_estado():
     info = _motor(forzar=request.args.get("refrescar") == "1")
@@ -1335,6 +1345,81 @@ def _voces_clonadas():
         return None, []
 
 
+PALABRAS_POR_MINUTO = 150  # ritmo de narración de VoxCPM2 (~15 letras por segundo)
+
+
+def _guion_ia(idea, minutos, estilo):
+    """Idea -> guion narrado listo para 'Guion a video'. Los largos se escriben por capítulos
+    (índice primero) para que no se corten ni se repitan."""
+    import clips_virales as cv
+    objetivo = int(minutos * PALABRAS_POR_MINUTO)
+    reglas = (
+        "You are a professional scriptwriter for YouTube and TikTok narrated videos. Write ONLY the narration "
+        "that the voice will read: no titles, no scene headings, no brackets, no stage directions, no emojis, "
+        "no markdown. Write in the SAME language as the user's idea. Short, clear sentences that sound natural "
+        "out loud. Start with a strong hook in the first sentence. Be factually accurate: real places, dates and "
+        "names; if something is a legend or uncertain, say so. Describe people, places and cultures accurately "
+        "and respectfully, with concrete visual details (where it happens, era, what people look like and wear) "
+        "so each part can be illustrated. "
+        f"Tone of the video: {estilo.get('nombre', '')} - {estilo.get('descripcion', '')}.")
+    if minutos <= 5:
+        texto, _ = cv.chat([{"role": "system", "content": reglas},
+                            {"role": "user", "content": f"Idea: {idea}\nLength: about {objetivo} words."}],
+                           cv.MOTORES["pro"]["llm"], json_mode=False, temperatura=0.7, max_tokens=8000)
+        return texto
+    capitulos = max(3, round(minutos / 2))
+    indice_txt, _ = cv.chat([
+        {"role": "system", "content": "You plan long narrated YouTube videos. Reply ONLY with JSON: "
+                                      '{"chapters": [{"title": "...", "points": "what this part covers"}]}'},
+        {"role": "user", "content": f"Idea: {idea}\nPlan exactly {capitulos} chapters that tell it from start to "
+                                    "end without repeating (hook first, strong ending). Same language as the idea."}],
+        cv.MOTORES["pro"]["llm"], json_mode=True, temperatura=0.5, max_tokens=4000)
+    indice = cv._leer_json(indice_txt).get("chapters") or []
+    if not indice:
+        raise RuntimeError("La IA no pudo planear el guion. Prueba otra vez.")
+    partes = []
+    por_capitulo = objetivo // len(indice)
+    plan = "\n".join(f"{i + 1}. {c.get('title', '')}: {c.get('points', '')}" for i, c in enumerate(indice))
+    for i, c in enumerate(indice):
+        previo = partes[-1][-1200:] if partes else "(this is the beginning: open with the hook)"
+        texto, _ = cv.chat([
+            {"role": "system", "content": reglas},
+            {"role": "user", "content": f"Idea: {idea}\nFull plan:\n{plan}\n\nWrite ONLY part {i + 1} "
+                                        f"({c.get('title', '')}), about {por_capitulo} words. Continue naturally "
+                                        f"from the previous text, do not repeat it and do not greet again.\n"
+                                        f"Previous text ends with:\n{previo}"
+                                        + ("\nThis is the LAST part: close with a memorable ending."
+                                           if i == len(indice) - 1 else "")}],
+            cv.MOTORES["pro"]["llm"], json_mode=False, temperatura=0.7, max_tokens=8000)
+        partes.append(texto.strip())
+    return "\n\n".join(partes)
+
+
+@ia_bp.route('/escribir_guion', methods=['POST'])
+def escribir_guion():
+    import re as _re
+    data = request.get_json(silent=True) or {}
+    idea = str(data.get("idea", "")).strip()
+    if not idea:
+        return jsonify({"success": False, "error": "Escribe la idea del video."}), 400
+    try:
+        minutos = max(0.5, min(30.0, float(data.get("minutos", 3))))
+    except (TypeError, ValueError):
+        minutos = 3.0
+    from app_secrets import get_secret
+    if not get_secret("groq", "api_key", env="GROQ_API_KEY"):
+        return jsonify({"success": False, "error": "Falta la clave de Groq: pulsa '🔑 Clave de Groq'."}), 400
+    import estilos_video
+    try:
+        guion = _guion_ia(idea[:4000], minutos, estilos_video.resolver(data.get("estilo_video") or "viral"))
+    except Exception as e:
+        return jsonify({"success": False, "error": f"No se pudo escribir el guion: {e}"}), 500
+    guion = _re.sub(r"^\s*(#+|\*\*|[-*]\s)", "", guion, flags=_re.M).replace("**", "").strip()
+    palabras = len(guion.split())
+    return jsonify({"success": True, "guion": guion, "palabras": palabras,
+                    "minutos": round(palabras / PALABRAS_POR_MINUTO, 1)})
+
+
 @ia_bp.route('/voces_guion', methods=['GET'])
 def voces_guion():
     """Voces para 'Guion a video': las de la lista y las clonadas en el Clonador de voz."""
@@ -1570,7 +1655,9 @@ def generar_imagenes():
     if modo == "audio_imagenes":
         if transcripcion == "local":
             whisper = whisper_instalado(str(data.get("whisper_local", "auto")))
-            if not whisper:
+            if not whisper and groq_key:
+                transcripcion = "groq"  # sin Whisper descargado: se transcribe en la nube
+            elif not whisper:
                 return jsonify({"success": False, "error": "Para transcribir en tu GPU descarga 'Whisper large-v3' "
                                                            "o 'Whisper large-v3-turbo' en el Gestor de Modelos."}), 400
         elif not groq_key:

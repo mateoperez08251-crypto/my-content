@@ -1494,9 +1494,9 @@
             })();
         });
     </script>
-    <link rel="stylesheet" href="/static/css/estudio_ia.css?v=5">
+    <link rel="stylesheet" href="/static/css/estudio_ia.css?v=6">
     <link rel="stylesheet" href="/static/css/tema.css?v=6">
-    <script src="/static/js/estudio_ia.js?v=5"></script>
+    <script src="/static/js/estudio_ia.js?v=6"></script>
 </head>
 
 <body>
@@ -2052,6 +2052,25 @@
 
 
     <!-- Audio Extraction Modal Overlay -->
+    <div id="claveGroqModal"
+        style="display: none; align-items: center; justify-content: center; z-index: 1000001; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;">
+        <div class="panel" style="width: 540px; max-width: 95%; padding: 28px; display: flex; flex-direction: column; gap: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0; font-size: 1.3rem;">🔑 Clave de Groq (IA gratis)</h2>
+                <button onclick="cerrarClaveGroq()" style="background: none; border: none; color: inherit; cursor: pointer; font-size: 1.4rem;"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <p style="margin: 0; color: var(--text-muted); font-size: 0.9rem; line-height: 1.5;">
+                Groq transcribe los audios y hace de <b>cerebro</b> (elige clips, escribe guiones y los prompts de cada imagen).
+                Crea tu clave gratis en <b>console.groq.com → API Keys</b>. Empieza por <code>gsk_</code>. Se guarda solo en este equipo.</p>
+            <div id="claveGroqEstado" style="font-size: 0.9rem;">Revisando…</div>
+            <input type="password" id="claveGroqInput" class="form-control" placeholder="gsk_..." autocomplete="off">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-primary" onclick="guardarClaveGroq()">Probar y guardar</button>
+                <button type="button" class="btn btn-secondary" id="claveGroqBorrar" onclick="borrarClaveGroq()" style="display:none;">Quitar</button>
+            </div>
+        </div>
+    </div>
+
     <div id="cookiesModal"
         style="display: none; align-items: center; justify-content: center; z-index: 10000; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;">
         <div class="panel" style="width: 560px; max-width: 95%; padding: 28px; display: flex; flex-direction: column; gap: 14px;">
@@ -2873,6 +2892,7 @@
                             <option value="pro" selected>Pro · GPT-OSS 120B · caras + hablante con anticipación (recomendado)</option>
                         </select>
                         <small style="color: var(--text-muted); font-size: 0.75rem;">Elige los momentos virales, escribe la descripción con #hashtags y enfoca a quien habla. La selección de clips corre en Groq; la transcripción puede ser en Groq o en tu GPU.</small>
+                        <a href="#" class="enlace-cookies" onclick="event.preventDefault(); abrirClaveGroq();">🔑 Configurar clave de Groq</a>
                         <label style="display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer;">
                             <input type="checkbox" id="smart_emojis" checked> Emojis automáticos en los subtítulos
                         </label>
@@ -3650,6 +3670,38 @@
         });
 
         // Modo servidor (RunPod): no hay explorador de Windows; se elige el archivo en el navegador y se sube.
+        async function estadoClaveGroq() {
+            const el = document.getElementById('claveGroqEstado');
+            try {
+                const d = await (await fetch('/api/clave_groq')).json();
+                el.innerHTML = d.hay ? `✅ Clave guardada (${d.vista}).` : '⚪ Sin clave: la IA en la nube no funcionará.';
+                document.getElementById('claveGroqBorrar').style.display = d.hay ? '' : 'none';
+            } catch (e) { el.textContent = 'No se pudo revisar.'; }
+        }
+        function abrirClaveGroq() {
+            const m = document.getElementById('claveGroqModal');
+            if (m.parentElement !== document.body) document.body.appendChild(m);  // encima del Estudio IA
+            m.style.display = 'flex';
+            estadoClaveGroq();
+        }
+        window.abrirClaveGroq = abrirClaveGroq;
+        function cerrarClaveGroq() { document.getElementById('claveGroqModal').style.display = 'none'; }
+        async function guardarClaveGroq() {
+            const el = document.getElementById('claveGroqEstado');
+            const clave = document.getElementById('claveGroqInput').value.trim();
+            if (!clave) { el.textContent = 'Pega tu clave primero.'; return; }
+            el.textContent = 'Probando la clave con Groq…';
+            const d = await (await fetch('/api/clave_groq', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clave }) })).json();
+            if (!d.success) { el.textContent = '❌ ' + d.error; return; }
+            document.getElementById('claveGroqInput').value = '';
+            estadoClaveGroq();
+        }
+        async function borrarClaveGroq() {
+            await fetch('/api/clave_groq', { method: 'DELETE' });
+            estadoClaveGroq();
+        }
+
         async function estadoCookies() {
             const el = document.getElementById('cookiesEstado');
             try {

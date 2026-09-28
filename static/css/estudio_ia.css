@@ -485,3 +485,5 @@
 #opciones-guion select, #opciones-audio-img select { width: 100%; }
 #select-voz-guion { width: auto !important; flex: 1 1 0; min-width: 0; }
 #opciones-guion div, #opciones-montaje div, #opciones-montaje label { min-width: 0; }
+
+.caja-guion-ia { margin-top: 10px; padding: 10px; border-radius: 10px; background: rgba(45, 212, 191, 0.07); border: 1px solid rgba(45, 212, 191, 0.25); }
