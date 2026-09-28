@@ -1454,8 +1454,13 @@ def _limpiar_origen(texto):
     if texto.startswith("http") or os.path.isfile(texto):
         return texto.split()[0] if texto.startswith("http") else texto
     import re
-    m = re.search(r"https?://[^\s\"'<>]+", texto)
-    return m.group(0) if m else texto
+    sitios = ("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch", "vimeo.com",
+              "twitter.com", "x.com", "twitch.tv", "kick.com", "dailymotion.com", "reddit.com")
+    for url in re.findall(r"https?://[^\s\"'<>]+", texto):
+        dominio = re.sub(r"^https?://(www\.|m\.)?", "", url).split("/")[0].lower()
+        if any(dominio == d or dominio.endswith("." + d) for d in sitios):
+            return url  # solo enlaces de sitios de video (no el de GitHub de la terminal)
+    return texto
 
 
 def run_smart_split_thread(data):
