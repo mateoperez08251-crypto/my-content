@@ -1180,6 +1180,44 @@ def cookies_youtube():
                     "fecha": time.strftime("%d/%m/%Y %H:%M", time.localtime(os.path.getmtime(ruta))) if hay else ""})
 
 
+def _probar_groq(clave):
+    try:
+        r = requests.get("https://api.groq.com/openai/v1/models", timeout=15,
+                         headers={"Authorization": f"Bearer {clave}"})
+    except requests.RequestException as e:
+        return False, f"No hay conexión con Groq: {e}"
+    if r.status_code == 200:
+        return True, ""
+    if r.status_code in (401, 403):
+        return False, "Groq rechazó la clave (no es válida o fue borrada)."
+    return False, f"Groq respondió {r.status_code}."
+
+
+@app.route("/api/clave_groq", methods=["GET", "POST", "DELETE"])
+def clave_groq():
+    """La clave de Groq (gsk_...) se guarda en secrets.json de este equipo, nunca en el repo."""
+    from app_secrets import load_secrets, save_secrets
+    if request.method == "GET":
+        clave = get_secret("groq", "api_key", env="GROQ_API_KEY") or ""
+        return jsonify({"success": True, "hay": bool(clave),
+                        "vista": (clave[:4] + "…" + clave[-4:]) if len(clave) > 12 else ""})
+    datos = load_secrets()
+    if request.method == "DELETE":
+        datos.pop("groq", None)
+        save_secrets(datos)
+        return jsonify({"success": True, "hay": False})
+    clave = str((request.get_json(silent=True) or {}).get("clave", "")).strip().strip('"\'')
+    if not clave.startswith("gsk_"):
+        return jsonify({"success": False, "error": "Eso no es una clave de Groq: debe empezar por gsk_. "
+                        "Créala gratis en console.groq.com → API Keys."}), 400
+    ok, error = _probar_groq(clave)
+    if not ok:
+        return jsonify({"success": False, "error": error}), 400
+    datos.setdefault("groq", {})["api_key"] = clave
+    save_secrets(datos)
+    return jsonify({"success": True, "hay": True, "vista": clave[:4] + "…" + clave[-4:]})
+
+
 @app.route("/api/browse", methods=["GET"])
 def browse():
     type_file = request.args.get('type')
@@ -1414,6 +1452,9 @@ def run_smart_split_thread(data):
     """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     _escribir_progreso_smart("Iniciando descargas...|0")
     try:
+        if not get_secret("groq", "api_key", env="GROQ_API_KEY"):
+            raise RuntimeError("Falta la clave de Groq (elige los clips con ella). Pulsa '🔑 Configurar clave "
+                               "de Groq' en esta ventana y pega tu clave gsk_...")
         source = data.get('source', '')
         if source.startswith("http"):
             _asegurar_yt_dlp()
@@ -1463,16 +1504,19 @@ def run_smart_split_thread(data):
         }
         if cfg_datos["transcripcion"] == "local":
             # Whisper local corre con el Python del motor de video (torch + GPU)
-            from modulo_ia import _motor
-            motor_ia_local = _motor()
-            if not motor_ia_local.get("listo") or not motor_ia_local.get("python_cmd"):
-                raise RuntimeError("La transcripción local necesita el motor de video instalado y con GPU "
-                                   "(ver 'Estado del motor' en el Estudio IA). Elige Groq o instala el motor.")
-            from modulo_ia import whisper_instalado
+            from modulo_ia import motor_listo, whisper_instalado
+            log("Revisando el motor de la GPU para Whisper...")
+            motor_ia_local = motor_listo()
             carpeta_whisper = whisper_instalado(cfg_datos["whisper_local"])
-            if not carpeta_whisper:
-                raise RuntimeError("Para transcribir en tu GPU descarga un modelo Whisper en el Gestor de "
-                                   "Modelos (Estudio IA): 'Whisper large-v3' o 'Whisper large-v3-turbo'.")
+            falta = None
+            if not motor_ia_local.get("listo") or not motor_ia_local.get("python_cmd"):
+                falta = "el motor de video con GPU no está listo"
+            elif not carpeta_whisper:
+                falta = "no hay un modelo Whisper descargado (Gestor de Modelos)"
+            if falta:
+                log(f"[aviso] Transcripción local no disponible ({falta}): se usa Groq.")
+                cfg_datos["transcripcion"] = "groq"
+        if cfg_datos["transcripcion"] == "local":
             cfg_datos["whisper_local"] = carpeta_whisper
             # El modelo de video que quedó cargado (RunPod) no deja sitio a Whisper en la VRAM
             from modulo_ia import liberar_gpu
@@ -1533,11 +1577,11 @@ def run_smart_split_thread(data):
                 _subir(clip_path, titulo, tiktok, facebook, youtube)
                 if _cancelado():
                     raise Exception("Cancelado.")
+        log(">>> PROCESO SMART SPLIT COMPLETADO <<<")
     except Exception as e:
         log(f"PROCESO SMART SPLIT ABORTADO: {e}")
         _escribir_progreso_smart(f"Error: {e}|-1")
     finally:
-        log(">>> PROCESO SMART SPLIT COMPLETADO <<<")
         _terminar_trabajo()
 
 

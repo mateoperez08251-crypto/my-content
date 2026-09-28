@@ -169,6 +169,35 @@ window.escucharVozGuion = function () {
     });
 };
 
+// Idea -> guion completo con la IA (Groq), con la duración elegida
+window.escribirGuionIA = async function () {
+    const area = document.getElementById('guion-texto');
+    const btn = document.getElementById('btn-escribir-guion');
+    const idea = (area?.value || '').trim();
+    if (!idea) { mostrarToast('Guion', 'Escribe primero la idea o el tema del video.', true); return; }
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Escribiendo…';
+    try {
+        const r = await fetch('/api/ia/escribir_guion', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                idea, minutos: Number(document.getElementById('select-duracion-guion')?.value || 3),
+                estilo_video: document.getElementById('select-estilo-video')?.value || 'viral',
+            }),
+        });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'No se pudo escribir el guion.');
+        area.value = d.guion;
+        mostrarToast('Guion listo', `${d.palabras} palabras (~${d.minutos} min). Revísalo y pulsa Generar.`, false);
+    } catch (e) {
+        mostrarToast('Guion', e.message, true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+    }
+};
+
 // Guion desde un archivo .txt
 window.cargarGuionArchivo = function (input, destino) {
     const f = input.files && input.files[0];

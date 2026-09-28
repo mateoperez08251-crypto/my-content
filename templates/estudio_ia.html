@@ -1,6 +1,6 @@
 <!-- Modal: Estudio IA (Pantalla Completa) -->
 <div class="estudio-overlay">
-    <link rel="stylesheet" href="/static/css/estudio_ia.css?v=5">
+    <link rel="stylesheet" href="/static/css/estudio_ia.css?v=6">
     <link rel="stylesheet" href="/static/css/tema.css?v=6">
 
     <!-- Topbar -->
@@ -54,6 +54,21 @@
                             <textarea id="guion-texto" rows="7" placeholder="Había una vez..." style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit'; resize: vertical;"></textarea>
                             <input type="file" id="guion-archivo" accept=".txt,text/plain" style="display:none" onchange="cargarGuionArchivo(this, 'guion-texto')">
                             <button onclick="document.getElementById('guion-archivo').click()" style="margin-top: 6px; background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; color: #fff; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: 'Outfit'; font-size: 0.8rem;">Cargar guion (.txt)</button>
+                            <div class="caja-guion-ia">
+                                <div style="font-size: 0.78rem; color: #cbd5e1;">✨ ¿Solo tienes una idea? Escríbela arriba (ej. "la historia del Imperio de Malí") y la IA escribe el guion completo.</div>
+                                <div style="display:flex; gap:6px; margin-top: 6px;">
+                                    <select id="select-duracion-guion" title="Duración del video" style="flex:1; min-width:0; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 7px; border-radius: 8px; font-family: 'Outfit';">
+                                        <option value="1">~1 min (Short)</option>
+                                        <option value="3" selected>~3 min</option>
+                                        <option value="5">~5 min</option>
+                                        <option value="8">~8 min (YouTube)</option>
+                                        <option value="12">~12 min (YouTube largo)</option>
+                                        <option value="20">~20 min (documental)</option>
+                                    </select>
+                                    <button id="btn-escribir-guion" type="button" onclick="escribirGuionIA()" style="background: linear-gradient(135deg, #2dd4bf, #a78bfa); border: none; color: #06231f; font-weight: 700; padding: 7px 12px; border-radius: 8px; cursor: pointer; font-family: 'Outfit'; font-size: 0.8rem; white-space: nowrap;">Escribir guion</button>
+                                </div>
+                                <a href="#" class="enlace-cookies" onclick="event.preventDefault(); window.abrirClaveGroq && abrirClaveGroq();">🔑 Clave de Groq (cerebro de la IA)</a>
+                            </div>
                             <div style="display:grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 10px;">
                                 <div style="display:flex; gap:6px;">
                                     <select id="select-voz-guion" title="Voz del narrador" style="flex:1; min-width:0; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-family: 'Outfit';">

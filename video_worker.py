@@ -1349,9 +1349,18 @@ def _una_imagen(pipe, motor, prompt, w, h, semilla, pasos, torch):
                 num_inference_steps=pasos, true_cfg_scale=4.0, generator=gen).images[0]
 
 
-def _partir_guion(texto, objetivo_seg=5.0, cps=15.0):
+MAX_ESCENAS = 200  # videos largos de YouTube: hasta 200 imágenes (Z-Image tarda ~5 s cada una)
+
+
+def _max_escenas(cfg):
+    """Qwen-Image es de máxima calidad pero lento: menos escenas para que un video largo no tarde horas."""
+    return 90 if cfg.get("motor") == "qwenimage" else MAX_ESCENAS
+
+
+def _partir_guion(texto, objetivo_seg=5.0, cps=15.0, max_escenas=None):
     """Guion -> textos de escena de ~objetivo_seg segundos hablados (~15 letras por segundo),
-    cortando en fin de frase (o en comas si una frase es muy larga). Máx. 60 escenas."""
+    cortando en fin de frase (o en comas si una frase es muy larga). Máx. max_escenas escenas."""
+    max_escenas = max_escenas or MAX_ESCENAS
     texto = re.sub(r"[ \t]+", " ", str(texto or "")).strip()
     frases = [f.strip() for f in re.split(r"(?<=[.!?…])\s+|\n+", texto) if f.strip()]
     trozos = []
@@ -1382,7 +1391,7 @@ def _partir_guion(texto, objetivo_seg=5.0, cps=15.0):
                 escenas[-1] = f"{escenas[-1]} {actual}"
             else:
                 escenas.append(actual)
-        if len(escenas) <= 60:
+        if len(escenas) <= max_escenas:
             return escenas
         objetivo *= 1.4
 
@@ -1444,6 +1453,7 @@ def _escenas_desde_audio(cfg, torch):
     if total <= 0:
         raise RuntimeError("No se pudo leer el audio (¿archivo dañado?).")
     objetivo = max(2.0, float(cfg.get("escena_seg") or 5))
+    maximo = _max_escenas(cfg)
     proveedor = "local" if cfg.get("transcripcion") == "local" else "groq"
     progreso(4, 1, "Transcribiendo el audio en tu GPU (Whisper)..." if proveedor == "local"
              else "Transcribiendo el audio (Groq)...")
@@ -1453,8 +1463,14 @@ def _escenas_desde_audio(cfg, torch):
         # Un modelo de video/imagen cargado de antes + Whisper no caben juntos: se libera antes
         progreso(3, 1, "Liberando la GPU para Whisper...")
         _vaciar_persistente(torch)
+    # Whisper local en su propio proceso: al terminar, TODA su RAM y VRAM vuelve al sistema
+    # (dentro del motor, un audio largo dejaba memoria ocupada para el modelo de imagen).
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "transcripcion_local.py")
+    aislado = proveedor == "local" and os.path.exists(script)
     palabras, segmentos = cv.transcribir(audio, idioma=cfg.get("idioma") or "es", proveedor=proveedor,
-                                         modelo_local=cfg.get("whisper_local") or "auto")
+                                         modelo_local=cfg.get("whisper_local") or "auto",
+                                         python_local=sys.executable if aislado else "",
+                                         script_local=script if aislado else "")
     _liberar_vram(torch)
     cfg["_palabras"] = palabras  # para los subtítulos
     frs = cv.frases(palabras, segmentos, max_seg=max(objetivo * 1.5, 6.0)) if palabras or segmentos else []
@@ -1470,11 +1486,11 @@ def _escenas_desde_audio(cfg, torch):
                 escenas[-1].extend(actual)
             else:
                 escenas.append(actual)
-        if len(escenas) <= 60:
+        if len(escenas) <= maximo:
             break
-        objetivo *= 1.5  # audios muy largos: escenas más largas (máx. 60 imágenes)
+        objetivo *= 1.25  # audios muy largos: escenas algo más largas (máx. `maximo` imágenes)
     if not escenas:  # música sin voz: escenas por tiempo
-        n = max(1, min(60, int(math.ceil(total / objetivo))))
+        n = max(1, min(maximo, int(math.ceil(total / objetivo))))
         return [{"texto": "", "inicio": total * i / n, "fin": total * (i + 1) / n} for i in range(n)]
     res = [{"texto": " ".join(f["text"] for f in e).strip(), "inicio": e[0]["start"], "fin": e[-1]["end"]}
            for e in escenas]
@@ -1485,22 +1501,94 @@ def _escenas_desde_audio(cfg, torch):
     return res
 
 
-def _prompts_escenas(escenas, cfg):
-    """Un prompt visual por escena, coherente entre sí (mismo estilo y personajes). Usa el Director
-    IA local (Ollama) si está; si no, Groq; si no, el texto de la escena con el estilo."""
+LOTE_ESCENAS = 12  # escenas por llamada al Director: la respuesta nunca se corta aunque el video sea largo
+
+
+def _llm_json(mensajes, cfg, max_tokens=8000):
+    """JSON del Director IA: Groq (GPT-OSS 120B, el más listo) primero; si no hay clave o falla,
+    el Director local (Ollama)."""
     import clips_virales as cv
     import requests
+    if cfg.get("groq_key"):
+        try:
+            os.environ["GROQ_API_KEY"] = cfg["groq_key"]
+            texto, _ = cv.chat(mensajes, cv.MOTORES["pro"]["llm"], json_mode=True, temperatura=0.6,
+                               max_tokens=max_tokens)
+            datos = cv._leer_json(texto)
+            if datos:
+                return datos
+        except Exception as e:
+            print(f"[aviso] Groq no respondió al Director ({e})", flush=True)
+    try:
+        r = requests.post("http://127.0.0.1:11434/api/chat", timeout=(3, 900), json={
+            "model": cfg.get("ollama_modelo") or "llama3", "messages": mensajes, "stream": False,
+            "format": "json", "keep_alive": 0, "options": {"num_ctx": 16384, "temperature": 0.6}})
+        if r.status_code == 200:
+            return cv._leer_json(r.json().get("message", {}).get("content", "")) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _biblia_visual(historia, estilo, cfg):
+    """El 'cerebro': antes de dibujar, entiende dónde y cuándo pasa la historia y cómo son su gente
+    y sus personajes, para que todas las imágenes sean fieles (lugar, época, etnia, ropa) y coherentes."""
+    sistema = (
+        "You are the research lead and art director of a documentary studio. Read the WHOLE story and decide the "
+        "visual world so every image is accurate and consistent. Infer everything from context (names, places, "
+        "language, dates, history, culture). Never default to Western or white people or to a modern American "
+        "setting unless the story really is there. People must match the real population of that place and era: "
+        "ethnicity, skin tone, facial features, hairstyles, clothing, jewelry (e.g. a story in rural Kenya shows "
+        "Black East African people; in the Mali Empire, West African people in period clothing; in Edo Japan, "
+        "Japanese people in period dress; in the Andes, Quechua people). Get landscape, climate, vegetation, "
+        "architecture, vehicles, technology and objects right for the era; avoid anachronisms. Be respectful: "
+        "no caricatures or stereotypes. Give every recurring character a fixed, detailed look to reuse "
+        "identically. Reply ONLY with JSON: {\"setting\": \"country/region, places, landscape, climate, "
+        "architecture\", \"era\": \"year or period and what that implies visually\", \"people\": \"how the "
+        "people there look and dress\", \"characters\": [{\"name\": \"...\", \"look\": \"age, gender, "
+        "ethnicity, skin tone, face, hair, body, clothes, accessories\"}], \"style\": \"shared visual style, "
+        "palette, lighting, mood\", \"avoid\": \"what must NOT appear\"}")
+    datos = _llm_json([{"role": "system", "content": sistema},
+                       {"role": "user", "content": f"Requested visual style: {estilo}\n\nStory:\n{historia[:14000]}"}],
+                      cfg, max_tokens=4000)
+    return datos if isinstance(datos, dict) else {}
+
+
+def _texto_biblia(b):
+    if not b:
+        return ""
+    partes = [f"Setting: {b.get('setting')}" if b.get("setting") else "",
+              f"Era: {b.get('era')}" if b.get("era") else "",
+              f"People: {b.get('people')}" if b.get("people") else "",
+              f"Style: {b.get('style')}" if b.get("style") else "",
+              f"Avoid: {b.get('avoid')}" if b.get("avoid") else ""]
+    for c in b.get("characters") or []:
+        if isinstance(c, dict) and c.get("name"):
+            partes.append(f"Character {c.get('name')}: {c.get('look', '')}")
+    return "\n".join(p for p in partes if p)
+
+
+def _prompts_escenas(escenas, cfg):
+    """Un prompt visual por escena, fiel a la historia y coherente entre sí. Primero la 'biblia
+    visual' (lugar, época, gente, personajes) y luego las escenas por lotes, con Groq o el Director local."""
     estilo = (cfg.get("prompt") or "").strip() or "cinematic, photorealistic, dramatic lighting, high detail"
+    guion = (cfg.get("guion") or "").strip()
+    historia = guion or " ".join(e["texto"] for e in escenas if e["texto"])
+    biblia = _biblia_visual(historia, estilo, cfg) if historia else {}
+    texto_biblia = _texto_biblia(biblia)
+    if biblia:
+        print(f"[director] biblia visual:\n{texto_biblia}", flush=True)
     sistema = (
         "You are an art director turning a narrated story into a sequence of images, one per scene. "
-        "First understand the WHOLE story (who, where, mood, how it evolves). Then for EACH scene write one "
-        "English image prompt that clearly shows what that part says: subject, action, setting, lighting and "
-        "camera framing, 40-80 words. Vary the shots like a film editor (wide establishing, medium, close-up, "
-        "detail, over-the-shoulder) so consecutive images never look the same. Keep the sequence coherent: the "
-        "same visual style and, if there are recurring characters, describe them identically every time "
-        "(age, hair, clothes). Make every image EXPRESSIVE: faces with clear, strong emotions that match "
-        "what is being said (fear, joy, surprise, anger, sadness, determination), dynamic poses and gestures, "
-        "and details that literally show the words of the narration. "
+        "For EACH scene write one English image prompt that clearly shows what that part says: subject, action, "
+        "setting, lighting and camera framing, 40-80 words. Follow the VISUAL BIBLE strictly: same place, era, "
+        "people (ethnicity, skin tone, clothing) and characters described IDENTICALLY every time they appear "
+        "(repeat their full look, never just the name). Show people who really belong to that place and era. "
+        "Vary the shots like a film editor (wide establishing, medium, close-up, detail, over-the-shoulder, "
+        "aerial) so consecutive images never look the same. Make every image EXPRESSIVE: faces with clear, strong "
+        "emotions that match what is being said, dynamic poses and gestures, and details that literally show "
+        "the words of the narration. If a scene is abstract (an idea, a number, a feeling), show a concrete "
+        "symbolic image from that world. "
         f"Requested style: {estilo}. " + (
             "When it helps tell the story, include ONE short text (1-4 words, in the SAME language as the "
             "narration, taken from what is said) rendered INSIDE the scene as a real object: a neon sign, a "
@@ -1511,48 +1599,47 @@ def _prompts_escenas(escenas, cfg):
             "Never put text, letters, signs or captions in the images. ") +
         "Also pick a camera motion for each scene that fits it: zoom_in (tension, focus on a detail), zoom_out "
         "(reveal), pan_left/pan_right (travel, landscapes), pan_up/pan_down (tall subjects), diag_in/diag_out. "
-        'Reply ONLY with JSON: {"style": "short shared style description", '
-        '"scenes": [{"n": 1, "prompt": "...", "motion": "zoom_in"}]}')
-    guion = (cfg.get("guion") or "").strip()
-    lineas = "\n".join(f"{i + 1}. [{e['inicio']:.1f}-{e['fin']:.1f}s] {e['texto'] or '(music, no speech)'}"
-                        for i, e in enumerate(escenas))
-    if guion:
-        lineas = f"Full story for context:\n{guion[:6000]}\n\nScenes:\n{lineas}"
-    mensajes = [{"role": "system", "content": sistema}, {"role": "user", "content": lineas}]
-    datos = {}
-    try:  # Director IA local (Ollama), si está corriendo
-        r = requests.post("http://127.0.0.1:11434/api/chat", timeout=(3, 600), json={
-            "model": cfg.get("ollama_modelo") or "llama3", "messages": mensajes, "stream": False,
-            "format": "json", "keep_alive": 0, "options": {"num_ctx": 8192, "temperature": 0.6}})
-        if r.status_code == 200:
-            datos = cv._leer_json(r.json().get("message", {}).get("content", ""))
-    except Exception:
-        datos = {}
-    if not datos.get("scenes") and cfg.get("groq_key"):
-        try:
-            os.environ["GROQ_API_KEY"] = cfg["groq_key"]
-            texto, _ = cv.chat(mensajes, cv.MOTORES["pro"]["llm"], json_mode=True, temperatura=0.6)
-            datos = cv._leer_json(texto)
-        except Exception as e:
-            print(f"[aviso] Groq no pudo escribir los prompts ({e})", flush=True)
-    estilo_global = str(datos.get("style") or estilo).strip()
+        'Reply ONLY with JSON: {"scenes": [{"n": 1, "prompt": "...", "motion": "zoom_in"}]}')
+    if texto_biblia:
+        sistema += "\n\nVISUAL BIBLE (must follow):\n" + texto_biblia
+    contexto = f"Full story for context:\n{historia[:6000]}\n\n" if historia else ""
     por_n, movs = {}, {}
-    for sc in datos.get("scenes") or []:
-        try:
-            por_n[int(sc.get("n"))] = str(sc.get("prompt") or "").strip()
-            movs[int(sc.get("n"))] = str(sc.get("motion") or "").strip().lower()
-        except (TypeError, ValueError):
-            continue
+    previo = ""
+    lotes = range(0, len(escenas), LOTE_ESCENAS)
+    for k, a in enumerate(lotes):
+        b = min(len(escenas), a + LOTE_ESCENAS)
+        if len(escenas) > LOTE_ESCENAS:
+            progreso(12 + 8 * k / max(1, len(lotes)), 1, f"Director IA: escenas {a + 1}-{b} de {len(escenas)}...")
+        lineas = "\n".join(f"{i + 1}. [{escenas[i]['inicio']:.1f}-{escenas[i]['fin']:.1f}s] "
+                           f"{escenas[i]['texto'] or '(music, no speech)'}" for i in range(a, b))
+        pedido = (f"{contexto}Write the prompts for scenes {a + 1} to {b} (keep their numbers):\n{lineas}"
+                  + (f"\n\nThe previous image was: {previo}" if previo else ""))
+        datos = _llm_json([{"role": "system", "content": sistema}, {"role": "user", "content": pedido}], cfg)
+        for sc in datos.get("scenes") or []:
+            try:
+                n = int(sc.get("n"))
+                por_n[n] = str(sc.get("prompt") or "").strip()
+                movs[n] = str(sc.get("motion") or "").strip().lower()
+            except (TypeError, ValueError, AttributeError):
+                continue
+        previo = por_n.get(b, previo)
     cfg["_movimientos"] = [movs.get(i + 1, "") for i in range(len(escenas))]
     if not por_n:
-        aviso("No hay Director IA (Ollama/Groq): cada imagen usa el texto de su escena con tu estilo.")
+        aviso("No hay Director IA (clave de Groq u Ollama): cada imagen usa el texto de su escena con tu estilo.")
+    elif len(por_n) < len(escenas):
+        aviso(f"El Director IA describió {len(por_n)} de {len(escenas)} escenas; el resto usa su texto.")
+    estilo_global = str(biblia.get("style") or estilo).strip()
+    lugar = ", ".join(str(biblia[c]) for c in ("setting", "era") if biblia.get(c))[:300]
     prompts = []
     for i, e in enumerate(escenas):
-        base = (por_n.get(i + 1) or e["texto"] or estilo).strip()
+        propio = por_n.get(i + 1)
+        base = (propio or e["texto"] or estilo).strip()
+        if not propio and biblia.get("people"):
+            base += f". People: {str(biblia['people'])[:200]}"
         if not cfg.get("texto_en_imagen", True):
             base = _sin_letreros(base)  # sin letreros: el modelo dibujaría letras sin sentido
         base = base.rstrip(".")
-        prompts.append(f"{base}. Style: {estilo_global}")
+        prompts.append(f"{base}. {('Setting: ' + lugar + '. ') if lugar else ''}Style: {estilo_global}")
     return prompts
 
 
@@ -1718,7 +1805,7 @@ def generar_imagenes(cfg):
             cfg["escena_seg"] = estilo["escena_seg"]
     escenas = None
     if tarea == "guion_video":
-        textos = _partir_guion(cfg.get("guion"), cfg.get("escena_seg") or 5)
+        textos = _partir_guion(cfg.get("guion"), cfg.get("escena_seg") or 5, max_escenas=_max_escenas(cfg))
         if not textos:
             raise RuntimeError("El guion está vacío.")
         escenas = _narrar(cfg, textos, torch)
