@@ -24,7 +24,13 @@ if len(sys.argv) > 1 and sys.argv[1] in ("--run-editor", "--run-subidor", "--run
 MODO_SERVIDOR = "--servidor" in sys.argv or os.environ.get("CONTENTAPP_SERVIDOR") == "1"
 if not getattr(sys, "frozen", False):
     # Programas que pip deja junto a este Python (deno para yt-dlp, etc.) deben estar en el PATH
-    os.environ["PATH"] = os.path.dirname(os.path.abspath(sys.executable)) + os.pathsep + os.environ.get("PATH", "")
+    import sysconfig
+    _extra = [os.path.dirname(os.path.abspath(sys.executable)), sysconfig.get_path("scripts")]
+    try:
+        _extra.append(sysconfig.get_path("scripts", f"{os.name}_user"))
+    except Exception:
+        pass
+    os.environ["PATH"] = os.pathsep.join([p for p in _extra if p] + [os.environ.get("PATH", "")])
 if MODO_SERVIDOR:
     os.environ["CONTENTAPP_SERVIDOR"] = "1"
 
@@ -1132,6 +1138,46 @@ def subir_archivo():
     destino = os.path.join(carpeta, f"{int(time.time())}_{nombre}")
     archivo.save(destino)
     return jsonify({"success": True, "path": destino})
+
+
+def _cookies_a_netscape(texto):
+    """Acepta cookies.txt (Netscape) o el JSON de extensiones como Cookie-Editor."""
+    texto = texto.strip().lstrip("﻿")
+    if texto.startswith("["):
+        filas = ["# Netscape HTTP Cookie File"]
+        for c in json.loads(texto):
+            dominio = c.get("domain", "")
+            filas.append("\t".join([
+                dominio, "TRUE" if dominio.startswith(".") else "FALSE", c.get("path", "/"),
+                "TRUE" if c.get("secure") else "FALSE", str(int(c.get("expirationDate") or 0)),
+                c.get("name", ""), c.get("value", "")]))
+        texto = "\n".join(filas)
+    if "youtube.com" not in texto:
+        raise ValueError("El archivo no trae cookies de youtube.com. Expórtalo con youtube.com abierto y tu sesión iniciada.")
+    return texto + "\n"
+
+
+@app.route("/api/cookies_youtube", methods=["GET", "POST", "DELETE"])
+def cookies_youtube():
+    """cookies.txt de YouTube: sin ellas YouTube bloquea descargas desde servidores (RunPod)."""
+    ruta = paths.data_path("cookies_youtube.txt")
+    if request.method == "DELETE":
+        if os.path.exists(ruta):
+            os.remove(ruta)
+        return jsonify({"success": True, "hay": False})
+    if request.method == "POST":
+        archivo = request.files.get("archivo")
+        texto = archivo.read().decode("utf-8", "replace") if archivo else (request.form.get("texto") or "")
+        try:
+            limpio = _cookies_a_netscape(texto)
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        with open(ruta, "w", encoding="utf-8") as f:
+            f.write(limpio)
+    hay = os.path.isfile(ruta) and os.path.getsize(ruta) > 0
+    return jsonify({"success": True, "hay": hay,
+                    "fecha": time.strftime("%d/%m/%Y %H:%M", time.localtime(os.path.getmtime(ruta))) if hay else ""})
 
 
 @app.route("/api/browse", methods=["GET"])

@@ -20,7 +20,8 @@ def extract_audio(source_path, output_dir):
         output_template = os.path.join(output_dir, f"audio_extraido_{file_id}.%(ext)s")
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
         
-        ydl_opts = {
+        import yt_downloader
+        ydl_opts = dict(yt_downloader.opciones_base(), **{
             'format': 'bestaudio/best',
             'outtmpl': output_template,
             'ffmpeg_location': ffmpeg_path,
@@ -30,10 +31,13 @@ def extract_audio(source_path, output_dir):
                 'preferredquality': '192',
             }],
             'quiet': False
-        }
+        })
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.extract_info(source_path, download=True)
+            try:
+                ydl.extract_info(source_path, download=True)
+            except Exception as e:
+                raise Exception(yt_downloader.mensaje_error(e)) from None
             # yt-dlp cambia la extensin a mp3 por el postprocessor
             expected_output = os.path.join(output_dir, f"audio_extraido_{file_id}.mp3")
             if os.path.exists(expected_output):

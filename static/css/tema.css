@@ -180,3 +180,8 @@ input[type="file"]::file-selector-button {
 }
 input[type="file"]::file-selector-button:hover { background: rgba(45, 212, 191, 0.22); }
 .view-tab.active { background: var(--suave-degradado) !important; color: #06231f !important; }
+
+/* Cookies de YouTube */
+.btn-cookies { padding: 0 12px !important; font-size: 1.05rem; }
+.enlace-cookies { display: inline-block; margin-top: 8px; font-size: 0.82rem; color: var(--accent-primary); text-decoration: none; opacity: 0.85; }
+.enlace-cookies:hover { opacity: 1; text-decoration: underline; }
