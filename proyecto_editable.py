@@ -91,7 +91,7 @@ def escribir_mlt(ruta, escenas, imagenes_rel, audios_rel, fps, W, H, total_frame
     from math import gcd
     g = gcd(W, H)
     x = ['<?xml version="1.0" encoding="utf-8"?>',
-         f'<mlt LC_NUMERIC="C" version="7.0.0" title="Content App" producer="main_bin">',
+         '<mlt LC_NUMERIC="C" version="7.0.0" title="Content App" producer="main_bin">',
          f'  <profile description="{W}x{H} {fps} fps" width="{W}" height="{H}" progressive="1" '
          f'sample_aspect_num="1" sample_aspect_den="1" display_aspect_num="{W // g}" display_aspect_den="{H // g}" '
          f'frame_rate_num="{fps}" frame_rate_den="1" colorspace="709"/>']
