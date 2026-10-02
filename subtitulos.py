@@ -122,6 +122,16 @@ def _carpeta(nombre):
 
 def ruta_fuente(fid):
     """Archivo .ttf de la fuente (se baja de fontsource la primera vez). None si no hay internet."""
+    if fid == "cjk":
+        candidates = [os.environ.get("SMART_SPLIT_CJK_FONT", ""),
+            os.path.join(_carpeta("fuentes"), "NotoSansCJK-Regular.ttc"),
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "C:/Windows/Fonts/NotoSansCJK-Regular.ttc"]
+        for candidate in candidates:
+            if candidate and os.path.isfile(candidate):
+                return candidate
+        raise RuntimeError("Instala Noto Sans CJK y define SMART_SPLIT_CJK_FONT con su ruta, "
+                           "o desactiva los subtítulos para este doblaje.")
     if fid not in FUENTES:
         fid = "montserrat"
     _, paquete, peso, estilo = FUENTES[fid]

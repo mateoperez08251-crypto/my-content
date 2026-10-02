@@ -48,7 +48,7 @@ echo       OK
 :: 4. Instalar dependencias del proyecto
 :: ============================================
 echo [2/5] Instalando dependencias del proyecto...
-py -m pip install flask firebase-admin pyautogui pynput send2trash requests pyperclip imageio imageio-ffmpeg pillow opencv-python mediapipe pystray --quiet
+py -m pip install flask firebase-admin pyautogui pynput send2trash requests pyperclip imageio imageio-ffmpeg pillow opencv-python mediapipe pystray edge-tts --quiet
 echo       OK
 
 :: ============================================
@@ -89,6 +89,7 @@ copy /y "editor.py" "%DIST%\" >nul 2>&1
 copy /y "api_subidor.py" "%DIST%\" >nul 2>&1
 copy /y "api_clonador_flask.py" "%DIST%\" >nul 2>&1
 copy /y "smart_editor.py" "%DIST%\" >nul 2>&1
+copy /y "smart_dubbing.py" "%DIST%\" >nul 2>&1
 copy /y "audio_extractor.py" "%DIST%\" >nul 2>&1
 copy /y "audio_separator.py" "%DIST%\" >nul 2>&1
 copy /y "yt_downloader.py" "%DIST%\" >nul 2>&1

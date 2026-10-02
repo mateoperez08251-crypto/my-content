@@ -1499,8 +1499,13 @@ def run_smart_split_thread(data):
             "end_time": data.get('end_time', ''),
             "subtitle_scale": float(data.get('subtitle_scale', 100)),
             "subtitle_style": data.get('style', 'style5'),
-            "anti_copyright_filter": data.get('anti_copyright_filter', True),
-            "anti_copyright_audio": data.get('anti_copyright_audio', True),
+            "anti_copyright_filter": data.get('anti_copyright_filter', False),
+            "anti_copyright_audio": False,
+            "dubbing_language": data.get('dubbing_language', 'original'),
+            "dubbing_voice": data.get('dubbing_voice', 'female'),
+            "original_volume": data.get('original_volume', 1.0),
+            "show_subtitles": data.get('show_subtitles', True),
+            "normalize_audio": data.get('normalize_audio', False),
             "bg_music": data.get('bg_music', ''),
             "show_progress_bar": data.get('show_progress_bar', True),
             "motor_ia": data.get('motor_ia', 'pro'),
@@ -1604,6 +1609,14 @@ def run_smart_split_thread(data):
 @app.route("/api/smart_split", methods=["POST"])
 def smart_split_api():
     data = request.get_json(silent=True) or {}
+    from smart_dubbing import validate_options
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "Se esperaba un objeto JSON."}), 400
+    try:
+        validate_options(data.get('dubbing_language', 'original'), data.get('dubbing_voice', 'female'),
+                         data.get('original_volume', 1.0))
+    except (ValueError, TypeError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "error": "Ya hay una automatización en curso"})
     _escribir_progreso_smart("Iniciando...|0")

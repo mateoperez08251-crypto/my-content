@@ -5,9 +5,12 @@ import numpy as np
 import cv2
 from PIL import Image, ImageDraw
 import math
+import tempfile
+from contextlib import ExitStack
+from smart_dubbing import validate_options, dub
 
 # Se requiere moviepy 2.x (API subclipped/with_*).
-from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_audioclips
+from moviepy import VideoFileClip, AudioFileClip
 
 import imageio_ffmpeg
 import subprocess
@@ -194,17 +197,21 @@ def parse_time(ts):
     except: return None
 
 def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, start_time="", end_time="",
-                        subtitle_scale=100, subtitle_style="style5", anti_copyright_filter=True,
-                        anti_copyright_audio=True, bg_music="", show_progress_bar=True,
+                        subtitle_scale=100, subtitle_style="style5", anti_copyright_filter=False,
+                        anti_copyright_audio=False, bg_music="", show_progress_bar=True,
                         motor_ia="pro", emojis=True, meta_salida=None, titulo_en_video=False,
                         transcripcion="groq", whisper_local="auto", python_motor="", script_local="",
-                        encuadre="caras", sub_opciones=None, efectos=True, vol_musica=0.2):
+                        encuadre="caras", sub_opciones=None, efectos=True, vol_musica=0.2,
+                        dubbing_language="original", dubbing_voice="female", original_volume=1.0,
+                        show_subtitles=True, normalize_audio=False):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
     import clips_virales as cv
     import reencuadre
 
+    dubbing_language, dubbing_voice, original_volume = validate_options(
+        dubbing_language, dubbing_voice, original_volume)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
     write_progress("Iniciando Smart Split...", 3)
     print(f"Iniciando Smart Split · motor: {motor['nombre']}")
@@ -225,142 +232,139 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     print("Transcripción completada. Total palabras:", len(words))
 
     clip = VideoFileClip(video_path)
-    base = 0.0
-    if s_time is not None or e_time is not None:
-        base = s_time or 0.0
-        fin_video = min(e_time if e_time is not None else clip.duration, clip.duration)
-        clip = clip.subclipped(base, fin_video)
-    total_duration = clip.duration
+    try:
+        base = 0.0
+        if s_time is not None or e_time is not None:
+            base = s_time or 0.0
+            fin_video = min(e_time if e_time is not None else clip.duration, clip.duration)
+            clip = clip.subclipped(base, fin_video)
+        total_duration = clip.duration
 
-    # 2. Momentos virales (frases completas, duración decidida por el contenido)
-    write_progress("Buscando los momentos más virales (IA)...", 22)
-    frs = cv.frases(words, segmentos)
-    seleccion = cv.seleccionar(frs, int(num_clips), float(clip_duration), total_duration,
-                               motor=motor_ia, avisar=print)
-    for c in seleccion:
-        print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['puntuacion']}/100 · {c['titulo']}")
+        # 2. Momentos virales (frases completas, duración decidida por el contenido)
+        write_progress("Buscando los momentos más virales (IA)...", 22)
+        frs = cv.frases(words, segmentos)
+        seleccion = cv.seleccionar(frs, int(num_clips), float(clip_duration), total_duration,
+                                   motor=motor_ia, avisar=print)
+        for c in seleccion:
+            print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['puntuacion']}/100 · {c['titulo']}")
 
-    orig_w, orig_h = clip.w, clip.h
-    fixed_crop_w = int(orig_h * 9 / 16) if (orig_w / orig_h) > (9 / 16) else orig_w
-    final_w, final_h = 1080, 1920
+        orig_w, orig_h = clip.w, clip.h
+        fixed_crop_w = int(orig_h * 9 / 16) if (orig_w / orig_h) > (9 / 16) else orig_w
+        final_w, final_h = 1080, 1920
 
-    generated_files = []
-    base_dummy_clip = None
-    if anti_copyright_audio:
-        dummy_audio_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dummy.wav')
-        if os.path.exists(dummy_audio_path):
-            _dc = AudioFileClip(dummy_audio_path)
-            base_dummy_clip = _dc.with_volume_scaled(0.005)
-    # la música se mezcla al final con ffmpeg (baja sola cuando hablan)
-    encuadre = encuadre if encuadre in ENCUADRES else "caras"
+        generated_files = []
+        # la música se mezcla al final con ffmpeg (baja sola cuando hablan)
+        encuadre = encuadre if encuadre in ENCUADRES else "caras"
 
-    palabras_abs = [{"start": w["start"] + base, "end": w["end"] + base} for w in words]
+        palabras_abs = [{"start": w["start"] + base, "end": w["end"] + base} for w in words]
 
-    for idx, info in enumerate(seleccion):
-        st, et, gen_title = info["inicio"], info["fin"], info["titulo"]
-        if not titulo_en_video:  # el título va en la descripción; dentro del video es opcional
-            gen_title = ""
-        parte_num = idx + 1
-        tramo = 70 / max(len(seleccion), 1)
-        p0 = 25 + int(idx * tramo)
+        for idx, info in enumerate(seleccion):
+            st, et, gen_title = info["inicio"], info["fin"], info["titulo"]
+            if not titulo_en_video:  # el título va en la descripción; dentro del video es opcional
+                gen_title = ""
+            parte_num = idx + 1
+            tramo = 70 / max(len(seleccion), 1)
+            p0 = 25 + int(idx * tramo)
 
-        # 3. Reencuadre: caras + hablante activo, anticipándose a quien va a hablar
-        write_progress(f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0)
-        if fixed_crop_w < orig_w and encuadre in ("caras", "zoom_dinamico"):
-            tiempos, centros = reencuadre.calcular_trayectoria(
-                video_path, base + st, base + et, fixed_crop_w, palabras_abs, motor["reencuadre"],
-                progreso=lambda f, p0=p0, tramo=tramo: write_progress(
-                    f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.3 * f)))
-        else:
-            tiempos, centros = [0.0], [orig_w / 2]
+            # 3. Reencuadre: caras + hablante activo, anticipándose a quien va a hablar
+            write_progress(f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0)
+            if fixed_crop_w < orig_w and encuadre in ("caras", "zoom_dinamico"):
+                tiempos, centros = reencuadre.calcular_trayectoria(
+                    video_path, base + st, base + et, fixed_crop_w, palabras_abs, motor["reencuadre"],
+                    progreso=lambda f, p0=p0, tramo=tramo: write_progress(
+                        f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.3 * f)))
+            else:
+                tiempos, centros = [0.0], [orig_w / 2]
 
-        # 4. Subtítulos (motor nuevo) con emojis elegidos por la IA
-        palabras_clip = [w for w in words if w["start"] >= st - 0.3 and w["end"] <= et + 0.3]
-        subs = _crear_subs(palabras_clip, final_w, final_h, subtitle_style, subtitle_scale, sub_opciones,
-                           emojis, motor_ia)
-        pulsos = _pulsos_zoom(subs) if encuadre == "zoom_dinamico" else []
+            with ExitStack() as resources:
+                translated = ""
+                palabras_clip = [w for w in words if w["start"] >= st and w["end"] <= et]
+                subclip = clip.subclipped(st, et)
+                final_audio = subclip.audio.with_volume_scaled(original_volume) if subclip.audio is not None else None
+                if dubbing_language != "original":
+                    write_progress(f"Traduciendo y doblando clip {parte_num}...", p0 + int(tramo * 0.3))
+                    directory = resources.enter_context(tempfile.TemporaryDirectory(prefix="smart_dub_"))
+                    voice_path, marks, translated = dub(palabras_clip, et - st, dubbing_language,
+                                                        dubbing_voice, motor_ia, directory)
+                    voice_audio = resources.enter_context(AudioFileClip(voice_path))
+                    final_audio = voice_audio  # reemplaza la pista original completa, sin mezclar dos idiomas
+                    palabras_clip = [{**w, "start": w["start"] + st, "end": w["end"] + st} for w in marks]
+                opciones_sub = dict(sub_opciones or {})
+                if dubbing_language in ("ja", "ko") and show_subtitles:
+                    opciones_sub["fuente"] = "cjk"
+                subs = _crear_subs(palabras_clip if show_subtitles else [], final_w, final_h, subtitle_style, subtitle_scale, opciones_sub,
+                                   emojis, motor_ia)
+                pulsos = _pulsos_zoom(subs) if encuadre == "zoom_dinamico" else []
+                write_progress(f"Renderizando clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.35))
 
-        write_progress(f"Renderizando clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.35))
-        subclip = clip.subclipped(st, et)
+                def process_frame(get_frame, t, st=st, et=et, tiempos=tiempos, centros=centros, gen_title=gen_title,
+                                  subs=subs, pulsos=pulsos):
+                    frame = get_frame(t)
+                    cx = reencuadre.centro_en(tiempos, centros, t)
+                    zoom = _zoom_en(pulsos, st + t) if pulsos else 1.0
+                    recorte = _encuadrar(frame, encuadre, cx, fixed_crop_w, final_w, final_h, zoom)
+                    if anti_copyright_filter:
+                        recorte = cv2.convertScaleAbs(recorte, alpha=1.01, beta=1)
+                        f32 = recorte.astype(np.float32)
+                        f32[:, :, 0] += 1.0
+                        f32[:, :, 2] += 0.5
+                        recorte = np.clip(f32, 0, 255).astype(np.uint8)
+                    return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar)
 
-        def process_frame(get_frame, t, st=st, et=et, tiempos=tiempos, centros=centros, gen_title=gen_title,
-                          subs=subs, pulsos=pulsos):
-            frame = get_frame(t)
-            cx = reencuadre.centro_en(tiempos, centros, t)
-            zoom = _zoom_en(pulsos, st + t) if pulsos else 1.0
-            recorte = _encuadrar(frame, encuadre, cx, fixed_crop_w, final_w, final_h, zoom)
-            if anti_copyright_filter:
-                recorte = cv2.convertScaleAbs(recorte, alpha=1.01, beta=1)
-                f32 = recorte.astype(np.float32)
-                f32[:, :, 0] += 1.0
-                f32[:, :, 2] += 0.5
-                recorte = np.clip(f32, 0, 255).astype(np.uint8)
-            return _componer(recorte, st + t, subs, gen_title, st, et, final_w, final_h, show_progress_bar)
+                processed_clip = subclip.transform(process_frame)
+                processed_clip = processed_clip.with_audio(final_audio)
 
-        processed_clip = subclip.transform(process_frame)
-        final_audio = subclip.audio
-        for extra in (base_dummy_clip,):
-            if extra is not None and final_audio is not None:
+                out_base, ext = os.path.splitext(output_path)
+                out_dir = os.path.dirname(output_path)
+                if out_dir:
+                    os.makedirs(out_dir, exist_ok=True)
+                safe_title = re.sub(r'[\\/*?:"<>|#]', "", gen_title).strip().replace(" ", "_").lower()[:50]
+                out_name = os.path.join(out_dir, f"{safe_title}_{parte_num}{ext}") if safe_title else f"{out_base}_parte_{parte_num}{ext}"
+                raiz_out, ext_out = os.path.splitext(out_name)
+                n_copia = 2
+                while os.path.exists(out_name):
+                    out_name = f"{raiz_out}_{n_copia}{ext_out}"
+                    n_copia += 1
+
+                import gpu_video
+                opciones = gpu_video.opciones_moviepy(preset_cpu="fast")
+                if idx == 0:
+                    print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
+                processed_clip.write_videofile(out_name, audio_codec="aac", threads=max(2, os.cpu_count() or 2),
+                                               logger=None, **opciones)
+                eventos = [(g["inicio"] - st, "pop", 0.6) for g in subs.subs if g.get("emoji")] if efectos else []
+                if (bg_music and os.path.exists(bg_music)) or eventos or normalize_audio:
+                    write_progress(f"Mezclando música y efectos · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.95))
+                    try:
+                        import audio_mix
+                        _mezclar_en_video(out_name, bg_music if bg_music and os.path.exists(bg_music) else "", vol_musica,
+                                          eventos, subclip.duration, audio_mix)
+                    except Exception as e:
+                        raise RuntimeError(f"No se pudo aplicar la mezcla o normalización solicitada: {e}") from e
+                generated_files.append(out_name)
+
+                # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
+                publicacion = cv.texto_publicacion(info)
                 try:
-                    vueltas = math.ceil(subclip.duration / extra.duration)
-                    pista = concatenate_audioclips([extra] * vueltas) if vueltas > 1 else extra
-                    final_audio = CompositeAudioClip([final_audio, pista.subclipped(0, subclip.duration)])
-                except Exception as e:
-                    print(f"Error mezclando audio: {e}")
-        processed_clip = processed_clip.with_audio(final_audio)
+                    with open(os.path.splitext(out_name)[0] + ".txt", "w", encoding="utf-8") as f:
+                        f.write(f"{info['titulo']}\n\n{publicacion}\n\nPuntuación viral: {info['puntuacion']}/100\n"
+                                f"Gancho: {info.get('gancho', '')}\n")
+                        if translated:
+                            f.write(f"\nDoblaje ({dubbing_language}):\n{translated}\n")
+                except OSError:
+                    pass
+                if meta_salida is not None:
+                    meta_salida.append({"archivo": out_name, "titulo": info["titulo"], "descripcion": info["descripcion"],
+                                        "hashtags": info["hashtags"], "publicacion": publicacion,
+                                        "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
+                                        "idioma_voz": dubbing_language, "texto_doblaje": translated})
+                # processed_clip/subclip comparten el lector del clip padre: no se cierran aquí.
 
-        out_base, ext = os.path.splitext(output_path)
-        out_dir = os.path.dirname(output_path)
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
-        safe_title = re.sub(r'[\\/*?:"<>|#]', "", gen_title).strip().replace(" ", "_").lower()[:50]
-        out_name = os.path.join(out_dir, f"{safe_title}_{parte_num}{ext}") if safe_title else f"{out_base}_parte_{parte_num}{ext}"
-        raiz_out, ext_out = os.path.splitext(out_name)
-        n_copia = 2
-        while os.path.exists(out_name):
-            out_name = f"{raiz_out}_{n_copia}{ext_out}"
-            n_copia += 1
-
-        import gpu_video
-        opciones = gpu_video.opciones_moviepy(preset_cpu="fast")
-        if idx == 0:
-            print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
-        processed_clip.write_videofile(out_name, audio_codec="aac", threads=max(2, os.cpu_count() or 2),
-                                       logger=None, **opciones)
-        eventos = [(g["inicio"] - st, "pop", 0.6) for g in subs.subs if g.get("emoji")] if efectos else []
-        if (bg_music and os.path.exists(bg_music)) or eventos:
-            write_progress(f"Mezclando música y efectos · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.95))
-            try:
-                import audio_mix
-                _mezclar_en_video(out_name, bg_music if bg_music and os.path.exists(bg_music) else "", vol_musica,
-                                  eventos, subclip.duration, audio_mix)
-            except Exception as e:
-                print(f"Aviso: no se pudo mezclar la música ({e}); el clip queda con su audio original.")
-        generated_files.append(out_name)
-
-        # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
-        publicacion = cv.texto_publicacion(info)
-        try:
-            with open(os.path.splitext(out_name)[0] + ".txt", "w", encoding="utf-8") as f:
-                f.write(f"{info['titulo']}\n\n{publicacion}\n\nPuntuación viral: {info['puntuacion']}/100\n"
-                        f"Gancho: {info.get('gancho', '')}\n")
-        except OSError:
-            pass
-        if meta_salida is not None:
-            meta_salida.append({"archivo": out_name, "titulo": info["titulo"], "descripcion": info["descripcion"],
-                                "hashtags": info["hashtags"], "publicacion": publicacion,
-                                "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et})
-        # processed_clip/subclip comparten el lector del clip padre: no se cierran aquí.
-
-    for c in (base_dummy_clip, clip):
-        try:
-            if c is not None:
-                c.close()
-        except Exception:
-            pass
-    write_progress("¡Proceso finalizado con éxito!", 100)
-    print("¡Proceso finalizado!")
-    return generated_files
+        write_progress("¡Proceso finalizado con éxito!", 100)
+        print("¡Proceso finalizado!")
+        return generated_files
+    finally:
+        clip.close()
 
 
 def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
@@ -368,7 +372,7 @@ def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     base = os.path.splitext(video)[0]
     mezcla = base + "_mezcla.wav"
-    audio_mix.mezclar(video, mezcla, ffmpeg, duracion, musica=musica, vol_musica=float(vol or 0.2), eventos=eventos)
+    audio_mix.mezclar(video, mezcla, ffmpeg, duracion, musica=musica, vol_musica=float(vol), eventos=eventos)
     tmp = base + "_tmp.mp4"
     r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", video, "-i", mezcla, "-map", "0:v:0", "-map", "1:a:0",
                         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", tmp],
@@ -393,13 +397,15 @@ def main(argv):
                 cfg["source"], cfg["output_path"], cfg.get("clip_duration", 60),
                 cfg.get("num_clips", 1), cfg.get("start_time", ""), cfg.get("end_time", ""),
                 cfg.get("subtitle_scale", 100), cfg.get("subtitle_style", "style5"),
-                cfg.get("anti_copyright_filter", True), cfg.get("anti_copyright_audio", True),
+                cfg.get("anti_copyright_filter", False), False,
                 cfg.get("bg_music", ""), cfg.get("show_progress_bar", True),
                 cfg.get("motor_ia", "pro"), cfg.get("emojis", True), meta,
                 cfg.get("titulo_en_video", False), cfg.get("transcripcion", "groq"),
                 cfg.get("whisper_local", "auto"), cfg.get("python_motor", ""), cfg.get("script_local", ""),
                 cfg.get("encuadre", "caras"), cfg.get("sub_opciones") or {}, cfg.get("efectos", True),
-                cfg.get("vol_musica", 0.2))
+                cfg.get("vol_musica", 0.2), cfg.get("dubbing_language", "original"),
+                cfg.get("dubbing_voice", "female"), cfg.get("original_volume", 1.0),
+                cfg.get("show_subtitles", True), cfg.get("normalize_audio", False))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)
