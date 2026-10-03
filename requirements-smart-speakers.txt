@@ -1,0 +1,4 @@
+# Opcional. Instalar en un entorno separado y definir SMART_DIARIZATION_PYTHON.
+# Evita modificar torch del motor de video/voz existente.
+pyannote.audio>=4.0,<5
+numpy

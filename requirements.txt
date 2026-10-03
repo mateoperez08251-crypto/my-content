@@ -19,3 +19,6 @@ pywebview>=4.0
 firebase-admin
 google-api-python-client
 google-auth-oauthlib
+
+# Doblaje multilingüe de Smart Split
+edge-tts>=7.2,<8

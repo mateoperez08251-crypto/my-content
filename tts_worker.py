@@ -150,6 +150,14 @@ def sintetizar_bloques(modelo, bloques, salidas, ref=None, ref_texto="", diseno=
 
 def sintetizar(trabajo):
     modelo = cargar_modelo(trabajo["modelo"])
+    if "speaker_segments" in trabajo:
+        segmentos = trabajo["speaker_segments"]
+        for i, segmento in enumerate(segmentos):
+            sintetizar_bloques(modelo, [segmento["text"]], [segmento["output"]],
+                               ref=segmento["reference"], semilla=1234)
+            emitir(bloque=i + 1, total=len(segmentos))
+        emitir(ok=True)
+        return 0
     sintetizar_bloques(modelo, trabajo["bloques"], trabajo["salidas"], trabajo.get("ref"),
                        trabajo.get("ref_texto") or "", trabajo.get("diseno") or "",
                        int(trabajo.get("semilla", 1234)), float(trabajo.get("cfg", 2.0)),

@@ -1499,8 +1499,16 @@ def run_smart_split_thread(data):
             "end_time": data.get('end_time', ''),
             "subtitle_scale": float(data.get('subtitle_scale', 100)),
             "subtitle_style": data.get('style', 'style5'),
-            "anti_copyright_filter": data.get('anti_copyright_filter', True),
-            "anti_copyright_audio": data.get('anti_copyright_audio', True),
+            "anti_copyright_filter": data.get('anti_copyright_filter', False),
+            "anti_copyright_audio": False,
+            "speaker_dubbing": data.get('speaker_dubbing', False),
+            "filter_strength": data.get('filter_strength', 1.0),
+            "denoise_audio": data.get('denoise_audio', False),
+            "dubbing_language": data.get('dubbing_language', 'original'),
+            "dubbing_voice": data.get('dubbing_voice', 'female'),
+            "original_volume": data.get('original_volume', 1.0),
+            "show_subtitles": data.get('show_subtitles', True),
+            "normalize_audio": data.get('normalize_audio', False),
             "bg_music": data.get('bg_music', ''),
             "show_progress_bar": data.get('show_progress_bar', True),
             "motor_ia": data.get('motor_ia', 'pro'),
@@ -1540,6 +1548,21 @@ def run_smart_split_thread(data):
             cfg_datos["python_motor"] = motor_ia_local["python_cmd"]
             cfg_datos["script_local"] = os.path.join(os.path.dirname(motor_ia_local["worker"]),
                                                      "transcripcion_local.py")
+        if cfg_datos["speaker_dubbing"]:
+            from api_clonador_flask import estado_voxcpm
+            from modulo_ia import liberar_gpu
+            voice = estado_voxcpm()
+            if not voice.get("instalado") or not voice.get("python"):
+                raise RuntimeError("Instala VoxCPM2 en el Gestor de Modelos y prepara el Clonador de voz antes de doblar por hablantes.")
+            liberar_gpu()
+            # Scripts de esta versión, no copias antiguas del entorno del motor.
+            worker_dir = paths.EXEC_DIR
+            cfg_datos["speaker_config"] = {
+                "voice_python": voice["python"], "voice_model": voice["carpeta"],
+                "voice_worker": os.path.join(worker_dir, "tts_worker.py"),
+                "diarization_python": os.environ.get("SMART_DIARIZATION_PYTHON") or voice["python"],
+                "diarization_worker": os.path.join(worker_dir, "smart_speaker_worker.py"),
+            }
         log(f"Iniciando procesamiento de Smart Split (Escala: {cfg_datos['subtitle_scale']}%, "
             f"Estilo: {cfg_datos['subtitle_style']})...")
         log_telemetry("Iniciando Smart Split", f"Origen: {source}")
@@ -1604,6 +1627,17 @@ def run_smart_split_thread(data):
 @app.route("/api/smart_split", methods=["POST"])
 def smart_split_api():
     data = request.get_json(silent=True) or {}
+    from smart_dubbing import validate_options
+    from smart_speakers import validate_edit_options
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "Se esperaba un objeto JSON."}), 400
+    try:
+        validate_options(data.get('dubbing_language', 'original'), data.get('dubbing_voice', 'female'),
+                         data.get('original_volume', 1.0))
+        validate_edit_options(data.get('dubbing_language', 'original'), data.get('speaker_dubbing', False),
+                              data.get('filter_strength', 1.0), data.get('denoise_audio', False))
+    except (ValueError, TypeError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "error": "Ya hay una automatización en curso"})
     _escribir_progreso_smart("Iniciando...|0")

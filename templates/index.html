@@ -3134,22 +3134,20 @@
                             style="margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
                             <label
                                 style="margin:0; margin-bottom: 10px; display: block; color: var(--accent-primary);"><i
-                                    class="ph-duotone ph-shield-check"></i> Modo Anti-Copyright (Evasión)</label>
+                                    class="ph-duotone ph-shield-check"></i> Edición visual y audio</label>
                             <div style="display: flex; flex-direction: column; gap: 10px;">
                                 <label class="custom-checkbox"
                                     style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                                    <input type="checkbox" id="smart_anti_copyright_filter" checked
+                                    <input type="checkbox" id="smart_anti_copyright_filter"
                                         style="width: 18px; height: 18px; accent-color: var(--accent-primary);">
-                                    <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Filtro visual
-                                        imperceptible (1% ruido/tinte)</span>
+                                    <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Ajuste suave de brillo y color</span>
                                 </label>
-                                <label class="custom-checkbox"
-                                    style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                                    <input type="checkbox" id="smart_anti_copyright_audio" checked
-                                        style="width: 18px; height: 18px; accent-color: var(--accent-primary);">
-                                    <span style="font-size: 14px; color: rgba(255,255,255,0.8);">Pista de audio
-                                        inaudible de fondo (-45dB)</span>
+                                <label for="smart_filter_strength">Intensidad de brillo y color
+                                    <input id="smart_filter_strength" type="range" min="0" max="5" step="0.5" value="1" style="width:100%">
                                 </label>
+                                <label><input type="checkbox" id="smart_denoise_audio"> Reducir ruido del audio</label>
+                                <label><input type="checkbox" id="smart_normalize_audio"> Normalizar volumen del audio</label>
+                                <label><input type="checkbox" id="smart_show_subtitles" checked> Mostrar subtítulos</label>
                                 <label class="custom-checkbox"
                                     style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                                     <input type="checkbox" id="show_progress_bar" checked
@@ -3158,6 +3156,27 @@
                                         Progreso en el Video</span>
                                 </label>
                             </div>
+                        </div>
+
+                        <div style="margin-top:15px;padding:15px;border:1px solid rgba(255,255,255,.1);border-radius:8px;">
+                            <label for="smart_dubbing_language">Idioma de voz (traducción y doblaje)</label>
+                            <select id="smart_dubbing_language" class="form-control" onchange="updateSmartDubbing()">
+                                <option value="original">Conservar audio original</option><option value="es">Español</option><option value="en">English</option><option value="ja">日本語 (japonés)</option><option value="pt-BR">Português (Brasil)</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="ko">한국어 (coreano)</option>
+                            </select>
+                            <label style="display:block;margin:12px 0">
+                                <input type="checkbox" id="smart_speaker_dubbing" disabled onchange="updateSmartDubbing()">
+                                Detectar hablantes y conservar la voz de cada uno
+                            </label>
+                            <small style="display:block">Distingue las voces por el audio y dobla cada intervención. Requiere el motor local VoxCPM2 y el detector de hablantes configurados. Usa voces propias o autorizadas.</small>
+                            <label for="smart_dubbing_voice">Voz del doblaje</label>
+                            <select id="smart_dubbing_voice" class="form-control" disabled>
+                                <option value="female">Femenina</option><option value="male">Masculina</option>
+                            </select>
+                            <label for="smart_original_volume">Volumen original <span id="smart_original_volume_value">100%</span></label>
+                            <input id="smart_original_volume" type="range" min="0" max="100" value="100" style="width:100%"
+                                oninput="document.getElementById('smart_original_volume_value').textContent = this.value + '%'">
+                            <small style="display:block;margin-top:8px">El doblaje reemplaza todo el audio original y ajusta su duración al clip. Traduce con Groq. Voz única: Edge TTS. Por hablantes: clonación local con VoxCPM2; cada turno conserva su posición. Requiere internet para traducir y alinear subtítulos (audio del doblaje enviado a Groq). Los subtítulos siguen la nueva voz. No sincroniza los labios.</small>
+                            <small style="display:block;margin-top:8px">Editar o traducir no elimina los derechos de autor ni garantiza monetización. Usa material propio o con permiso. Para japonés y coreano instala una fuente compatible (Noto Sans CJK).</small>
                         </div>
 
                         <!-- Background Music Picker -->
@@ -3824,6 +3843,16 @@
             document.getElementById('smartSplitProgressModal').style.display = 'flex';
         }
 
+        function updateSmartDubbing() {
+            const enabled = document.getElementById('smart_dubbing_language').value !== 'original';
+            const speakers = document.getElementById('smart_speaker_dubbing');
+            speakers.disabled = !enabled;
+            if (!enabled) speakers.checked = false;
+            document.getElementById('smart_dubbing_voice').disabled = !enabled || speakers.checked;
+            document.getElementById('smart_original_volume').disabled = enabled;
+            document.getElementById('smart_original_volume_value').textContent = enabled ? 'Reemplazado por doblaje' : document.getElementById('smart_original_volume').value + '%';
+        }
+
         async function processSmartSplit() {
             const source = document.getElementById('smart_split_source').value;
             const duration = document.getElementById('smart_split_duration').value;
@@ -3893,8 +3922,15 @@
                         end_time: endTime,
                         smart_split_title: smart_split_title,
                         subtitle_scale: document.getElementById('subtitle_scale') ? document.getElementById('subtitle_scale').value : 100,
-                        anti_copyright_filter: document.getElementById('smart_anti_copyright_filter') ? document.getElementById('smart_anti_copyright_filter').checked : true,
-                        anti_copyright_audio: document.getElementById('smart_anti_copyright_audio') ? document.getElementById('smart_anti_copyright_audio').checked : true,
+                        anti_copyright_filter: document.getElementById('smart_anti_copyright_filter') ? document.getElementById('smart_anti_copyright_filter').checked : false,
+                        speaker_dubbing: document.getElementById('smart_speaker_dubbing').checked,
+                        filter_strength: Number(document.getElementById('smart_filter_strength').value),
+                        denoise_audio: document.getElementById('smart_denoise_audio').checked,
+                        dubbing_language: document.getElementById('smart_dubbing_language').value,
+                        dubbing_voice: document.getElementById('smart_dubbing_voice').value,
+                        original_volume: Number(document.getElementById('smart_original_volume').value) / 100,
+                        show_subtitles: document.getElementById('smart_show_subtitles').checked,
+                        normalize_audio: document.getElementById('smart_normalize_audio').checked,
                         show_progress_bar: document.getElementById('show_progress_bar') ? document.getElementById('show_progress_bar').checked : true,
                         bg_music: bg_music_smart,
                         motor_ia: document.getElementById('smart_motor_ia') ? document.getElementById('smart_motor_ia').value : 'pro',
