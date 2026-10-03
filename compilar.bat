@@ -90,6 +90,9 @@ copy /y "api_subidor.py" "%DIST%\" >nul 2>&1
 copy /y "api_clonador_flask.py" "%DIST%\" >nul 2>&1
 copy /y "smart_editor.py" "%DIST%\" >nul 2>&1
 copy /y "smart_dubbing.py" "%DIST%\" >nul 2>&1
+copy /y "smart_speakers.py" "%DIST%\" >nul 2>&1
+copy /y "smart_speaker_worker.py" "%DIST%\" >nul 2>&1
+copy /y "requirements-smart-speakers.txt" "%DIST%\" >nul 2>&1
 copy /y "audio_extractor.py" "%DIST%\" >nul 2>&1
 copy /y "audio_separator.py" "%DIST%\" >nul 2>&1
 copy /y "yt_downloader.py" "%DIST%\" >nul 2>&1

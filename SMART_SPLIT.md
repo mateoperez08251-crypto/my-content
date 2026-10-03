@@ -24,3 +24,19 @@ Fuentes oficiales consultadas el 2 de octubre de 2026:
 `python -m unittest discover -s tests -p 'test_smart_dubbing.py'`
 
 La prueba de integración usa voz y traducción simuladas; no consume servicios externos. Para una prueba real configura Groq, instala las dependencias y exporta un clip corto en cada idioma deseado.
+
+## Doblaje por hablantes (opcional)
+
+Activa «Detectar hablantes y conservar la voz de cada uno» después de elegir idioma. La detección se basa en audio, no identifica caras ni nombres. Cada persona obtiene una referencia propia que se reutiliza cuando vuelve a hablar en el clip. VoxCPM2 sintetiza los turnos traducidos con esa referencia, y los coloca en su posición original. Las pausas quedan en silencio. Se sustituye la pista completa original; no separa música/ambiente. Los subtítulos se transcriben del doblaje mediante Groq.
+
+Preparación:
+1. Instala VoxCPM2 en el Gestor de Modelos y prepara el Clonador de voz existente.
+2. Crea un entorno Python separado para diarización e instala `requirements-smart-speakers.txt`. Define `SMART_DIARIZATION_PYTHON` con la ruta completa a su Python (no al directorio). Así no modificas torch del motor de voz.
+3. Acepta las condiciones de https://huggingface.co/pyannote/speaker-diarization-community-1 y configura `HF_TOKEN` en el entorno de la app. No lo pegues en el repositorio. También admite un modelo local mediante `SMART_DIARIZATION_MODEL`.
+4. Reinicia la app para cargar las variables.
+
+El detector funciona localmente y descarga el modelo la primera vez. Necesita muestras limpias de al menos 1,5 s por persona. Puede equivocarse con voces parecidas o simultáneas. Se detiene si no puede asignar una palabra, si falta una referencia limpia o si la traducción exige un cambio de velocidad mayor que 0,5–2×. No cambia silenciosamente a una voz genérica. No sincroniza labios. Clona solo voces propias o autorizadas.
+
+También se añaden intensidad del filtro visual (0–5) y reducción audible de ruido. No hay pista oculta ni garantía de monetización.
+
+Verificación: `python -m unittest discover -s tests -p 'test_smart_speakers.py'`. Estas pruebas simulan los modelos y verifican turnos, referencias y validación; se requiere una prueba con los modelos instalados para evaluar calidad de voz y detección.

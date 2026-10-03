@@ -203,7 +203,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         transcripcion="groq", whisper_local="auto", python_motor="", script_local="",
                         encuadre="caras", sub_opciones=None, efectos=True, vol_musica=0.2,
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
-                        show_subtitles=True, normalize_audio=False):
+                        show_subtitles=True, normalize_audio=False,
+                        speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -212,6 +213,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
     dubbing_language, dubbing_voice, original_volume = validate_options(
         dubbing_language, dubbing_voice, original_volume)
+    from smart_speakers import validate_edit_options
+    validate_edit_options(dubbing_language, speaker_dubbing, filter_strength, denoise_audio)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
     write_progress("Iniciando Smart Split...", 3)
     print(f"Iniciando Smart Split · motor: {motor['nombre']}")
@@ -224,7 +227,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     write_progress("Transcribiendo el audio en tu GPU (Whisper local)..." if local
                    else "Transcribiendo el audio con IA (Groq)...", 8)
     words, segmentos = cv.transcribir(
-        video_path, s_time, e_time, modelo=motor["whisper"],
+        video_path, s_time, e_time, modelo=motor["whisper"], idioma=None,
         progreso=lambda n, total: write_progress(
             "Transcribiendo en tu GPU (Whisper local)..." if local else f"Transcribiendo audio ({n + 1}/{total})...",
             8 + int(12 * n / max(total, 1))),
@@ -278,14 +281,23 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
             with ExitStack() as resources:
                 translated = ""
+                speaker_report = []
                 palabras_clip = [w for w in words if w["start"] >= st and w["end"] <= et]
                 subclip = clip.subclipped(st, et)
                 final_audio = subclip.audio.with_volume_scaled(original_volume) if subclip.audio is not None else None
                 if dubbing_language != "original":
                     write_progress(f"Traduciendo y doblando clip {parte_num}...", p0 + int(tramo * 0.3))
                     directory = resources.enter_context(tempfile.TemporaryDirectory(prefix="smart_dub_"))
-                    voice_path, marks, translated = dub(palabras_clip, et - st, dubbing_language,
-                                                        dubbing_voice, motor_ia, directory)
+                    if speaker_dubbing:
+                        from smart_speakers import dub_speakers
+                        relative_words = [{**w, "start": w["start"] - st, "end": w["end"] - st} for w in palabras_clip]
+                        voice_path, marks, translated, speaker_report = dub_speakers(
+                            video_path, base + st, et - st, relative_words, dubbing_language, motor_ia,
+                            directory, speaker_config or {},
+                            progress=lambda msg: write_progress(msg, p0 + int(tramo * 0.3)), subtitles=show_subtitles)
+                    else:
+                        voice_path, marks, translated = dub(palabras_clip, et - st, dubbing_language,
+                                                            dubbing_voice, motor_ia, directory)
                     voice_audio = resources.enter_context(AudioFileClip(voice_path))
                     final_audio = voice_audio  # reemplaza la pista original completa, sin mezclar dos idiomas
                     palabras_clip = [{**w, "start": w["start"] + st, "end": w["end"] + st} for w in marks]
@@ -304,10 +316,10 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     zoom = _zoom_en(pulsos, st + t) if pulsos else 1.0
                     recorte = _encuadrar(frame, encuadre, cx, fixed_crop_w, final_w, final_h, zoom)
                     if anti_copyright_filter:
-                        recorte = cv2.convertScaleAbs(recorte, alpha=1.01, beta=1)
+                        recorte = cv2.convertScaleAbs(recorte, alpha=1 + 0.01 * float(filter_strength), beta=float(filter_strength))
                         f32 = recorte.astype(np.float32)
-                        f32[:, :, 0] += 1.0
-                        f32[:, :, 2] += 0.5
+                        f32[:, :, 0] += float(filter_strength)
+                        f32[:, :, 2] += 0.5 * float(filter_strength)
                         recorte = np.clip(f32, 0, 255).astype(np.uint8)
                     return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar)
 
@@ -332,6 +344,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
                 processed_clip.write_videofile(out_name, audio_codec="aac", threads=max(2, os.cpu_count() or 2),
                                                logger=None, **opciones)
+                if denoise_audio:
+                    _limpiar_audio(out_name)
                 eventos = [(g["inicio"] - st, "pop", 0.6) for g in subs.subs if g.get("emoji")] if efectos else []
                 if (bg_music and os.path.exists(bg_music)) or eventos or normalize_audio:
                     write_progress(f"Mezclando música y efectos · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.95))
@@ -357,7 +371,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     meta_salida.append({"archivo": out_name, "titulo": info["titulo"], "descripcion": info["descripcion"],
                                         "hashtags": info["hashtags"], "publicacion": publicacion,
                                         "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
-                                        "idioma_voz": dubbing_language, "texto_doblaje": translated})
+                                        "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report})
                 # processed_clip/subclip comparten el lector del clip padre: no se cierran aquí.
 
         write_progress("¡Proceso finalizado con éxito!", 100)
@@ -386,6 +400,22 @@ def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
     os.replace(tmp, video)
 
 
+def _limpiar_audio(video):
+    """Reducción de ruido audible; no añade pistas ocultas."""
+    tmp = os.path.splitext(video)[0] + "_denoise.mp4"
+    try:
+        result = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", video,
+            "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy", "-af", "afftdn=nf=-25",
+            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", tmp], capture_output=True,
+            creationflags=SIN_VENTANA)
+        if result.returncode:
+            raise RuntimeError("No se pudo reducir el ruido. Comprueba que el video tenga audio.")
+        os.replace(tmp, video)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
 def main(argv):
     """Modo subproceso: smart_editor.py --config <json>. Imprime RESULT_PATHS y RESULT_META."""
     if len(argv) >= 2 and argv[0] == "--config":
@@ -405,7 +435,9 @@ def main(argv):
                 cfg.get("encuadre", "caras"), cfg.get("sub_opciones") or {}, cfg.get("efectos", True),
                 cfg.get("vol_musica", 0.2), cfg.get("dubbing_language", "original"),
                 cfg.get("dubbing_voice", "female"), cfg.get("original_volume", 1.0),
-                cfg.get("show_subtitles", True), cfg.get("normalize_audio", False))
+                cfg.get("show_subtitles", True), cfg.get("normalize_audio", False),
+                cfg.get("speaker_dubbing", False), cfg.get("speaker_config"),
+                cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)

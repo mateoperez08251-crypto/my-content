@@ -80,3 +80,5 @@ logs/
 
 # Excepción: dependencias de RunPod (el *.txt de arriba las ignoraba)
 !runpod/requirements-runpod.txt
+
+!requirements-smart-speakers.txt
