@@ -3168,6 +3168,29 @@
                                 Detectar hablantes y conservar la voz de cada uno
                             </label>
                             <small style="display:block">Distingue las voces por el audio y dobla cada intervención. Requiere el motor local VoxCPM2 y el detector de hablantes configurados. Usa voces propias o autorizadas.</small>
+                            <div style="margin:12px 0">
+                                <button type="button" id="smart_download_voice" class="btn" onclick="downloadSmartVoice()">Descargar VoxCPM2 · voz por hablante (~5 GB)</button>
+                                <p id="smart_model_status" aria-live="polite">Consulta o descarga aquí el modelo de voz.</p>
+                                <a href="/clonador" target="_blank" rel="noopener">Abrir Clonador y guardar voces</a>
+                                <small style="display:block">En Colab ejecuta la celda 5 de la libreta actualizada para instalar los motores y descargar también el detector. El detector necesita HF_TOKEN y aceptar sus condiciones.</small>
+                                <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noopener">Abrir condiciones del detector de hablantes</a>
+                            </div>
+                            <div id="smart_cast_panel" hidden>
+                                <button type="button" class="btn" onclick="detectSmartCast()">Detectar y escuchar hablantes</button>
+                                <p id="smart_cast_status" aria-live="polite"></p>
+                                <div id="smart_cast_rows"></div>
+                                <small>Escucha cada muestra y elige quién la doblará. Añade voces desde el Clonador de voz. Las personas conservan su voz en todos los clips de este video.</small>
+                                <label>Calidad de voz
+                                    <select id="smart_voice_steps" class="form-control"><option value="10">Alta · 10 pasos</option><option value="6">Rápida · 6 pasos (puede perder detalle)</option></select>
+                                </label>
+                            </div>
+                            <label>Exportación
+                                <select id="smart_export_profile" class="form-control">
+                                    <option value="balanced">Equilibrada · 1080p</option>
+                                    <option value="fast">Rápida · 720p, hasta 30 fps</option>
+                                    <option value="quality">Calidad · 1080p, compresión más lenta</option>
+                                </select>
+                            </label>
                             <label for="smart_dubbing_voice">Voz del doblaje</label>
                             <select id="smart_dubbing_voice" class="form-control" disabled>
                                 <option value="female">Femenina</option><option value="male">Masculina</option>
@@ -3843,10 +3866,97 @@
             document.getElementById('smartSplitProgressModal').style.display = 'flex';
         }
 
+        let smartModelTimer = null;
+        async function refreshSmartVoice() {
+            clearTimeout(smartModelTimer);
+            const status = document.getElementById('smart_model_status');
+            const button = document.getElementById('smart_download_voice');
+            try {
+                const response = await fetch('/api/ia/modelos');
+                if (!response.ok) throw new Error('No se pudo consultar el modelo.');
+                const result = await response.json();
+                const model = result.modelos.find(m => m.id === 'voxcpm2');
+                if (!model) throw new Error('VoxCPM2 no aparece en el catálogo. Actualiza la app.');
+                button.disabled = model.installed || (model.downloading && !model.paused && !model.error);
+                status.textContent = model.installed ? 'VoxCPM2 descargado. El motor de voz y el detector deben estar instalados.' :
+                    model.error ? 'Error: ' + model.error : model.paused ? 'Descarga pausada. Pulsa el botón para continuar.' :
+                    model.downloading ? 'Descargando VoxCPM2: ' + Number(model.progress || 0).toFixed(0) + '%' :
+                    'Falta VoxCPM2. Pulsa Descargar para instalar los pesos del modelo.';
+                if (model.downloading && !model.paused && !model.error) smartModelTimer = setTimeout(refreshSmartVoice, 2000);
+            } catch (error) { status.textContent = error.message; button.disabled = false; }
+        }
+        async function downloadSmartVoice() {
+            const button = document.getElementById('smart_download_voice'); button.disabled = true;
+            try {
+                const response = await fetch('/api/ia/descargar_modelo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:'voxcpm2'})});
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.error || 'No se pudo iniciar la descarga.');
+                await refreshSmartVoice();
+            } catch (error) { document.getElementById('smart_model_status').textContent = error.message; button.disabled = false; }
+        }
+
+        let smartCast = null;
+        let smartCastBusy = false;
+        function smartCastPayload() {
+            if (!document.getElementById('smart_speaker_dubbing').checked || !smartCast ||
+                smartCast.source !== document.getElementById('smart_split_source').value) return {};
+            const voice_cast = {};
+            document.querySelectorAll('#smart_cast_rows select').forEach(select => {
+                if (select.value) voice_cast[select.dataset.person] = select.value;
+            });
+            return {cast_id: smartCast.id, voice_cast};
+        }
+        async function detectSmartCast() {
+            if (smartCastBusy) return;
+            const source = document.getElementById('smart_split_source').value;
+            const status = document.getElementById('smart_cast_status');
+            const rows = document.getElementById('smart_cast_rows');
+            smartCast = null; rows.replaceChildren(); smartCastBusy = true;
+            status.textContent = 'Descargando y detectando hablantes… Puede tardar varios minutos.';
+            try {
+                const response = await fetch('/api/smart_cast', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({source})});
+                const job = await response.json();
+                if (!response.ok) throw new Error(job.error || 'No se pudo iniciar la detección.');
+                let result;
+                do {
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    const poll = await fetch('/api/smart_cast/' + encodeURIComponent(job.id));
+                    result = await poll.json();
+                    if (!poll.ok || result.status === 'error') throw new Error(result.error || 'Falló la detección.');
+                } while (result.status === 'running');
+                const voicesResponse = await fetch('/api/voces');
+                if (!voicesResponse.ok) throw new Error('No se pudieron cargar tus voces guardadas.');
+                const voices = await voicesResponse.json();
+                if (source !== document.getElementById('smart_split_source').value) throw new Error('Cambiaste el video. Detecta sus hablantes de nuevo.');
+                smartCast = {id:job.id, source};
+                for (const person of result.people) {
+                    const row = document.createElement('div'); row.style.margin = '12px 0';
+                    const label = document.createElement('label'); label.textContent = person.id + ' · primera voz en ' + person.start.toFixed(1) + ' s';
+                    const select = document.createElement('select'); select.className = 'form-control'; select.dataset.person = person.id;
+                    select.add(new Option(person.sample ? 'Conservar su voz original' : 'Sin muestra limpia: elige una voz', ''));
+                    for (const voice of voices) select.add(new Option(voice.nombre || voice.id, voice.id));
+                    label.append(select); row.append(label);
+                    const audio = document.createElement('audio'); audio.controls = true; audio.preload = 'none'; audio.style.maxWidth = '100%';
+                    const original = person.sample ? '/api/smart_cast/' + encodeURIComponent(job.id) + '/sample/' + encodeURIComponent(person.id) : '';
+                    function updateSample() {
+                        const url = select.value ? '/api/voces/' + encodeURIComponent(select.value) + '/audio' : original;
+                        audio.pause();
+                        if (url) audio.src = url; else audio.removeAttribute('src');
+                        audio.hidden = !url;
+                    }
+                    select.addEventListener('change', updateSample); updateSample(); row.append(audio); rows.append(row);
+                }
+                status.textContent = result.people.length + ' personas detectadas. Revisa las muestras; la detección puede equivocarse.';
+            } catch (error) { status.textContent = error.message; }
+            finally { smartCastBusy = false; }
+        }
+
         function updateSmartDubbing() {
             const enabled = document.getElementById('smart_dubbing_language').value !== 'original';
             const speakers = document.getElementById('smart_speaker_dubbing');
+            if (enabled) refreshSmartVoice();
             speakers.disabled = !enabled;
+            document.getElementById('smart_cast_panel').hidden = !enabled || !speakers.checked;
             if (!enabled) speakers.checked = false;
             document.getElementById('smart_dubbing_voice').disabled = !enabled || speakers.checked;
             document.getElementById('smart_original_volume').disabled = enabled;
@@ -3864,6 +3974,7 @@
                 alert("Por favor ingresa una ruta local o URL válida.");
                 return;
             }
+            if (smartCastBusy) { alert('Espera a que termine la detección de hablantes.'); return; }
             closeSmartSplitModal();
 
             // Mostrar la ventana de carga individual
@@ -3924,6 +4035,9 @@
                         subtitle_scale: document.getElementById('subtitle_scale') ? document.getElementById('subtitle_scale').value : 100,
                         anti_copyright_filter: document.getElementById('smart_anti_copyright_filter') ? document.getElementById('smart_anti_copyright_filter').checked : false,
                         speaker_dubbing: document.getElementById('smart_speaker_dubbing').checked,
+                        export_profile: document.getElementById('smart_export_profile').value,
+                        voice_steps: Number(document.getElementById('smart_voice_steps').value),
+                        ...smartCastPayload(),
                         filter_strength: Number(document.getElementById('smart_filter_strength').value),
                         denoise_audio: document.getElementById('smart_denoise_audio').checked,
                         dubbing_language: document.getElementById('smart_dubbing_language').value,

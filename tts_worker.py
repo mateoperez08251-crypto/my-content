@@ -154,7 +154,7 @@ def sintetizar(trabajo):
         segmentos = trabajo["speaker_segments"]
         for i, segmento in enumerate(segmentos):
             sintetizar_bloques(modelo, [segmento["text"]], [segmento["output"]],
-                               ref=segmento["reference"], semilla=1234)
+                               ref=segmento["reference"], semilla=1234, pasos=int(trabajo.get("pasos", 10)))
             emitir(bloque=i + 1, total=len(segmentos))
         emitir(ok=True)
         return 0
