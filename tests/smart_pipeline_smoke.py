@@ -30,4 +30,10 @@ with tempfile.TemporaryDirectory() as directory:
             assert abs(result.duration-1)<0.1
         assert captured[0]['word']=='Hello'
         assert meta[0]['idioma_voz']=='en'
-        print('PASS: MP4 render, dubbing audio, translated subtitles, normalization and metadata')
+        fast=se.process_smart_split(src,os.path.join(directory,'fast.mp4'),dubbing_language='en',
+                  emojis=False,efectos=False,export_profile='fast')
+        with VideoFileClip(fast[0]) as result:
+            assert result.size==[720,1280]
+            assert result.fps<=30
+            assert result.audio is not None
+        print('PASS: MP4 1080p/720p, dubbing audio, translated subtitles, normalization and metadata')

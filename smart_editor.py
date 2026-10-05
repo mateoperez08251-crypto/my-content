@@ -204,7 +204,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         encuadre="caras", sub_opciones=None, efectos=True, vol_musica=0.2,
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
-                        speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False):
+                        speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced"):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -235,6 +235,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     print("Transcripción completada. Total palabras:", len(words))
 
     clip = VideoFileClip(video_path)
+    speaker_resources = ExitStack()
     try:
         base = 0.0
         if s_time is not None or e_time is not None:
@@ -253,7 +254,16 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
         orig_w, orig_h = clip.w, clip.h
         fixed_crop_w = int(orig_h * 9 / 16) if (orig_w / orig_h) > (9 / 16) else orig_w
-        final_w, final_h = 1080, 1920
+        from smart_speakers import validate_performance
+        validate_performance(export_profile)
+        final_w, final_h = (720, 1280) if export_profile == 'fast' else (1080, 1920)
+        if speaker_dubbing:
+            from smart_speakers import prepare_speakers
+            speaker_config = dict(speaker_config or {})
+            if not speaker_config.get('prepared'):
+                shared = speaker_resources.enter_context(tempfile.TemporaryDirectory(prefix='smart_cast_'))
+                speaker_config['prepared'] = prepare_speakers(video_path, shared, speaker_config,
+                    lambda msg: write_progress(msg, 24))
 
         generated_files = []
         # la música se mezcla al final con ffmpeg (baja sola cuando hablan)
@@ -339,11 +349,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     n_copia += 1
 
                 import gpu_video
-                opciones = gpu_video.opciones_moviepy(preset_cpu="fast")
+                opciones = gpu_video.opciones_moviepy(preset_cpu={"quality": "fast", "balanced": "veryfast", "fast": "ultrafast"}[export_profile])
                 if idx == 0:
                     print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
                 processed_clip.write_videofile(out_name, audio_codec="aac", threads=max(2, os.cpu_count() or 2),
-                                               logger=None, **opciones)
+                                               logger=None, fps=min(subclip.fps, 30) if export_profile == "fast" else subclip.fps, **opciones)
                 if denoise_audio:
                     _limpiar_audio(out_name)
                 eventos = [(g["inicio"] - st, "pop", 0.6) for g in subs.subs if g.get("emoji")] if efectos else []
@@ -378,6 +388,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         print("¡Proceso finalizado!")
         return generated_files
     finally:
+        speaker_resources.close()
         clip.close()
 
 
@@ -437,7 +448,7 @@ def main(argv):
                 cfg.get("dubbing_voice", "female"), cfg.get("original_volume", 1.0),
                 cfg.get("show_subtitles", True), cfg.get("normalize_audio", False),
                 cfg.get("speaker_dubbing", False), cfg.get("speaker_config"),
-                cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False))
+                cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False), cfg.get("export_profile", "balanced"))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)

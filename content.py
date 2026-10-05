@@ -1463,6 +1463,109 @@ def _limpiar_origen(texto):
     return texto
 
 
+# La vista previa conserva referencias locales para reutilizarlas al exportar.
+_smart_cast_jobs = {}
+_smart_cast_lock = threading.Lock()
+
+
+def _smart_voice_config():
+    from api_clonador_flask import estado_voxcpm
+    voice = estado_voxcpm()
+    if not voice.get("instalado") or not voice.get("python"):
+        raise RuntimeError("Pulsa Descargar VoxCPM2 en Smart Split. En Colab ejecuta también la celda 5 para instalar los motores de voz y detección.")
+    return {"voice_python": voice["python"], "voice_model": voice["carpeta"],
+            "voice_worker": os.path.join(paths.EXEC_DIR, "tts_worker.py"),
+            "diarization_python": os.environ.get("SMART_DIARIZATION_PYTHON") or voice["python"],
+            "diarization_worker": os.path.join(paths.EXEC_DIR, "smart_speaker_worker.py")}
+
+
+def _smart_source_stamp(source):
+    stat = os.stat(source)
+    return [os.path.realpath(source), stat.st_size, stat.st_mtime_ns]
+
+
+def _smart_cast_worker(job_id, source):
+    import tempfile
+    from smart_speakers import prepare_speakers
+    directory = None
+    try:
+        os.makedirs(TEMP_DIR, exist_ok=True)
+        directory = tempfile.mkdtemp(prefix="smart_cast_", dir=TEMP_DIR)
+        config = _smart_voice_config()
+        from modulo_ia import liberar_gpu
+        liberar_gpu()
+        if source.startswith("http"):
+            _asegurar_yt_dlp()
+            import yt_downloader
+            source = yt_downloader.download_video(source, output_dir=paths.data_path("videos_descargados"),
+                quality="1440", cancel_checker=lambda: cancel_requested)
+        if not source or not os.path.isfile(source) or _cancelado():
+            raise RuntimeError("No se pudo abrir el video o se canceló el análisis.")
+        def register_process(proc):
+            global current_subprocess
+            with _estado_lock:
+                current_subprocess = proc
+                cancelled = cancel_requested
+            if cancelled:
+                winproc.matar_arbol(proc)
+        prepared = prepare_speakers(source, directory, config, on_process=register_process)
+        if _cancelado():
+            raise RuntimeError('Análisis cancelado.')
+        people = [{'id': person, 'start': next(t['start'] for t in prepared['turns'] if t['speaker'] == person),
+                   'sample': bool(sample)} for person, sample in prepared['references'].items()]
+        with _smart_cast_lock:
+            _smart_cast_jobs[job_id].update(status='ready', prepared=prepared, source=source,
+                stamp=_smart_source_stamp(source), people=people, directory=directory)
+    except Exception as exc:
+        import shutil
+        if directory:
+            shutil.rmtree(directory, ignore_errors=True)
+        with _smart_cast_lock:
+            _smart_cast_jobs[job_id].update(status='error', error=str(exc))
+    finally:
+        _terminar_trabajo()
+
+
+@app.route('/api/smart_cast', methods=['POST'])
+def smart_cast_create():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data.get('source'):
+        return jsonify(error='Elige un video primero.'), 400
+    if not _intentar_iniciar_trabajo():
+        return jsonify(error='Ya hay un trabajo en curso.'), 409
+    job_id = uuid.uuid4().hex
+    source = _limpiar_origen(data['source'])
+    # El bloqueo de trabajo impide borrar referencias usadas por una exportación.
+    with _smart_cast_lock:
+        import shutil
+        for old in _smart_cast_jobs.values():
+            if old.get('directory'):
+                shutil.rmtree(old['directory'], ignore_errors=True)
+        _smart_cast_jobs.clear()
+        _smart_cast_jobs[job_id] = {'status': 'running', 'requested_source': source}
+    threading.Thread(target=_smart_cast_worker, args=(job_id, source), daemon=True).start()
+    return jsonify(id=job_id)
+
+
+@app.route('/api/smart_cast/<job_id>', methods=['GET'])
+def smart_cast_status(job_id):
+    with _smart_cast_lock:
+        job = _smart_cast_jobs.get(job_id)
+        if not job:
+            return jsonify(error='Análisis vencido; vuelve a detectar.'), 404
+        return jsonify({k: job[k] for k in ('status', 'error', 'people') if k in job})
+
+
+@app.route('/api/smart_cast/<job_id>/sample/<person>', methods=['GET'])
+def smart_cast_sample(job_id, person):
+    with _smart_cast_lock:
+        job = _smart_cast_jobs.get(job_id, {})
+        sample = job.get('prepared', {}).get('references', {}).get(person)
+    if not sample or not os.path.isfile(sample):
+        return jsonify(error='No hay muestra limpia.'), 404
+    return send_from_directory(os.path.dirname(sample), os.path.basename(sample), mimetype='audio/wav')
+
+
 def run_smart_split_thread(data):
     """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     _escribir_progreso_smart("Iniciando descargas...|0")
@@ -1471,6 +1574,15 @@ def run_smart_split_thread(data):
             raise RuntimeError("Falta la clave de Groq (elige los clips con ella). Pulsa '🔑 Configurar clave "
                                "de Groq' en esta ventana y pega tu clave gsk_...")
         source = _limpiar_origen(data.get('source', ''))
+        prepared_cast = None
+        if data.get('cast_id'):
+            with _smart_cast_lock:
+                job = _smart_cast_jobs.get(data['cast_id'], {})
+                if (job.get('status') != 'ready' or job.get('requested_source') != source
+                        or job.get('stamp') != _smart_source_stamp(job['source'])):
+                    raise RuntimeError('El video cambió o el análisis venció. Vuelve a detectar los hablantes.')
+                prepared_cast = job['prepared']
+                source = job['source']
         if source.startswith("http"):
             _asegurar_yt_dlp()
             import yt_downloader
@@ -1502,6 +1614,7 @@ def run_smart_split_thread(data):
             "anti_copyright_filter": data.get('anti_copyright_filter', False),
             "anti_copyright_audio": False,
             "speaker_dubbing": data.get('speaker_dubbing', False),
+            "export_profile": data.get("export_profile", "balanced"),
             "filter_strength": data.get('filter_strength', 1.0),
             "denoise_audio": data.get('denoise_audio', False),
             "dubbing_language": data.get('dubbing_language', 'original'),
@@ -1549,20 +1662,23 @@ def run_smart_split_thread(data):
             cfg_datos["script_local"] = os.path.join(os.path.dirname(motor_ia_local["worker"]),
                                                      "transcripcion_local.py")
         if cfg_datos["speaker_dubbing"]:
-            from api_clonador_flask import estado_voxcpm
+            from api_clonador_flask import listar_voces, DIR_VOCES
             from modulo_ia import liberar_gpu
-            voice = estado_voxcpm()
-            if not voice.get("instalado") or not voice.get("python"):
-                raise RuntimeError("Instala VoxCPM2 en el Gestor de Modelos y prepara el Clonador de voz antes de doblar por hablantes.")
             liberar_gpu()
-            # Scripts de esta versión, no copias antiguas del entorno del motor.
-            worker_dir = paths.EXEC_DIR
-            cfg_datos["speaker_config"] = {
-                "voice_python": voice["python"], "voice_model": voice["carpeta"],
-                "voice_worker": os.path.join(worker_dir, "tts_worker.py"),
-                "diarization_python": os.environ.get("SMART_DIARIZATION_PYTHON") or voice["python"],
-                "diarization_worker": os.path.join(worker_dir, "smart_speaker_worker.py"),
-            }
+            cfg_datos["speaker_config"] = _smart_voice_config()
+            config = cfg_datos["speaker_config"]
+            config['steps'] = data.get('voice_steps', 10)
+            if prepared_cast:
+                config['prepared'] = prepared_cast
+            selected = data.get('voice_cast') or {}
+            if selected and not prepared_cast:
+                raise RuntimeError('Detecta los hablantes antes de asignar voces.')
+            saved = {v['id']: str(DIR_VOCES / v['id'] / 'referencia.wav') for v in listar_voces()}
+            config['cast'] = {}
+            for person, actor in selected.items():
+                if person not in prepared_cast['references'] or actor not in saved:
+                    raise RuntimeError('Una voz o persona seleccionada ya no existe. Vuelve a elegirla.')
+                config['cast'][person] = saved[actor]
         log(f"Iniciando procesamiento de Smart Split (Escala: {cfg_datos['subtitle_scale']}%, "
             f"Estilo: {cfg_datos['subtitle_style']})...")
         log_telemetry("Iniciando Smart Split", f"Origen: {source}")
@@ -1628,10 +1744,13 @@ def run_smart_split_thread(data):
 def smart_split_api():
     data = request.get_json(silent=True) or {}
     from smart_dubbing import validate_options
-    from smart_speakers import validate_edit_options
+    from smart_speakers import validate_edit_options, validate_performance
     if not isinstance(data, dict):
         return jsonify({"success": False, "error": "Se esperaba un objeto JSON."}), 400
     try:
+        validate_performance(data.get('export_profile', 'balanced'), data.get('voice_steps', 10), data.get('voice_cast'))
+        if data.get('cast_id') is not None and not isinstance(data['cast_id'], str):
+            raise ValueError('Análisis de hablantes no válido.')
         validate_options(data.get('dubbing_language', 'original'), data.get('dubbing_voice', 'female'),
                          data.get('original_volume', 1.0))
         validate_edit_options(data.get('dubbing_language', 'original'), data.get('speaker_dubbing', False),

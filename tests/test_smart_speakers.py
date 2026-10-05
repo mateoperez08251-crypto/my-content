@@ -68,16 +68,16 @@ class SpeakerPipelineTests(unittest.TestCase):
                 captured.extend(job['speaker_segments'])
                 for item in job['speaker_segments']: write_wav(item['output'],2,1000)
         cv = SimpleNamespace(MOTORES={'pro':{'whisper':'fake'}},
-                             transcribir=lambda *a,**kw: ([{'word':'hello','start':0,'end':2}],[]))
+                             transcribir=lambda *a,**kw: ([{'word':'hello','start':t['start'],'end':t['end']} for t in turns],[]))
         config={k:'fake' for k in ['diarization_python','diarization_worker','voice_python','voice_worker','voice_model']}
         with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'clips_virales':cv}), \
              patch('smart_speakers.run_worker',side_effect=worker), patch('smart_speakers.extract',side_effect=extract), \
-             patch('smart_speakers.translate_text',return_value='hello'):
+             patch('smart_speakers.translate_segments',return_value=['hello']*3):
             path, marks, text, report = dub_speakers('video',10,9,words,'en','pro',directory,config)
             self.assertEqual(captured[0]['reference'],captured[2]['reference'])
             self.assertNotEqual(captured[0]['reference'],captured[1]['reference'])
             self.assertEqual([w['start'] for w in marks],[0,3,6])
-            self.assertEqual([r['speaker'] for r in report],['A','B','A'])
+            self.assertEqual([r['speaker'] for r in report],['Persona 1','Persona 2','Persona 1'])
             with wave.open(path,'rb') as stream:
                 audio=np.frombuffer(stream.readframes(stream.getnframes()),dtype='<i2')
             self.assertEqual(len(audio),9*24000)
