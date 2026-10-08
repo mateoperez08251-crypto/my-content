@@ -67,7 +67,10 @@ def assign_turns(words, turns, duration):
             groups[-1]['words'].append(word)
         else:
             if groups and start < groups[-1]['end']:
-                raise RuntimeError('Hay voces superpuestas en la transcripción. Revisa el clip antes de doblar.')
+                # Solape: desplaza el inicio al final del grupo previo en vez de abortar
+                start = groups[-1]['end']
+                if end <= start:
+                    continue
             groups.append({'start': start, 'end': end, 'speaker': speaker, 'words': [word]})
     if not groups:
         raise RuntimeError('No se encontraron intervenciones para doblar.')
