@@ -204,7 +204,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         encuadre="caras", sub_opciones=None, efectos=True, vol_musica=0.2,
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
-                        speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced"):
+                        speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced",
+                        preserve_background=False, upscale="off"):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -309,7 +310,24 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         voice_path, marks, translated = dub(palabras_clip, et - st, dubbing_language,
                                                             dubbing_voice, motor_ia, directory)
                     voice_audio = resources.enter_context(AudioFileClip(voice_path))
-                    final_audio = voice_audio  # reemplaza la pista original completa, sin mezclar dos idiomas
+                    final_audio = voice_audio  # por defecto reemplaza la pista original
+                    if preserve_background:
+                        write_progress(f"Preservando música/ambiente del clip {parte_num}...", p0 + int(tramo * 0.32))
+                        try:
+                            from smart_dubbing import separate_background
+                            from moviepy import CompositeAudioClip
+                            instr_path = separate_background(video_path, base + st, et - st, directory)
+                            if instr_path:
+                                instrumental = resources.enter_context(AudioFileClip(instr_path))
+                                # El instrumental conserva música/ambiente del original; la voz nueva va encima
+                                final_audio = CompositeAudioClip([
+                                    instrumental.with_volume_scaled(0.75),
+                                    voice_audio.with_volume_scaled(1.0),
+                                ])
+                            else:
+                                print('[preservar_fondo] Fallback: solo voz doblada (Demucs no disponible)')
+                        except Exception as _bg_exc:
+                            print(f'[preservar_fondo] Error, uso solo voz: {_bg_exc}')
                     palabras_clip = [{**w, "start": w["start"] + st, "end": w["end"] + st} for w in marks]
                 opciones_sub = dict(sub_opciones or {})
                 if dubbing_language in ("ja", "ko") and show_subtitles:
@@ -365,6 +383,12 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                           eventos, subclip.duration, audio_mix)
                     except Exception as e:
                         raise RuntimeError(f"No se pudo aplicar la mezcla o normalización solicitada: {e}") from e
+                if upscale and upscale != "off":
+                    write_progress(f"Mejorando calidad visual · clip {parte_num}...", p0 + int(tramo * 0.97))
+                    try:
+                        _mejorar_calidad_video(out_name, upscale, final_w, final_h)
+                    except Exception as e:
+                        print(f'[upscale] No se pudo mejorar calidad: {e}')
                 generated_files.append(out_name)
 
                 # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
@@ -411,6 +435,54 @@ def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
     os.replace(tmp, video)
 
 
+def _mejorar_calidad_video(video, modo, final_w, final_h):
+    """Mejora de calidad del clip final.
+    - 'sharpen': solo nitidez + reducción leve de ruido (sin cambiar resolución, barato).
+    - 'hd': reescala a 1080x1920 con lanczos + unsharp + hqdn3d (buena para 720p -> 1080p).
+    - 'ia': intenta Real-ESRGAN (si existe el binario `realesrgan-ncnn-vulkan`), si no cae a 'hd'.
+    """
+    import shutil as _shutil
+    tmp = os.path.splitext(video)[0] + "_up.mp4"
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+
+    if modo == 'ia' and _shutil.which('realesrgan-ncnn-vulkan'):
+        # Pipeline Real-ESRGAN frame por frame: extrae -> upscala -> recompone con audio
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix='upscale_') as tdir:
+            frames_in = os.path.join(tdir, 'in')
+            frames_out = os.path.join(tdir, 'out')
+            os.makedirs(frames_in); os.makedirs(frames_out)
+            subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
+                            os.path.join(frames_in, '%06d.png')],
+                           capture_output=True, creationflags=SIN_VENTANA)
+            subprocess.run(['realesrgan-ncnn-vulkan', '-i', frames_in, '-o', frames_out, '-n', 'realesrgan-x4plus'],
+                           capture_output=True, creationflags=SIN_VENTANA)
+            # Reescalamos de vuelta al target y recomponemos con audio original
+            subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', '30',
+                            '-i', os.path.join(frames_out, '%06d.png'),
+                            '-i', video, '-map', '0:v:0', '-map', '1:a:0?',
+                            '-vf', f'scale={final_w}:{final_h}:flags=lanczos',
+                            '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+                            '-c:a', 'copy', '-movflags', '+faststart', tmp],
+                           capture_output=True, creationflags=SIN_VENTANA)
+    elif modo in ('hd', 'ia'):
+        vf = f'scale={final_w}:{final_h}:flags=lanczos,hqdn3d=1.5:1:6:6,unsharp=5:5:0.9:5:5:0.0'
+        subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
+                        '-vf', vf, '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+                        '-c:a', 'copy', '-movflags', '+faststart', tmp],
+                       capture_output=True, creationflags=SIN_VENTANA)
+    else:  # 'sharpen' por defecto
+        vf = 'hqdn3d=1.5:1:6:6,unsharp=5:5:0.8:5:5:0.0'
+        subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
+                        '-vf', vf, '-c:v', 'libx264', '-preset', 'medium', '-crf', '19',
+                        '-c:a', 'copy', '-movflags', '+faststart', tmp],
+                       capture_output=True, creationflags=SIN_VENTANA)
+    if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+        os.replace(tmp, video)
+    elif os.path.exists(tmp):
+        os.remove(tmp)
+
+
 def _limpiar_audio(video):
     """Reducción de ruido audible; no añade pistas ocultas."""
     tmp = os.path.splitext(video)[0] + "_denoise.mp4"
@@ -448,7 +520,8 @@ def main(argv):
                 cfg.get("dubbing_voice", "female"), cfg.get("original_volume", 1.0),
                 cfg.get("show_subtitles", True), cfg.get("normalize_audio", False),
                 cfg.get("speaker_dubbing", False), cfg.get("speaker_config"),
-                cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False), cfg.get("export_profile", "balanced"))
+                cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False), cfg.get("export_profile", "balanced"),
+                cfg.get("preserve_background", False), cfg.get("upscale", "off"))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)

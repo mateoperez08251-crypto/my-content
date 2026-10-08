@@ -137,17 +137,29 @@ def _descargar_cli(url, formato, plantilla, cookies):
     raise DescargaError(r.stderr or r.stdout or "yt-dlp falló")
 
 
-def download_video(url, output_dir="videos_descargados", quality="1440", cancel_checker=None):
-    """Descarga y devuelve la ruta del .mp4. Si falla lanza DescargaError con el motivo en claro."""
+def download_video(url, output_dir="videos_descargados", quality="best", cancel_checker=None):
+    """Descarga y devuelve la ruta del .mp4. Si falla lanza DescargaError con el motivo en claro.
+    quality: 'best' baja la MÁXIMA calidad disponible (4K/8K en VP9/AV1 cuando existan). Si pasas
+    una altura (1080/1440/2160) la limita como tope. El merge siempre acaba en mp4."""
     os.makedirs(output_dir, exist_ok=True)
-    print(f"Descargando video: {url} (Calidad: {quality}p si está disponible)")
+    print(f"Descargando video: {url} (Calidad: {quality})")
 
-    # H.264 (avc1) + AAC (m4a) para que se reproduzca bien en Windows; si no hay, lo mejor disponible
+    # YouTube solo ofrece >1080p en VP9/AV1: forzar avc1 topa la descarga a 1080.
+    # Preferimos AV1 > VP9 > AVC, con audio Opus (webm)/M4A/el mejor disponible, remuxeado a mp4.
     if quality == "best":
-        formato = 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bv*+ba/b'
+        formato = (
+            'bv*[vcodec^=av01]+ba/'
+            'bv*[vcodec^=vp9]+ba/'
+            'bv*[ext=mp4]+ba[ext=m4a]/'
+            'bv*+ba/b'
+        )
     else:
-        formato = (f'bestvideo[ext=mp4][vcodec^=avc1][height<={quality}]+bestaudio[ext=m4a]/'
-                   f'bv*[height<={quality}]+ba/b[height<={quality}]/bv*+ba/b')
+        formato = (
+            f'bv*[vcodec^=av01][height<={quality}]+ba/'
+            f'bv*[vcodec^=vp9][height<={quality}]+ba/'
+            f'bv*[ext=mp4][vcodec^=avc1][height<={quality}]+ba[ext=m4a]/'
+            f'bv*[height<={quality}]+ba/b[height<={quality}]/bv*+ba/b'
+        )
     plantilla = os.path.join(output_dir, '%(title).150B.%(ext)s')
 
     def progress_hook(d):

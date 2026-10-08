@@ -1588,7 +1588,8 @@ def run_smart_split_thread(data):
             import yt_downloader
             log("Descargando video para Smart Split...")
             dl_dir = data.get('custom_output_dir', '') or paths.data_path("videos_descargados")
-            source = yt_downloader.download_video(source, output_dir=dl_dir, quality="1440", cancel_checker=lambda: cancel_requested)
+            dl_quality = str(data.get('download_quality', 'best')).strip() or 'best'
+            source = yt_downloader.download_video(source, output_dir=dl_dir, quality=dl_quality, cancel_checker=lambda: cancel_requested)
             if not source:
                 raise Exception("Error al descargar video")
         elif not source or not os.path.isfile(source):
@@ -1614,6 +1615,8 @@ def run_smart_split_thread(data):
             "anti_copyright_filter": data.get('anti_copyright_filter', False),
             "anti_copyright_audio": False,
             "speaker_dubbing": data.get('speaker_dubbing', False),
+            "preserve_background": bool(data.get('preserve_background', False)),
+            "upscale": str(data.get('upscale', 'off')),
             "export_profile": data.get("export_profile", "balanced"),
             "filter_strength": data.get('filter_strength', 1.0),
             "denoise_audio": data.get('denoise_audio', False),

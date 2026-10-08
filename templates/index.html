@@ -2804,6 +2804,30 @@
                         </div>
                     </div>
 
+                    <div class="form-group" style="margin-top: 15px; display: flex; gap: 15px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 220px;">
+                            <label>Calidad de descarga (YouTube/URL)</label>
+                            <select id="smart_download_quality" class="form-control">
+                                <option value="best" selected>Máxima disponible (4K/8K si existe)</option>
+                                <option value="2160">4K · 2160p</option>
+                                <option value="1440">2K · 1440p</option>
+                                <option value="1080">Full HD · 1080p</option>
+                                <option value="720">HD · 720p (más rápido)</option>
+                            </select>
+                            <small style="color: var(--text-muted); font-size: 0.75rem;">Las resoluciones altas de YouTube están en VP9/AV1. Ahora se descargan y remuxean a mp4.</small>
+                        </div>
+                        <div style="flex: 1; min-width: 220px;">
+                            <label>Mejorar calidad del clip final</label>
+                            <select id="smart_upscale" class="form-control">
+                                <option value="off" selected>No mejorar</option>
+                                <option value="sharpen">Nitidez + reducción de ruido (rápido)</option>
+                                <option value="hd">Realzado HD (lanczos + unsharp)</option>
+                                <option value="ia">IA · Real-ESRGAN (si está instalado) · fallback HD</option>
+                            </select>
+                            <small style="color: var(--text-muted); font-size: 0.75rem;">Se aplica al final de cada clip. "IA" usa realesrgan-ncnn-vulkan si está en el PATH.</small>
+                        </div>
+                    </div>
+
                     <div class="form-group" style="margin-top: 20px;">
                         <label style="display:flex;align-items:center;">Carpeta de Guardado <div class="custom-tooltip">
                                 <i class="ph-duotone ph-info"></i><span class="tooltip-text">Selecciona dónde se
@@ -3168,6 +3192,11 @@
                                 Detectar hablantes y conservar la voz de cada uno
                             </label>
                             <small style="display:block">Distingue las voces por el audio y dobla cada intervención. Requiere el motor local VoxCPM2 y el detector de hablantes configurados. Usa voces propias o autorizadas.</small>
+                            <label style="display:block;margin:12px 0">
+                                <input type="checkbox" id="smart_preserve_background" disabled>
+                                Preservar música y sonido de fondo (Demucs separa la voz y conserva la pista musical/ambiente del original)
+                            </label>
+                            <small style="display:block;color:var(--text-muted)">Al doblar: separa el audio original con Demucs, elimina la voz y mezcla el fondo con la nueva voz doblada. Requiere Demucs instalado (motor de video con GPU).</small>
                             <div style="margin:12px 0">
                                 <button type="button" id="smart_download_voice" class="btn" onclick="downloadSmartVoice()">Descargar VoxCPM2 · voz por hablante (~5 GB)</button>
                                 <p id="smart_model_status" aria-live="polite">Consulta o descarga aquí el modelo de voz.</p>
@@ -3961,6 +3990,8 @@
             document.getElementById('smart_dubbing_voice').disabled = !enabled || speakers.checked;
             document.getElementById('smart_original_volume').disabled = enabled;
             document.getElementById('smart_original_volume_value').textContent = enabled ? 'Reemplazado por doblaje' : document.getElementById('smart_original_volume').value + '%';
+            const bg = document.getElementById('smart_preserve_background');
+            if (bg) { bg.disabled = !enabled; if (!enabled) bg.checked = false; }
         }
 
         async function processSmartSplit() {
@@ -4035,6 +4066,9 @@
                         subtitle_scale: document.getElementById('subtitle_scale') ? document.getElementById('subtitle_scale').value : 100,
                         anti_copyright_filter: document.getElementById('smart_anti_copyright_filter') ? document.getElementById('smart_anti_copyright_filter').checked : false,
                         speaker_dubbing: document.getElementById('smart_speaker_dubbing').checked,
+                        preserve_background: document.getElementById('smart_preserve_background') ? document.getElementById('smart_preserve_background').checked : false,
+                        download_quality: document.getElementById('smart_download_quality') ? document.getElementById('smart_download_quality').value : 'best',
+                        upscale: document.getElementById('smart_upscale') ? document.getElementById('smart_upscale').value : 'off',
                         export_profile: document.getElementById('smart_export_profile').value,
                         voice_steps: Number(document.getElementById('smart_voice_steps').value),
                         ...smartCastPayload(),
