@@ -1942,6 +1942,60 @@ def _inbox_local(limit=20):
         return []
 
 
+@app.route("/api/inbox/clear", methods=["POST"])
+def clear_inbox():
+    """Vacía la bandeja local y, si está, la de Firebase."""
+    try:
+        p = paths.data_path("radar_inbox.jsonl")
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception as e:
+        log(f"[inbox] no se pudo borrar local: {e}")
+    if firebase_db:
+        try:
+            for doc in firebase_db.collection('inbox').stream():
+                doc.reference.delete()
+        except Exception as e:
+            log(f"[inbox] no se pudo borrar firebase: {e}")
+    return jsonify({"success": True})
+
+
+@app.route("/api/inbox/delete", methods=["POST"])
+def delete_inbox_item():
+    """Elimina un item por su URL/link (local o Firebase)."""
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or data.get("id") or "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "Falta url o id"}), 400
+    # local jsonl
+    try:
+        p = paths.data_path("radar_inbox.jsonl")
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            kept = []
+            for line in lines:
+                try:
+                    d = json.loads(line)
+                    link = d.get("link") or d.get("url") or ""
+                    if link != url:
+                        kept.append(line)
+                except ValueError:
+                    kept.append(line)
+            with open(p, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+    except Exception as e:
+        log(f"[inbox] no se pudo borrar item local: {e}")
+    # firebase: busca por url
+    if firebase_db:
+        try:
+            for doc in firebase_db.collection('inbox').where('url', '==', url).stream():
+                doc.reference.delete()
+        except Exception as e:
+            log(f"[inbox] no se pudo borrar firebase item: {e}")
+    return jsonify({"success": True})
+
+
 @app.route("/api/inbox", methods=["GET"])
 def get_inbox():
     if not firebase_db:
