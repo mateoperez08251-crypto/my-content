@@ -60,7 +60,10 @@ def assign_turns(words, turns, duration):
         ranked = [(max(0, min(end, t['end']) - max(start, t['start'])), t) for t in turns]
         score, turn = max(ranked, key=lambda pair: pair[0], default=(0, None))
         if not turn or score <= 0:
-            raise RuntimeError('Hay palabras sin hablante detectado. Revisa el audio o usa voz única.')
+            # Sin solape: elige el hablante más cercano en el tiempo en vez de abortar
+            if not turns:
+                continue
+            turn = min(turns, key=lambda t: min(abs(start - t['end']), abs(end - t['start'])))
         speaker = turn['speaker']
         if groups and groups[-1]['speaker'] == speaker and start - groups[-1]['end'] < 0.7 and end - groups[-1]['start'] <= 12:
             groups[-1]['end'] = end
