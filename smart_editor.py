@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import numpy as np
 # pyrefly: ignore [missing-import]
@@ -445,26 +446,44 @@ def _mejorar_calidad_video(video, modo, final_w, final_h):
     tmp = os.path.splitext(video)[0] + "_up.mp4"
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
 
-    if modo == 'ia' and _shutil.which('realesrgan-ncnn-vulkan'):
-        # Pipeline Real-ESRGAN frame por frame: extrae -> upscala -> recompone con audio
-        import tempfile
+    if modo == 'ia':
+        # Pipeline Real-ESRGAN con CUDA (PyTorch). Usa el script `realesrgan_ncnn.py`
+        # local si existe, o cae al binario Vulkan, o al CLI `realesrgan` instalado por pip.
+        import tempfile, shutil as _sh
+        model_dir = os.environ.get('REALESRGAN_MODEL_DIR', os.path.join(os.path.dirname(__file__), 'models', 'realesrgan'))
         with tempfile.TemporaryDirectory(prefix='upscale_') as tdir:
-            frames_in = os.path.join(tdir, 'in')
-            frames_out = os.path.join(tdir, 'out')
+            frames_in = os.path.join(tdir, 'in'); frames_out = os.path.join(tdir, 'out')
             os.makedirs(frames_in); os.makedirs(frames_out)
+            # fps original para preservar la cadencia
+            probe = subprocess.run([ffmpeg, '-i', video, '-hide_banner'], capture_output=True, text=True)
+            fps_match = re.search(r'(\d+(?:\.\d+)?)\s+fps', probe.stderr or '') if (probe.stderr) else None
+            fps = fps_match.group(1) if fps_match else '30'
             subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
                             os.path.join(frames_in, '%06d.png')],
                            capture_output=True, creationflags=SIN_VENTANA)
-            subprocess.run(['realesrgan-ncnn-vulkan', '-i', frames_in, '-o', frames_out, '-n', 'realesrgan-x4plus'],
-                           capture_output=True, creationflags=SIN_VENTANA)
-            # Reescalamos de vuelta al target y recomponemos con audio original
-            subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', '30',
-                            '-i', os.path.join(frames_out, '%06d.png'),
-                            '-i', video, '-map', '0:v:0', '-map', '1:a:0?',
-                            '-vf', f'scale={final_w}:{final_h}:flags=lanczos',
-                            '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
-                            '-c:a', 'copy', '-movflags', '+faststart', tmp],
-                           capture_output=True, creationflags=SIN_VENTANA)
+            ok = False
+            # 1) CLI de pip realesrgan (CUDA)
+            if _sh.which('realesrgan'):
+                r = subprocess.run(['realesrgan', '-i', frames_in, '-o', frames_out, '-n', 'RealESRGAN_x4plus', '-s', '4',
+                                    '--model_path', os.path.join(model_dir, 'RealESRGAN_x4plus.pth')],
+                                   capture_output=True, creationflags=SIN_VENTANA)
+                ok = r.returncode == 0 and any(f.endswith('.png') for f in os.listdir(frames_out))
+            # 2) Binario ncnn-vulkan como fallback
+            if not ok and _sh.which('realesrgan-ncnn-vulkan'):
+                r = subprocess.run(['realesrgan-ncnn-vulkan', '-i', frames_in, '-o', frames_out, '-n', 'realesrgan-x4plus'],
+                                   capture_output=True, creationflags=SIN_VENTANA)
+                ok = r.returncode == 0 and any(f.endswith('.png') for f in os.listdir(frames_out))
+            if not ok:
+                print('[upscale] Real-ESRGAN no disponible; usando HD')
+                modo = 'hd'
+            else:
+                subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', str(fps),
+                                '-i', os.path.join(frames_out, '%06d.png'),
+                                '-i', video, '-map', '0:v:0', '-map', '1:a:0?',
+                                '-vf', f'scale={final_w}:{final_h}:flags=lanczos',
+                                '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+                                '-c:a', 'copy', '-movflags', '+faststart', tmp],
+                               capture_output=True, creationflags=SIN_VENTANA)
     elif modo in ('hd', 'ia'):
         vf = f'scale={final_w}:{final_h}:flags=lanczos,hqdn3d=1.5:1:6:6,unsharp=5:5:0.9:5:5:0.0'
         subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
