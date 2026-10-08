@@ -45,7 +45,6 @@ temp/
 videos_descargados/
 videos_procesados/
 chrome_tiktok/
-firebase_radar/
 
 # Modelos y pesos de la IA de voz (son demasiado pesados para Git)
 Clonar-voz/modelos/*.gguf
