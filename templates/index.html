@@ -2326,10 +2326,25 @@
                                 Nube 24/7</label>
                             <label class="checkbox-item"><input type="checkbox" id="radar_email_notify" checked> Enviar
                                 Correo</label>
+                            <label class="checkbox-item"><input type="checkbox" id="radar_whatsapp_notify"> Enviar
+                                WhatsApp (CallMeBot)</label>
                             <label class="checkbox-item"><input type="checkbox" id="radar_auto_dl"> Autodescargar a
                                 Drive</label>
                             <label class="checkbox-item"><input type="checkbox" id="radar_inbox" checked> Mostrar en
                                 Bandeja Local</label>
+                        </div>
+                    </div>
+
+                    <div class="grid-2-col" style="margin-top: 15px;">
+                        <div class="form-group">
+                            <label style="display:flex;align-items:center;">WhatsApp (teléfono) <div
+                                    class="custom-tooltip"><i class="ph-duotone ph-info"></i><span class="tooltip-text">Formato internacional con +país, sin espacios. Ej: +593991234567.</span></div></label>
+                            <input type="text" id="radar_whatsapp_phone" class="form-control" placeholder="+593991234567">
+                        </div>
+                        <div class="form-group">
+                            <label style="display:flex;align-items:center;">API Key CallMeBot <div
+                                    class="custom-tooltip"><i class="ph-duotone ph-info"></i><span class="tooltip-text">Agrega +34 644 51 95 23 a tus contactos y envíale "I allow callmebot to send me messages". Te responden con tu API key.</span></div></label>
+                            <input type="text" id="radar_whatsapp_apikey" class="form-control" placeholder="1234567">
                         </div>
                     </div>
                 </form>
@@ -4130,10 +4145,13 @@
                     if (data.radar_password) document.getElementById('radar_password').value = data.radar_password;
                     if (data.radar_interval) document.getElementById('radar_interval').value = data.radar_interval;
                     if (data.radar_platform) document.getElementById('radar_platform').value = data.radar_platform;
+                    if (data.radar_whatsapp_phone) document.getElementById('radar_whatsapp_phone').value = data.radar_whatsapp_phone;
+                    if (data.radar_whatsapp_apikey) document.getElementById('radar_whatsapp_apikey').value = data.radar_whatsapp_apikey;
 
                     // Fill checkboxes
                     document.getElementById('radar_cloud').checked = (data.radar_cloud === 'on' || data.radar_cloud === true);
                     document.getElementById('radar_email_notify').checked = (data.radar_email_notify === 'on' || data.radar_email_notify === true);
+                    document.getElementById('radar_whatsapp_notify').checked = (data.radar_whatsapp_notify === 'on' || data.radar_whatsapp_notify === true);
                     document.getElementById('radar_auto_dl').checked = (data.radar_auto_dl === 'on' || data.radar_auto_dl === true);
                     document.getElementById('radar_inbox').checked = (data.radar_inbox === 'on' || data.radar_inbox === true);
 
@@ -4167,7 +4185,7 @@
         async function saveRadarConfig() {
             const formData = new FormData(document.getElementById('radarForm'));
             // handle checkboxes manually
-            ['radar_cloud', 'radar_email_notify', 'radar_auto_dl', 'radar_inbox'].forEach(cb => {
+            ['radar_cloud', 'radar_email_notify', 'radar_whatsapp_notify', 'radar_auto_dl', 'radar_inbox'].forEach(cb => {
                 const el = document.getElementById(cb);
                 if (el && el.checked) formData.append(cb, 'on');
             });
@@ -4178,6 +4196,8 @@
             data.radar_password = document.getElementById('radar_password') ? document.getElementById('radar_password').value : '';
             data.radar_interval = document.getElementById('radar_interval') ? document.getElementById('radar_interval').value : '';
             data.radar_platform = document.getElementById('radar_platform') ? document.getElementById('radar_platform').value : '';
+            data.radar_whatsapp_phone = document.getElementById('radar_whatsapp_phone') ? document.getElementById('radar_whatsapp_phone').value : '';
+            data.radar_whatsapp_apikey = document.getElementById('radar_whatsapp_apikey') ? document.getElementById('radar_whatsapp_apikey').value : '';
 
             let channels_str = document.getElementById('radar_channels') ? document.getElementById('radar_channels').value : '';
             data.channels = channels_str.split(',').map(c => c.trim()).filter(c => c !== '');
