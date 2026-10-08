@@ -447,50 +447,67 @@ def _mejorar_calidad_video(video, modo, final_w, final_h):
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
 
     if modo == 'ia':
-        # Pipeline Real-ESRGAN con CUDA (PyTorch). Usa el script `realesrgan_ncnn.py`
-        # local si existe, o cae al binario Vulkan, o al CLI `realesrgan` instalado por pip.
-        import tempfile, shutil as _sh
+        # Pipeline Real-ESRGAN directo con PyTorch/CUDA sobre cada frame.
+        # Si falta torch/realesrgan o no hay GPU, cae a HD con lanczos+unsharp.
+        import tempfile
         model_dir = os.environ.get('REALESRGAN_MODEL_DIR', os.path.join(os.path.dirname(__file__), 'models', 'realesrgan'))
-        with tempfile.TemporaryDirectory(prefix='upscale_') as tdir:
-            frames_in = os.path.join(tdir, 'in'); frames_out = os.path.join(tdir, 'out')
-            os.makedirs(frames_in); os.makedirs(frames_out)
-            # fps original para preservar la cadencia
-            probe = subprocess.run([ffmpeg, '-i', video, '-hide_banner'], capture_output=True, text=True)
-            fps_match = re.search(r'(\d+(?:\.\d+)?)\s+fps', probe.stderr or '') if (probe.stderr) else None
-            fps = fps_match.group(1) if fps_match else '30'
-            subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
-                            os.path.join(frames_in, '%06d.png')],
-                           capture_output=True, creationflags=SIN_VENTANA)
-            ok = False
-            # 1) CLI de pip realesrgan (CUDA)
-            if _sh.which('realesrgan'):
-                r = subprocess.run(['realesrgan', '-i', frames_in, '-o', frames_out, '-n', 'RealESRGAN_x4plus', '-s', '4',
-                                    '--model_path', os.path.join(model_dir, 'RealESRGAN_x4plus.pth')],
-                                   capture_output=True, creationflags=SIN_VENTANA)
-                ok = r.returncode == 0 and any(f.endswith('.png') for f in os.listdir(frames_out))
-            # 2) Binario ncnn-vulkan como fallback
-            if not ok and _sh.which('realesrgan-ncnn-vulkan'):
-                r = subprocess.run(['realesrgan-ncnn-vulkan', '-i', frames_in, '-o', frames_out, '-n', 'realesrgan-x4plus'],
-                                   capture_output=True, creationflags=SIN_VENTANA)
-                ok = r.returncode == 0 and any(f.endswith('.png') for f in os.listdir(frames_out))
-            if not ok:
-                print('[upscale] Real-ESRGAN no disponible; usando HD')
-                modo = 'hd'
-            else:
+        os.makedirs(model_dir, exist_ok=True)
+        model_path = os.path.join(model_dir, 'RealESRGAN_x4plus.pth')
+        ok = False
+        try:
+            import torch
+            from basicsr.archs.rrdbnet_arch import RRDBNet
+            from realesrgan import RealESRGANer
+            # Descarga el modelo si falta
+            if not os.path.exists(model_path):
+                import urllib.request
+                url = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
+                print(f'[upscale] Descargando RealESRGAN_x4plus.pth a {model_path}...')
+                urllib.request.urlretrieve(url, model_path)
+            arch = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+            upsampler = RealESRGANer(scale=4, model_path=model_path, model=arch,
+                                     tile=256, tile_pad=10, pre_pad=0,
+                                     half=torch.cuda.is_available(),
+                                     gpu_id=0 if torch.cuda.is_available() else None)
+            with tempfile.TemporaryDirectory(prefix='upscale_') as tdir:
+                frames_in = os.path.join(tdir, 'in'); frames_out = os.path.join(tdir, 'out')
+                os.makedirs(frames_in); os.makedirs(frames_out)
+                probe = subprocess.run([ffmpeg, '-i', video, '-hide_banner'], capture_output=True, text=True)
+                fps_match = re.search(r'(\d+(?:\.\d+)?)\s+fps', probe.stderr or '') if probe.stderr else None
+                fps = fps_match.group(1) if fps_match else '30'
+                subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
+                                os.path.join(frames_in, '%06d.png')],
+                               capture_output=True, creationflags=SIN_VENTANA)
+                frames = sorted(f for f in os.listdir(frames_in) if f.endswith('.png'))
+                total = len(frames)
+                print(f'[upscale] Procesando {total} frames con Real-ESRGAN...')
+                for i, fname in enumerate(frames):
+                    img = cv2.imread(os.path.join(frames_in, fname), cv2.IMREAD_UNCHANGED)
+                    out, _ = upsampler.enhance(img, outscale=2)  # 2x basta y rinde más
+                    cv2.imwrite(os.path.join(frames_out, fname), out)
+                    if i % 30 == 0:
+                        print(f'[upscale] {i+1}/{total}')
                 subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', str(fps),
                                 '-i', os.path.join(frames_out, '%06d.png'),
                                 '-i', video, '-map', '0:v:0', '-map', '1:a:0?',
-                                '-vf', f'scale={final_w}:{final_h}:flags=lanczos',
+                                '-vf', f'scale={final_w}:{final_h}:flags=lanczos,unsharp=5:5:0.6',
                                 '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
                                 '-c:a', 'copy', '-movflags', '+faststart', tmp],
                                capture_output=True, creationflags=SIN_VENTANA)
-    elif modo in ('hd', 'ia'):
+                ok = os.path.exists(tmp) and os.path.getsize(tmp) > 0
+        except Exception as e:
+            print(f'[upscale] Real-ESRGAN falló ({e.__class__.__name__}: {e}); uso HD')
+        if not ok:
+            modo = 'hd'
+        else:
+            modo = 'done'
+    if modo == 'hd':
         vf = f'scale={final_w}:{final_h}:flags=lanczos,hqdn3d=1.5:1:6:6,unsharp=5:5:0.9:5:5:0.0'
         subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
                         '-vf', vf, '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
                         '-c:a', 'copy', '-movflags', '+faststart', tmp],
                        capture_output=True, creationflags=SIN_VENTANA)
-    else:  # 'sharpen' por defecto
+    elif modo == 'sharpen':
         vf = 'hqdn3d=1.5:1:6:6,unsharp=5:5:0.8:5:5:0.0'
         subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
                         '-vf', vf, '-c:v', 'libx264', '-preset', 'medium', '-crf', '19',
