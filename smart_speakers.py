@@ -124,8 +124,11 @@ def dub_speakers(source, start, duration, words, language, motor, directory, con
             raw_duration = stream.getnframes() / stream.getframerate()
         slot = group['end'] - group['start']
         factor = raw_duration / slot
-        if not math.isfinite(factor) or not 0.5 <= factor <= 2:
-            raise RuntimeError('Una traducción no cabe con voz natural. Usa un clip con pausas más amplias o voz única.')
+        if not math.isfinite(factor) or factor <= 0:
+            raise RuntimeError('Una traducción no cabe con voz natural. Usa voz única.')
+        # Clampeo seguro: antes abortaba fuera de 0.5-2, ahora acelera/ralentiza
+        # con atempo encadenado (tolera hasta 2.5x sin romper la voz).
+        factor = max(0.5, min(factor, 2.5))
         fitted = str(Path(directory) / f'fitted_{index}.wav')
         extract(job['output'], fitted, 0, slot, tempo_filters(factor) + ',apad')
         with wave.open(fitted, 'rb') as stream:
