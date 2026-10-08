@@ -3198,7 +3198,7 @@
                             </label>
                             <small style="display:block;color:var(--text-muted)">Al doblar: separa el audio original con Demucs, elimina la voz y mezcla el fondo con la nueva voz doblada. Requiere Demucs instalado (motor de video con GPU).</small>
                             <div style="margin:12px 0">
-                                <button type="button" id="smart_download_voice" class="btn" onclick="downloadSmartVoice()">Descargar VoxCPM2 · voz por hablante (~5 GB)</button>
+                                <button type="button" id="smart_download_voice" class="btn" onclick="downloadSmartVoice()" onmouseover="refreshSmartVoice()">Descargar VoxCPM2 · voz por hablante (~5 GB)</button>
                                 <p id="smart_model_status" aria-live="polite">Consulta o descarga aquí el modelo de voz.</p>
                                 <a href="/clonador" target="_blank" rel="noopener">Abrir Clonador y guardar voces</a>
                                 <small style="display:block">En Colab ejecuta la celda 5 de la libreta actualizada para instalar los motores y descargar también el detector. El detector necesita HF_TOKEN y aceptar sus condiciones.</small>
@@ -4337,6 +4337,7 @@
         // Agregar listeners cuando carga el DOM
         document.addEventListener('DOMContentLoaded', () => {
             loadFormSettings();
+            try { refreshSmartVoice(); } catch (e) {}
 
             // Guardar configuración cada vez que cambie algún campo
             const formInputs = document.querySelectorAll('form input, form select, form textarea');
