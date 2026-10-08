@@ -2037,12 +2037,24 @@
             style="width: 600px; max-width: 90%; max-height: 80vh; display: flex; flex-direction: column; background: rgba(15, 15, 18, 0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 25px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
             <div
                 style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 15px;">
-                <h2 style="margin: 0; color: white; font-size: 1.3rem;"><i class="ph-duotone ph-tray"></i> Bandeja de
-                    Entrada (Firebase)</h2>
-                <button onclick="closeInboxModal()"
-                    style="background: none; border: none; color: white; cursor: pointer; font-size: 1.5rem; transition: color 0.2s;"
-                    onmouseover="this.style.color='#ff4444'" onmouseout="this.style.color='white'"><i
-                        class="ph-bold ph-x"></i></button>
+                <h2 style="margin: 0; color: white; font-size: 1.3rem;"><i class="ph-duotone ph-tray"></i> Bandeja del Radar
+                    <span id="inboxCount" style="font-size: 0.75rem; color: var(--text-muted); margin-left: 8px;"></span></h2>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" id="inboxFilter" placeholder="Filtrar..." oninput="renderInbox()"
+                        style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; width: 140px;">
+                    <select id="inboxPlat" onchange="renderInbox()"
+                        style="background: #111; border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 6px; padding: 6px; font-size: 0.85rem;">
+                        <option value="">Todas</option>
+                        <option value="youtube">YouTube</option>
+                        <option value="tiktok">TikTok</option>
+                        <option value="instagram">Instagram</option>
+                    </select>
+                    <button onclick="clearInbox()" title="Vaciar bandeja"
+                        style="background: rgba(255,68,68,0.1); border: 1px solid rgba(255,68,68,0.3); color:#ff6b6b; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 0.85rem;">
+                        <i class="ph-bold ph-trash"></i> Vaciar</button>
+                    <button onclick="closeInboxModal()"
+                        style="background: none; border: none; color: white; cursor: pointer; font-size: 1.4rem;"><i class="ph-bold ph-x"></i></button>
+                </div>
             </div>
             <div id="inboxContainer" style="flex: 1; overflow-y: auto; padding-right: 10px;">
                 <div style="text-align: center; color: var(--text-muted); padding: 20px;">Cargando...</div>
@@ -4584,48 +4596,91 @@
             } catch (err) { }
         }, 1000);
 
-        // Polling del Inbox cada 15 seg
+        // Bandeja del radar: filtros + eliminar + Smart Split directo
+        let _inboxCache = [];
+
         async function fetchInbox() {
             try {
                 const res = await fetch('/api/inbox');
                 const data = await res.json();
-                const container = document.getElementById('inboxContainer');
-
                 if (data.error) {
-                    container.innerHTML = `<div style="color:var(--danger-bg); font-size:0.85rem;">${escapeHtml(data.error)}</div>`;
-                    return;
+                    document.getElementById('inboxContainer').innerHTML =
+                        `<div style="color:#ff6b6b; font-size:0.85rem;">${escapeHtml(data.error)}</div>`;
+                    _inboxCache = []; renderInbox(); return;
                 }
-
-                if (data.videos && Array.isArray(data.videos)) {
-                    if (data.videos.length > 0) {
-                        container.innerHTML = '';
-                        data.videos.forEach(item => {
-                            const titulo = escapeHtml(item.title || 'Video Detectado');
-                            const url = /^https?:\/\//i.test(item.url || '') ? escapeHtml(item.url) : '#';
-                            const urlJs = escapeHtml(JSON.stringify(/^https?:\/\//i.test(item.url || '') ? item.url : ''));
-                            container.innerHTML += `
-                                <div class="inbox-item" style="flex-direction: column; align-items: stretch; gap: 10px;">
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <div class="inbox-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 75%;" title="${titulo}">${titulo}</div>
-                                        <div class="inbox-time">${escapeHtml(item.time_ago || '')}</div>
-                                    </div>
-                                    <div style="display: flex; gap: 10px;">
-                                        <button class="btn btn-primary" style="flex: 1; font-size: 0.8rem; padding: 6px;" onclick="document.getElementById('video_path').value=${urlJs}; closeInboxModal();">📥 Usar Link</button>
-                                        <a href="${url}" target="_blank" rel="noopener" class="btn btn-secondary" style="flex: 1; font-size: 0.8rem; padding: 6px; text-decoration: none; text-align: center;">👀 Ver</a>
-                                    </div>
-                                </div>
-                            `;
-                        });
-                    } else {
-                        container.innerHTML = '<div style="color:var(--text-secondary); font-size:0.85rem;">La bandeja está vacía</div>';
-                    }
-                } else if (data.html) {
-                    // Si el backend devuelve HTML puro
-                    container.innerHTML = data.html;
-                } else {
-                    container.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.9rem;">No hay videos nuevos</div>`;
-                }
+                _inboxCache = Array.isArray(data.videos) ? data.videos : [];
+                renderInbox();
             } catch (e) { }
+        }
+
+        function renderInbox() {
+            const container = document.getElementById('inboxContainer');
+            const filt = (document.getElementById('inboxFilter')?.value || '').toLowerCase();
+            const plat = document.getElementById('inboxPlat')?.value || '';
+            const items = _inboxCache.filter(it => {
+                const t = (it.title || '').toLowerCase();
+                const c = (it.channel || '').toLowerCase();
+                if (filt && !t.includes(filt) && !c.includes(filt)) return false;
+                if (plat && (it.platform || '') !== plat) return false;
+                return true;
+            });
+            document.getElementById('inboxCount').textContent = `(${items.length}/${_inboxCache.length})`;
+            if (!items.length) {
+                container.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:30px; font-size:0.9rem;">
+                    ${_inboxCache.length ? 'Ningún item coincide con el filtro' : 'La bandeja está vacía'}</div>`;
+                return;
+            }
+            const platIcon = { youtube: '📺', tiktok: '🎵', instagram: '📷' };
+            container.innerHTML = items.map(item => {
+                const titulo = escapeHtml(item.title || 'Sin título');
+                const canal = escapeHtml(item.channel || '');
+                const url = /^https?:\/\//i.test(item.url || '') ? item.url : '';
+                const urlEsc = escapeHtml(url);
+                const urlJs = JSON.stringify(url).replace(/</g, '\\u003c');
+                const icon = platIcon[item.platform] || '🎬';
+                return `
+                <div class="inbox-item" style="flex-direction:column; align-items:stretch; gap:10px; padding:12px; border-radius:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; gap:10px;">
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">${icon} ${canal} · ${escapeHtml(item.time_ago || '')}</div>
+                            <div class="inbox-title" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${titulo}">${titulo}</div>
+                        </div>
+                        <button onclick="deleteInboxItem(${urlJs})" title="Eliminar"
+                            style="background:transparent; border:none; color:#ff6b6b; cursor:pointer; font-size:1.1rem; padding:4px 8px;">✕</button>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn btn-primary" style="flex:2; font-size:0.78rem; padding:6px;" onclick="sendToSmartSplit(${urlJs})">✂️ Smart Split</button>
+                        <button class="btn btn-secondary" style="flex:1; font-size:0.78rem; padding:6px;" onclick="document.getElementById('video_path').value=${urlJs}; closeInboxModal();">📥 Usar</button>
+                        <a href="${urlEsc}" target="_blank" rel="noopener" class="btn btn-secondary" style="flex:1; font-size:0.78rem; padding:6px; text-decoration:none; text-align:center;">👀</a>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function sendToSmartSplit(url) {
+            if (!url) return;
+            const el = document.getElementById('smart_split_source');
+            if (el) el.value = url;
+            closeInboxModal();
+            if (typeof openSmartSplitModal === 'function') openSmartSplitModal();
+        }
+
+        async function deleteInboxItem(url) {
+            if (!url || !confirm('¿Eliminar este item?')) return;
+            try {
+                await fetch('/api/inbox/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url }) });
+                _inboxCache = _inboxCache.filter(it => (it.url || '') !== url);
+                renderInbox();
+            } catch (e) { alert('No se pudo eliminar: ' + e); }
+        }
+
+        async function clearInbox() {
+            if (!confirm('¿Vaciar toda la bandeja? Esta acción no se puede deshacer.')) return;
+            try {
+                await fetch('/api/inbox/clear', { method: 'POST' });
+                _inboxCache = []; renderInbox();
+            } catch (e) { alert('No se pudo vaciar: ' + e); }
         }
 
         fetchInbox();
