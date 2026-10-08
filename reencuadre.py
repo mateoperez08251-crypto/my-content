@@ -149,6 +149,13 @@ def calcular_trayectoria(video, t_ini, t_fin, crop_w, palabras=None, nivel="equi
     palabras: lista de {"start","end"} en segundos del video completo (para saber
     cuándo hay voz)."""
     cfg = NIVELES.get(nivel, NIVELES["equilibrado"])
+    # Silencia los warnings "Your platform doesn't support hardware accelerated AV1 decoding"
+    # que llenan el log en videos AV1 (4K/8K de YouTube). El decode cae a software igual.
+    try:
+        cv2.setLogLevel(0)  # LOG_LEVEL_SILENT
+    except Exception:
+        pass
+    os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'hwaccel;none')
     cap = cv2.VideoCapture(video)
     orig_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920
     orig_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080
