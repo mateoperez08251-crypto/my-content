@@ -422,10 +422,41 @@ def _terminar_trabajo():
     winproc.matar_arbol(proc)
 
 
+_file_logger = None
+
+
+def _get_file_logger():
+    """Logger a archivo con rotación: 5 MB x 5 archivos. Carpeta datos/logs/."""
+    global _file_logger
+    if _file_logger is not None:
+        return _file_logger
+    import logging
+    from logging.handlers import RotatingFileHandler
+    try:
+        log_dir = paths.data_path("logs")
+    except Exception:
+        log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    logger = logging.getLogger("contentapp")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        h = RotatingFileHandler(os.path.join(log_dir, "contentapp.log"),
+                                maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+        logger.addHandler(h)
+        logger.propagate = False
+    _file_logger = logger
+    return logger
+
+
 def log(msg):
     msg = str(msg)
     try:
         print(msg)
+    except Exception:
+        pass
+    try:
+        _get_file_logger().info(msg)
     except Exception:
         pass
     with _logs_lock:
@@ -626,16 +657,25 @@ def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None):
                 pass
 
 
-def _subir(video, titulo, tiktok, facebook, youtube):
-    """Único punto de subida para los tres flujos (Colab, local y Smart Split)."""
+def _subir(video, titulo, tiktok, facebook, youtube, max_retries=2):
+    """Único punto de subida para los tres flujos (Colab, local y Smart Split).
+    Reintenta hasta max_retries veces en caso de fallo transitorio."""
     if not (tiktok or facebook or youtube):
         return 0
     cfg = _escribir_config("config_subidor", {
         "video": video, "title": titulo,
         "tiktok": bool(tiktok), "facebook": bool(facebook), "youtube": bool(youtube),
     })
-    return _ejecutar_subproceso(_cmd_script("api_subidor.py", "--run-subidor", "--config", cfg),
-                                config_path=cfg)
+    for intento in range(1, max_retries + 2):
+        code = _ejecutar_subproceso(_cmd_script("api_subidor.py", "--run-subidor", "--config", cfg),
+                                    config_path=cfg)
+        if code == 0:
+            return 0
+        if intento <= max_retries:
+            log(f"[subida] Intento {intento} falló (código {code}). Reintentando en 10 s...")
+            time.sleep(10)
+    log(f"[subida] FALLÓ tras {max_retries + 1} intentos. Revisa tokens de TikTok/YouTube/FB.")
+    return code
 
 
 def _log_destinos(parte, tiktok, youtube, facebook):
@@ -1778,6 +1818,59 @@ def get_smart_split_progress():
         return jsonify({"success": True, "message": "Preparando...", "percent": "0"})
 
 
+# ---- Smart Split: presets guardables -----------------------------------
+def _presets_path():
+    try:
+        p = paths.data_path("smart_presets.json")
+    except Exception:
+        p = "smart_presets.json"
+    os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+    return p
+
+
+@app.route("/api/smart_presets", methods=["GET"])
+def list_smart_presets():
+    try:
+        with open(_presets_path(), "r", encoding="utf-8") as f:
+            return jsonify({"success": True, "presets": json.load(f)})
+    except (OSError, ValueError):
+        return jsonify({"success": True, "presets": {}})
+
+
+@app.route("/api/smart_presets", methods=["POST"])
+def save_smart_preset():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    cfg = data.get("config") or {}
+    if not name or not isinstance(cfg, dict):
+        return jsonify({"success": False, "error": "Nombre o config inválidos"}), 400
+    try:
+        try:
+            with open(_presets_path(), "r", encoding="utf-8") as f:
+                presets = json.load(f)
+        except (OSError, ValueError):
+            presets = {}
+        presets[name] = cfg
+        with open(_presets_path(), "w", encoding="utf-8") as f:
+            json.dump(presets, f, ensure_ascii=False, indent=2)
+        return jsonify({"success": True})
+    except OSError as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/smart_presets/<name>", methods=["DELETE"])
+def delete_smart_preset(name):
+    try:
+        with open(_presets_path(), "r", encoding="utf-8") as f:
+            presets = json.load(f)
+        presets.pop(name, None)
+        with open(_presets_path(), "w", encoding="utf-8") as f:
+            json.dump(presets, f, ensure_ascii=False, indent=2)
+        return jsonify({"success": True})
+    except (OSError, ValueError) as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/radar_config_get", methods=["GET"])
 def get_radar_config():
     if firebase_db:
@@ -1812,10 +1905,47 @@ def save_radar_config():
         return jsonify({'success': False, 'message': str(e)})
 
 
+def _inbox_push(item: dict):
+    """Añade un item a la bandeja local (fallback cuando no hay Firebase)."""
+    try:
+        p = paths.data_path("radar_inbox.jsonl")
+        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _inbox_local(limit=20):
+    """Lee los últimos N items del JSONL local."""
+    try:
+        p = paths.data_path("radar_inbox.jsonl")
+        with open(p, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-limit:]
+        items = []
+        for line in reversed(lines):
+            try:
+                d = json.loads(line)
+                items.append({
+                    "id": d.get("link", ""),
+                    "title": d.get("titulo") or d.get("title") or "Sin título",
+                    "channel": d.get("canal") or d.get("channel") or "",
+                    "platform": d.get("plataforma") or d.get("platform") or "",
+                    "url": d.get("link") or d.get("url") or "",
+                    "thumbnail": d.get("thumbnail", ""),
+                    "time_ago": "Reciente",
+                })
+            except ValueError:
+                continue
+        return items
+    except Exception:
+        return []
+
+
 @app.route("/api/inbox", methods=["GET"])
 def get_inbox():
     if not firebase_db:
-        return jsonify({"error": "Firebase no está configurado (falta firebase-key.json)"})
+        return jsonify({"videos": _inbox_local()})
     try:
         docs = firebase_db.collection('inbox').order_by(
             'detected_at', direction=firestore.Query.DESCENDING).limit(10).stream()

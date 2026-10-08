@@ -387,7 +387,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 if upscale and upscale != "off":
                     write_progress(f"Mejorando calidad visual · clip {parte_num}...", p0 + int(tramo * 0.97))
                     try:
-                        _mejorar_calidad_video(out_name, upscale, final_w, final_h)
+                        def _up_prog(msg, pct):
+                            write_progress(f"Clip {parte_num}: {msg}", p0 + int(tramo * 0.97))
+                        _mejorar_calidad_video(out_name, upscale, final_w, final_h, progress=_up_prog)
                     except Exception as e:
                         print(f'[upscale] No se pudo mejorar calidad: {e}')
                 generated_files.append(out_name)
@@ -436,7 +438,7 @@ def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
     os.replace(tmp, video)
 
 
-def _mejorar_calidad_video(video, modo, final_w, final_h):
+def _mejorar_calidad_video(video, modo, final_w, final_h, progress=None):
     """Mejora de calidad del clip final.
     - 'sharpen': solo nitidez + reducción leve de ruido (sin cambiar resolución, barato).
     - 'hd': reescala a 1080x1920 con lanczos + unsharp + hqdn3d (buena para 720p -> 1080p).
@@ -483,8 +485,13 @@ def _mejorar_calidad_video(video, modo, final_w, final_h):
                 print(f'[upscale] Procesando {total} frames con Real-ESRGAN...')
                 for i, fname in enumerate(frames):
                     img = cv2.imread(os.path.join(frames_in, fname), cv2.IMREAD_UNCHANGED)
-                    out, _ = upsampler.enhance(img, outscale=2)  # 2x basta y rinde más
+                    out, _ = upsampler.enhance(img, outscale=2)
                     cv2.imwrite(os.path.join(frames_out, fname), out)
+                    if i % 10 == 0 and progress:
+                        try:
+                            progress(f'Mejorando con IA: {i+1}/{total} frames', min(99, int(100 * (i + 1) / max(1, total))))
+                        except Exception:
+                            pass
                     if i % 30 == 0:
                         print(f'[upscale] {i+1}/{total}')
                 subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', str(fps),

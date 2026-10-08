@@ -29,19 +29,19 @@ SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 MOTORES = {
     "ligero": {
         "nombre": "Ligero (Llama 3.1 8B)",
-        "llm": ["llama3-8b-8192"],
+        "llm": ["llama-3.1-8b-instant"],
         "whisper": "whisper-large-v3-turbo",
         "reencuadre": "ligero",
     },
     "equilibrado": {
         "nombre": "Equilibrado (GPT-OSS 20B)",
-        "llm": ["openai/gpt-oss-20b", "llama3-8b-8192"],
+        "llm": ["openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
         "whisper": "whisper-large-v3",
         "reencuadre": "equilibrado",
     },
     "pro": {
         "nombre": "Pro (GPT-OSS 120B) - recomendado",
-        "llm": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama3-8b-8192"],
+        "llm": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
         "whisper": "whisper-large-v3",
         "reencuadre": "pro",
     },
@@ -63,8 +63,30 @@ def _clave():
     return key
 
 
+OPENROUTER = "https://openrouter.ai/api/v1"
+
+
+def _openrouter_key():
+    """OpenRouter como fallback de Groq. Opcional."""
+    try:
+        from app_secrets import get_secret
+        return get_secret("openrouter", "api_key", env="OPENROUTER_API_KEY")
+    except Exception:
+        import os as _os
+        return _os.environ.get("OPENROUTER_API_KEY", "")
+
+
+_OPENROUTER_MAP = {
+    "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b": "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile": "meta-llama/llama-3.3-70b-instruct",
+    "llama-3.1-8b-instant": "meta-llama/llama-3.1-8b-instruct",
+}
+
+
 def chat(mensajes, modelos, json_mode=True, temperatura=0.4, max_tokens=4000):
-    """Llama a Groq probando los modelos en orden. Devuelve (texto, modelo_usado)."""
+    """Llama a Groq probando los modelos en orden; si todos fallan, intenta OpenRouter.
+    Devuelve (texto, modelo_usado)."""
     ultimo = ""
     for modelo in modelos:
         cuerpo = {"model": modelo, "messages": mensajes, "temperature": temperatura,
@@ -82,10 +104,28 @@ def chat(mensajes, modelos, json_mode=True, temperatura=0.4, max_tokens=4000):
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"], modelo
             ultimo = f"{modelo}: HTTP {r.status_code} {r.text[:200]}"
-            if r.status_code == 429:  # límite de uso: esperar y reintentar
+            if r.status_code == 429:
                 time.sleep(float(r.headers.get("retry-after", 5)))
                 continue
-            break  # modelo inexistente/retirado u otro error: probar el siguiente
+            break
+    # Fallback a OpenRouter (si hay clave)
+    or_key = _openrouter_key()
+    if or_key:
+        for modelo in modelos:
+            or_model = _OPENROUTER_MAP.get(modelo, modelo)
+            cuerpo = {"model": or_model, "messages": mensajes, "temperature": temperatura,
+                      "max_tokens": max_tokens}
+            if json_mode:
+                cuerpo["response_format"] = {"type": "json_object"}
+            try:
+                r = requests.post(f"{OPENROUTER}/chat/completions", json=cuerpo, timeout=(10, 180),
+                                  headers={"Authorization": f"Bearer {or_key}",
+                                           "HTTP-Referer": "https://github.com/mateoperez08251-crypto/my-content"})
+                if r.status_code == 200:
+                    return r.json()["choices"][0]["message"]["content"], or_model + " (OpenRouter)"
+                ultimo = f"OR {or_model}: HTTP {r.status_code} {r.text[:200]}"
+            except requests.RequestException as e:
+                ultimo = f"OR {or_model}: {e}"
     raise RuntimeError(f"Groq no respondió: {ultimo}")
 
 

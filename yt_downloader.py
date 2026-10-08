@@ -160,7 +160,9 @@ def download_video(url, output_dir="videos_descargados", quality="best", cancel_
             f'bv*[ext=mp4][vcodec^=avc1][height<={quality}]+ba[ext=m4a]/'
             f'bv*[height<={quality}]+ba/b[height<={quality}]/bv*+ba/b'
         )
-    plantilla = os.path.join(output_dir, '%(title).150B.%(ext)s')
+    # Caché por video ID: si el mismo video ya está descargado (aunque cambie el título),
+    # yt-dlp lo detecta y no lo vuelve a bajar. El nombre final incluye el id al principio.
+    plantilla = os.path.join(output_dir, '%(id)s_%(title).130B.%(ext)s')
 
     def progress_hook(d):
         if cancel_checker and cancel_checker():

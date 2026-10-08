@@ -220,6 +220,38 @@ def push_inbox(item: dict):
         pass
 
 
+def _auto_clip(item: dict, preset_name: str):
+    """Lanza Smart Split sobre el video nuevo con un preset guardado.
+    Requiere que content.py esté corriendo en el mismo proceso."""
+    try:
+        import content  # type: ignore
+    except Exception:
+        return
+    try:
+        presets = {}
+        try:
+            with open(content._presets_path(), "r", encoding="utf-8") as f:
+                presets = json.load(f)
+        except Exception:
+            pass
+        cfg = presets.get(preset_name) or presets.get("default") or {}
+        if not cfg:
+            _log(f"Auto-clip saltado: no hay preset '{preset_name}'.")
+            return
+        data = {**cfg, "source": item["link"]}
+        try:
+            if content._intentar_iniciar_trabajo():
+                _log(f"Auto-clip disparado para {item['link']} con preset '{preset_name}'.")
+                content.threading.Thread(target=content.run_smart_split_thread,
+                                         args=(data,), daemon=True).start()
+            else:
+                _log(f"Auto-clip pospuesto: hay otra tarea en curso ({item['link']}).")
+        except Exception as exc:
+            _log(f"Auto-clip falló: {exc}")
+    except Exception as exc:
+        _log(f"Auto-clip error: {exc}")
+
+
 # ----- Loop principal --------------------------------------------------------
 
 def _plataformas_a_consultar(filtro: str) -> list[str]:
@@ -265,6 +297,10 @@ def radar_monitor():
             if cfg.get("radar_whatsapp_notify") and cfg.get("radar_whatsapp_phone"):
                 send_whatsapp(cfg["radar_whatsapp_phone"], cfg.get("radar_whatsapp_apikey", ""),
                               f"🔔 {it['channel']} publicó:\n{it['title']}\n{it['link']}")
+            # Auto-pipeline: dispara Smart Split con un preset guardado
+            if cfg.get("radar_auto_clip") and it["platform"] == "youtube":
+                threading.Thread(target=_auto_clip, args=(it, cfg.get("radar_auto_preset", "default")),
+                                 daemon=True).start()
     # Poda estado > 90 días para no crecer sin fin
     corte = int(time.time()) - 90 * 86400
     state["seen"] = {k: v for k, v in seen.items() if v > corte}
