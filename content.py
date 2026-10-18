@@ -1655,7 +1655,9 @@ def run_smart_split_thread(data):
             "anti_copyright_filter": data.get('anti_copyright_filter', False),
             "anti_copyright_audio": False,
             "speaker_dubbing": data.get('speaker_dubbing', False),
-            "preserve_background": bool(data.get('preserve_background', False)),
+            "preserve_background": data.get('preserve_background', False),
+            "background_volume": data.get('background_volume', 0.75),
+            "video_format": data.get('video_format', 'vertical'),
             "upscale": str(data.get('upscale', 'off')),
             "export_profile": data.get("export_profile", "balanced"),
             "filter_strength": data.get('filter_strength', 1.0),
@@ -1786,11 +1788,13 @@ def run_smart_split_thread(data):
 @app.route("/api/smart_split", methods=["POST"])
 def smart_split_api():
     data = request.get_json(silent=True) or {}
-    from smart_dubbing import validate_options
+    from smart_dubbing import validate_options, validate_layout
     from smart_speakers import validate_edit_options, validate_performance
     if not isinstance(data, dict):
         return jsonify({"success": False, "error": "Se esperaba un objeto JSON."}), 400
     try:
+        validate_layout(data.get('video_format', 'vertical'), data.get('preserve_background', False),
+                        data.get('background_volume', 0.75))
         validate_performance(data.get('export_profile', 'balanced'), data.get('voice_steps', 10), data.get('voice_cast'))
         if data.get('cast_id') is not None and not isinstance(data['cast_id'], str):
             raise ValueError('Análisis de hablantes no válido.')
@@ -1883,15 +1887,42 @@ def get_radar_config():
     return jsonify({'success': False, 'message': 'No data'})
 
 
+def _radar_config_local_path():
+    return paths.data_path("radar_config.json")
+
+
+def _save_radar_locally(data):
+    """Guarda la config del radar en un archivo JSON local como fallback."""
+    try:
+        p = _radar_config_local_path()
+        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except OSError as e:
+        print(f"Error guardando radar local: {e}")
+        return False
+
+
 @app.route("/api/radar_config", methods=["POST"])
 def save_radar_config():
     try:
         data = request.get_json(silent=True)
         if not data:
             return jsonify({'success': False, 'message': 'No se recibieron datos'})
-        if not firebase_db:
-            return jsonify({'success': True, 'message': 'Radar guardado localmente (Firebase no conectado)'})
-        firebase_db.collection('config').document('radar').set(data)
+
+        # Siempre guardar localmente (fallback seguro)
+        _save_radar_locally(data)
+
+        firebase_ok = False
+        firebase_error = ""
+        if firebase_db:
+            try:
+                firebase_db.collection('config').document('radar').set(data)
+                firebase_ok = True
+            except Exception as fb_err:
+                firebase_error = str(fb_err)
+                print(f"Error guardando radar en Firebase: {fb_err}")
 
         def trigger_radar():
             try:
@@ -1900,13 +1931,26 @@ def save_radar_config():
             except Exception as e:
                 print("Error disparando radar:", e)
         threading.Thread(target=trigger_radar, daemon=True).start()
-        return jsonify({'success': True, 'message': 'Radar guardado y activo en Firebase'})
+
+        if firebase_ok:
+            return jsonify({'success': True, 'message': 'Radar guardado y activo en Firebase'})
+        elif firebase_db and "billing" in firebase_error.lower():
+            return jsonify({'success': True, 'message':
+                'Radar guardado localmente. ⚠️ Para activar el radar en LA NUBE '
+                '(Cloud Functions), habilita la facturación en tu proyecto de Google Cloud: '
+                'Consola de Google Cloud → Facturación → Habilitar plan Blaze. '
+                'El radar LOCAL funciona sin problemas.'})
+        elif firebase_db and firebase_error:
+            return jsonify({'success': True, 'message':
+                f'Radar guardado localmente (Firebase falló: {firebase_error[:100]})'})
+        else:
+            return jsonify({'success': True, 'message': 'Radar guardado localmente (Firebase no conectado)'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
 
 def _inbox_push(item: dict):
-    """Añade un item a la bandeja local (fallback cuando no hay Firebase)."""
+    """Añade un item a la bandeja local (archivo permanente, nunca se borra)."""
     try:
         p = paths.data_path("radar_inbox.jsonl")
         os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
@@ -1944,13 +1988,7 @@ def _inbox_local(limit=20):
 
 @app.route("/api/inbox/clear", methods=["POST"])
 def clear_inbox():
-    """Vacía la bandeja local y, si está, la de Firebase."""
-    try:
-        p = paths.data_path("radar_inbox.jsonl")
-        if os.path.exists(p):
-            os.remove(p)
-    except Exception as e:
-        log(f"[inbox] no se pudo borrar local: {e}")
+    """Vacía la bandeja de Firebase. El archivo local NUNCA se borra (historial permanente)."""
     if firebase_db:
         try:
             for doc in firebase_db.collection('inbox').stream():
@@ -1962,31 +2000,12 @@ def clear_inbox():
 
 @app.route("/api/inbox/delete", methods=["POST"])
 def delete_inbox_item():
-    """Elimina un item por su URL/link (local o Firebase)."""
+    """Elimina un item por su URL/link solo de Firebase. El local NUNCA se borra."""
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or data.get("id") or "").strip()
     if not url:
         return jsonify({"success": False, "error": "Falta url o id"}), 400
-    # local jsonl
-    try:
-        p = paths.data_path("radar_inbox.jsonl")
-        if os.path.exists(p):
-            with open(p, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            kept = []
-            for line in lines:
-                try:
-                    d = json.loads(line)
-                    link = d.get("link") or d.get("url") or ""
-                    if link != url:
-                        kept.append(line)
-                except ValueError:
-                    kept.append(line)
-            with open(p, "w", encoding="utf-8") as f:
-                f.writelines(kept)
-    except Exception as e:
-        log(f"[inbox] no se pudo borrar item local: {e}")
-    # firebase: busca por url
+    # Solo borrar de Firebase, el archivo local es historial permanente
     if firebase_db:
         try:
             for doc in firebase_db.collection('inbox').where('url', '==', url).stream():
@@ -2262,17 +2281,42 @@ if __name__ == "__main__":
                        f"{PUERTO}, pero conectar TikTok/Facebook necesita el {PUERTO_PREFERIDO}.\n"
                        "Cierra la copia vieja desde el Administrador de tareas y reinicia la app.")
 
+    def _purge_firebase_inbox():
+        """Borra items de Firebase con más de 3 días para no acumular datos en la nube."""
+        if not firebase_db:
+            return
+        try:
+            corte = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)
+            docs = firebase_db.collection('inbox').where(
+                'detected_at', '<', corte).stream()
+            borrados = 0
+            for doc in docs:
+                doc.reference.delete()
+                borrados += 1
+            if borrados:
+                print(f"[inbox] Purga automática: {borrados} items de Firebase con más de 3 días eliminados.")
+        except Exception as e:
+            print(f"[inbox] Error en purga automática de Firebase: {e}")
+
     def start_radar():
         try:
             from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
         except ImportError:
             print(">> Módulo de Radar no encontrado. Omitiendo monitoreo en segundo plano.")
             return
+        rondas = 0
         while True:
             try:
                 radar_monitor()
             except Exception as e:
                 print("Error en el radar:", e)
+            # Cada 6 rondas (~3 horas) purgar Firebase inbox > 3 días
+            rondas += 1
+            if rondas % 6 == 0:
+                try:
+                    _purge_firebase_inbox()
+                except Exception as e:
+                    print(f"Error en purga del inbox: {e}")
             time.sleep(1800)
 
     threading.Thread(target=start_radar, daemon=True, name="radar").start()

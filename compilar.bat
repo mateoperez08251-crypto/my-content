@@ -98,7 +98,6 @@ copy /y "audio_separator.py" "%DIST%\" >nul 2>&1
 copy /y "yt_downloader.py" "%DIST%\" >nul 2>&1
 copy /y "youtube_uploader.py" "%DIST%\" >nul 2>&1
 copy /y "descargar_modelo.py" "%DIST%\" >nul 2>&1
-copy /y "generate_prompt_variation.py" "%DIST%\" >nul 2>&1
 copy /y "video_worker.py" "%DIST%\" >nul 2>&1
 copy /y "transcripcion_local.py" "%DIST%\" >nul 2>&1
 copy /y "tts_worker.py" "%DIST%\" >nul 2>&1

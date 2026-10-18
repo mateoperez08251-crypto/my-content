@@ -1,9 +1,10 @@
 # Smart Split: voz y edición
 
 - Conserva el audio original o traduce y dobla al español, inglés, japonés, portugués de Brasil, francés, alemán, italiano o coreano.
-- Elige voz femenina o masculina. El doblaje reemplaza la pista original completa, incluida su música. Puedes añadir música propia con el selector existente.
+- Al elegir un idioma, el modal propone doblaje por hablantes y conservar música/ambiente. Puedes elegir una voz guardada por persona. Desactiva hablantes para elegir una sola voz femenina o masculina.
+- Conservar fondo usa Demucs y permite ajustar su volumen (75% por defecto). Si la separación falla, se detiene con un error; no se exporta silenciosamente solo la voz. La separación puede dejar restos de voz o perder efectos. Desactivar esta opción reemplaza toda la pista original.
 - El texto transcrito se envía a Groq para traducir y a Microsoft Edge TTS para generar voz. Requiere internet, una clave de Groq y `pip install -r requirements.txt` en el Python que ejecuta Smart Split.
-- En el modo de voz única, la narración se ajusta a la duración del clip y sus marcas de palabras se ajustan con ella. No mantiene las pausas originales, distintos hablantes ni sincronía labial; revisa el resultado si hay grandes diferencias de longitud entre idiomas.
+- En voz única se agrupan las frases por pausas y se ajustan a sus intervalos relativos al clip. No distingue hablantes ni sincroniza labios; revisa el resultado si hay grandes diferencias de longitud entre idiomas.
 - Activa o desactiva subtítulos y normalización, y ajusta el volumen original (incluido silencio). Durante el doblaje este volumen no se usa.
 - Para subtítulos japoneses/coreanos: instala Noto Sans CJK y define `SMART_SPLIT_CJK_FONT` con la ruta al archivo .ttc/.otf. También se buscan fuentes del sistema y `fuentes/NotoSansCJK-Regular.ttc` en el directorio de datos. Si falta la fuente, se muestra un error en vez de exportar caracteres vacíos.
 
@@ -27,7 +28,7 @@ La prueba de integración usa voz y traducción simuladas; no consume servicios 
 
 ## Doblaje por hablantes (opcional)
 
-Activa «Detectar hablantes y conservar la voz de cada uno» después de elegir idioma. La detección se basa en audio, no identifica caras ni nombres. Cada persona obtiene una referencia propia que se reutiliza cuando vuelve a hablar en todo el video. VoxCPM2 sintetiza los turnos traducidos con esa referencia, y los coloca en su posición original. Las pausas quedan en silencio. Se sustituye la pista completa original; no separa música/ambiente. Los subtítulos se transcriben del doblaje mediante Groq.
+Elige un idioma y revisa «Detectar hablantes y conservar la voz de cada uno». La detección se basa en audio, no identifica caras ni nombres. Cada persona obtiene una referencia propia que se reutiliza cuando vuelve a hablar en todo el video. VoxCPM2 sintetiza los turnos traducidos con esa referencia y los coloca en su posición original. Con «Preservar música y sonido de fondo», el ambiente también permanece durante las pausas. Los subtítulos se transcriben del doblaje mediante Groq.
 
 Preparación:
 1. En Smart Split pulsa **Descargar VoxCPM2 · voz por hablante**. Muestra el estado, avance y errores. En Colab ejecuta la celda 5 de la libreta actualizada: instala motores en Python 3.12 y descarga VoxCPM2 y el detector. Fuera de Colab prepara el Clonador de voz existente.

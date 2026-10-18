@@ -62,7 +62,7 @@ def assign_turns(words, turns, duration):
         if not turn or score <= 0:
             # Sin solape: elige el hablante más cercano en el tiempo en vez de abortar
             if not turns:
-                continue
+                raise RuntimeError('Hay palabras sin hablante. Vuelve a detectar los hablantes.')
             turn = min(turns, key=lambda t: min(abs(start - t['end']), abs(end - t['start'])))
         speaker = turn['speaker']
         if groups and groups[-1]['speaker'] == speaker and start - groups[-1]['end'] < 0.7 and end - groups[-1]['start'] <= 12:

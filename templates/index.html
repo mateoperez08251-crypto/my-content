@@ -3215,15 +3215,17 @@
                                 <option value="original">Conservar audio original</option><option value="es">Español</option><option value="en">English</option><option value="ja">日本語 (japonés)</option><option value="pt-BR">Português (Brasil)</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="ko">한국어 (coreano)</option>
                             </select>
                             <label style="display:block;margin:12px 0">
-                                <input type="checkbox" id="smart_speaker_dubbing" disabled onchange="updateSmartDubbing()">
+                                <input type="checkbox" id="smart_speaker_dubbing" checked disabled onchange="updateSmartDubbing()">
                                 Detectar hablantes y conservar la voz de cada uno
                             </label>
                             <small style="display:block">Distingue las voces por el audio y dobla cada intervención. Requiere el motor local VoxCPM2 y el detector de hablantes configurados. Usa voces propias o autorizadas.</small>
                             <label style="display:block;margin:12px 0">
-                                <input type="checkbox" id="smart_preserve_background" disabled>
+                                <input type="checkbox" id="smart_preserve_background" checked disabled onchange="updateSmartDubbing()">
                                 Preservar música y sonido de fondo (Demucs separa la voz y conserva la pista musical/ambiente del original)
                             </label>
-                            <small style="display:block;color:var(--text-muted)">Al doblar: separa el audio original con Demucs, elimina la voz y mezcla el fondo con la nueva voz doblada. Requiere Demucs instalado (motor de video con GPU).</small>
+                            <small style="display:block;color:var(--text-muted)">Separa la voz con Demucs y mezcla el fondo con el doblaje. La separación puede dejar restos de voz o perder algunos efectos. Si falla, se informa del error sin exportar solo la voz.</small>
+                            <label for="smart_background_volume">Volumen del fondo <output id="smart_background_volume_value">75%</output></label>
+                            <input id="smart_background_volume" type="range" min="0" max="100" value="75" disabled style="width:100%" oninput="document.getElementById('smart_background_volume_value').textContent = this.value + '%'">
                             <div style="margin:12px 0">
                                 <button type="button" id="smart_download_voice" class="btn" onclick="downloadSmartVoice()" onmouseover="refreshSmartVoice()">Descargar VoxCPM2 · voz por hablante (~5 GB)</button>
                                 <p id="smart_model_status" aria-live="polite">Consulta o descarga aquí el modelo de voz.</p>
@@ -3240,6 +3242,13 @@
                                     <select id="smart_voice_steps" class="form-control"><option value="10">Alta · 10 pasos</option><option value="6">Rápida · 6 pasos (puede perder detalle)</option></select>
                                 </label>
                             </div>
+                            <label for="smart_video_format">Formato del video</label>
+                            <select id="smart_video_format" class="form-control">
+                                <option value="vertical">TikTok / Shorts · vertical 9:16</option>
+                                <option value="horizontal">YouTube · horizontal 16:9, video completo</option>
+                                <option value="vertical_blur">Vertical · video completo centrado y fondo difuminado</option>
+                            </select>
+                            <small>El fondo difuminado usa una copia ampliada del mismo video; el original se ve completo y nítido en el centro.</small>
                             <label>Exportación
                                 <select id="smart_export_profile" class="form-control">
                                     <option value="balanced">Equilibrada · 1080p</option>
@@ -3254,7 +3263,7 @@
                             <label for="smart_original_volume">Volumen original <span id="smart_original_volume_value">100%</span></label>
                             <input id="smart_original_volume" type="range" min="0" max="100" value="100" style="width:100%"
                                 oninput="document.getElementById('smart_original_volume_value').textContent = this.value + '%'">
-                            <small style="display:block;margin-top:8px">El doblaje reemplaza todo el audio original y ajusta su duración al clip. Traduce con Groq. Voz única: Edge TTS. Por hablantes: clonación local con VoxCPM2; cada turno conserva su posición. Requiere internet para traducir y alinear subtítulos (audio del doblaje enviado a Groq). Los subtítulos siguen la nueva voz. No sincroniza los labios.</small>
+                            <small style="display:block;margin-top:8px">Por defecto dobla por hablantes y conserva el fondo. Puedes desactivar ambas opciones. Traduce con Groq. Voz única: Edge TTS. Por hablantes: VoxCPM2 y detector local; cada turno conserva su posición y su voz asignada. Requiere internet para traducir y alinear subtítulos (audio del doblaje enviado a Groq). No sincroniza los labios.</small>
                             <small style="display:block;margin-top:8px">Editar o traducir no elimina los derechos de autor ni garantiza monetización. Usa material propio o con permiso. Para japonés y coreano instala una fuente compatible (Noto Sans CJK).</small>
                         </div>
 
@@ -3954,7 +3963,8 @@
         let smartCast = null;
         let smartCastBusy = false;
         function smartCastPayload() {
-            if (!document.getElementById('smart_speaker_dubbing').checked || !smartCast ||
+            if (document.getElementById('smart_dubbing_language').value === 'original' ||
+                !document.getElementById('smart_speaker_dubbing').checked || !smartCast ||
                 smartCast.source !== document.getElementById('smart_split_source').value) return {};
             const voice_cast = {};
             document.querySelectorAll('#smart_cast_rows select').forEach(select => {
@@ -4013,12 +4023,12 @@
             if (enabled) refreshSmartVoice();
             speakers.disabled = !enabled;
             document.getElementById('smart_cast_panel').hidden = !enabled || !speakers.checked;
-            if (!enabled) speakers.checked = false;
             document.getElementById('smart_dubbing_voice').disabled = !enabled || speakers.checked;
             document.getElementById('smart_original_volume').disabled = enabled;
             document.getElementById('smart_original_volume_value').textContent = enabled ? 'Reemplazado por doblaje' : document.getElementById('smart_original_volume').value + '%';
             const bg = document.getElementById('smart_preserve_background');
-            if (bg) { bg.disabled = !enabled; if (!enabled) bg.checked = false; }
+            if (bg) bg.disabled = !enabled;
+            document.getElementById('smart_background_volume').disabled = !enabled || !bg.checked;
         }
 
         async function processSmartSplit() {
@@ -4092,8 +4102,10 @@
                         smart_split_title: smart_split_title,
                         subtitle_scale: document.getElementById('subtitle_scale') ? document.getElementById('subtitle_scale').value : 100,
                         anti_copyright_filter: document.getElementById('smart_anti_copyright_filter') ? document.getElementById('smart_anti_copyright_filter').checked : false,
-                        speaker_dubbing: document.getElementById('smart_speaker_dubbing').checked,
-                        preserve_background: document.getElementById('smart_preserve_background') ? document.getElementById('smart_preserve_background').checked : false,
+                        speaker_dubbing: document.getElementById('smart_dubbing_language').value !== 'original' && document.getElementById('smart_speaker_dubbing').checked,
+                        preserve_background: document.getElementById('smart_dubbing_language').value !== 'original' && document.getElementById('smart_preserve_background').checked,
+                        background_volume: Number(document.getElementById('smart_background_volume').value) / 100,
+                        video_format: document.getElementById('smart_video_format').value,
                         download_quality: document.getElementById('smart_download_quality') ? document.getElementById('smart_download_quality').value : 'best',
                         upscale: document.getElementById('smart_upscale') ? document.getElementById('smart_upscale').value : 'off',
                         export_profile: document.getElementById('smart_export_profile').value,

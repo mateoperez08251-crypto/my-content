@@ -124,7 +124,7 @@ def _encuadrar(frame, modo, cx, fixed_crop_w, final_w, final_h, zoom=1.0):
         if fh > final_h:
             fh, fw = final_h, int(round(orig_w * final_h / orig_h))
         frente = cv2.resize(frame, (fw, fh), interpolation=cv2.INTER_AREA)
-        y = int((final_h - fh) * 0.42)
+        y = (final_h - fh) // 2
         x = (final_w - fw) // 2
         fondo[y:y + fh, x:x + fw] = frente
         return fondo
@@ -206,7 +206,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
                         speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced",
-                        preserve_background=False, upscale="off"):
+                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -217,6 +217,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         dubbing_language, dubbing_voice, original_volume)
     from smart_speakers import validate_edit_options
     validate_edit_options(dubbing_language, speaker_dubbing, filter_strength, denoise_audio)
+    from smart_dubbing import validate_layout
+    validate_layout(video_format, preserve_background, background_volume)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
     write_progress("Iniciando Smart Split...", 3)
     print(f"Iniciando Smart Split · motor: {motor['nombre']}")
@@ -259,6 +261,10 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         from smart_speakers import validate_performance
         validate_performance(export_profile)
         final_w, final_h = (720, 1280) if export_profile == 'fast' else (1080, 1920)
+        if video_format == 'horizontal':
+            final_w, final_h = final_h, final_w
+        if video_format in ('horizontal', 'vertical_blur'):
+            encuadre = 'difuminado'
         if speaker_dubbing:
             from smart_speakers import prepare_speakers
             speaker_config = dict(speaker_config or {})
@@ -308,27 +314,23 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             directory, speaker_config or {},
                             progress=lambda msg: write_progress(msg, p0 + int(tramo * 0.3)), subtitles=show_subtitles)
                     else:
-                        voice_path, marks, translated = dub(palabras_clip, et - st, dubbing_language,
+                        relative_words = [{**w, 'start': w['start'] - st, 'end': w['end'] - st} for w in palabras_clip]
+                        voice_path, marks, translated = dub(relative_words, et - st, dubbing_language,
                                                             dubbing_voice, motor_ia, directory)
                     voice_audio = resources.enter_context(AudioFileClip(voice_path))
                     final_audio = voice_audio  # por defecto reemplaza la pista original
                     if preserve_background:
                         write_progress(f"Preservando música/ambiente del clip {parte_num}...", p0 + int(tramo * 0.32))
-                        try:
-                            from smart_dubbing import separate_background
-                            from moviepy import CompositeAudioClip
-                            instr_path = separate_background(video_path, base + st, et - st, directory)
-                            if instr_path:
-                                instrumental = resources.enter_context(AudioFileClip(instr_path))
-                                # El instrumental conserva música/ambiente del original; la voz nueva va encima
-                                final_audio = CompositeAudioClip([
-                                    instrumental.with_volume_scaled(0.75),
-                                    voice_audio.with_volume_scaled(1.0),
-                                ])
-                            else:
-                                print('[preservar_fondo] Fallback: solo voz doblada (Demucs no disponible)')
-                        except Exception as _bg_exc:
-                            print(f'[preservar_fondo] Error, uso solo voz: {_bg_exc}')
+                        from smart_dubbing import separate_background
+                        from moviepy import CompositeAudioClip
+                        instr_path = separate_background(video_path, base + st, et - st, directory)
+                        if not instr_path:
+                            raise RuntimeError('No se pudo conservar el fondo. Revisa Demucs o desactiva esta opción explícitamente.')
+                        instrumental = resources.enter_context(AudioFileClip(instr_path))
+                        final_audio = CompositeAudioClip([
+                            instrumental.with_volume_scaled(float(background_volume)),
+                            voice_audio,
+                        ]).with_duration(et - st)
                     palabras_clip = [{**w, "start": w["start"] + st, "end": w["end"] + st} for w in marks]
                 opciones_sub = dict(sub_opciones or {})
                 if dubbing_language in ("ja", "ko") and show_subtitles:
@@ -564,7 +566,8 @@ def main(argv):
                 cfg.get("show_subtitles", True), cfg.get("normalize_audio", False),
                 cfg.get("speaker_dubbing", False), cfg.get("speaker_config"),
                 cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False), cfg.get("export_profile", "balanced"),
-                cfg.get("preserve_background", False), cfg.get("upscale", "off"))
+                cfg.get("preserve_background", False), cfg.get("upscale", "off"),
+                cfg.get("video_format", "vertical"), cfg.get("background_volume", 0.75))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)
