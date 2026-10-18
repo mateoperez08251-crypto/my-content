@@ -21,6 +21,7 @@ dist/
 *.env
 .env
 client_secret_*.json
+client_secrets.json
 secrets.json
 youtube_token.json
 tiktok_token.json
