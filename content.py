@@ -2381,6 +2381,17 @@ def _arrancar_servidor():
     threading.Thread(target=init_firebase_async, daemon=True, name="firebase").start()
     threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
     threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
+    # El bot de subida también corre en modo servidor (p. ej. la PC principal manejada desde otra)
+    if os.environ.get("CONTENTAPP_BOT", "1") != "0" and not os.environ.get("RUNPOD_POD_ID"):
+        threading.Thread(target=_iniciar_bot, daemon=True, name="bot-arranque").start()
+
+        def _radar_servidor():
+            try:
+                import firebase_radar.local_radar  # noqa: F401  (al importarse arranca su ronda periódica)
+            except Exception as e:
+                print(f"[radar] no arrancó en modo servidor: {e}")
+
+        threading.Thread(target=_radar_servidor, daemon=True, name="radar").start()
     minutos = float(os.environ.get("CONTENTAPP_AUTOBORRAR_MIN") or 0)
     if minutos > 0:
         threading.Thread(target=_hilo_autoborrado, args=(minutos,), daemon=True, name="autoborrado").start()
