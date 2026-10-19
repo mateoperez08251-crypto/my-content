@@ -592,7 +592,13 @@ class Motor:
                 if listo:
                     listo.set()
                 page.goto(mod.URL_LOGIN, wait_until="domcontentloaded")
-                self.log(f"Inicia sesión en {mod.NOMBRE} · {cuenta['nombre']} y cierra esa ventana.")
+                try:
+                    page.bring_to_front()  # que no quede escondida detrás de la app
+                except Exception:
+                    pass
+                ruta = navegador.buscar_navegador(self.cfg["navegador"])[1] or "Chromium de Playwright"
+                self.log(f"Ventana abierta con {ruta} (perfil: {self.perfil(cuenta)}). Inicia sesión en "
+                         f"{mod.NOMBRE} · {cuenta['nombre']} y cierra esa ventana.")
                 fin = time.time() + 30 * 60
                 while time.time() < fin and ctx.pages:
                     time.sleep(2)
