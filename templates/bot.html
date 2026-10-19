@@ -117,6 +117,8 @@ a{color:var(--acento)}
       <div><label>Hasta</label><input id="hora_fin" type="time"></div>
       <div><label>Reintentos por subida</label><input id="max_intentos" type="number" min="1"></div>
       <div><label>Preset por defecto</label><input id="preset"></div>
+      <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
+        <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
     </div>
     <label style="margin-top:12px">Servidor de cortes (Colab con GPU) — opcional. Si se apaga, corta esta PC.</label>
     <div class="fila">
@@ -130,7 +132,7 @@ a{color:var(--acento)}
     <div class="fila" style="margin-top:12px">
       <label class="switch"><input type="checkbox" id="radar_auto"> Radar de la PC → cola</label>
       <label class="switch"><input type="checkbox" id="firebase_auto"> Radar de la nube → cola</label>
-      <label class="switch"><input type="checkbox" id="headless"> Chrome oculto</label>
+      <label class="switch"><input type="checkbox" id="headless"> Navegador oculto</label>
       <button class="prim" onclick="guardarAjustes()"><i class="ph ph-floppy-disk"></i> Guardar</button>
     </div>
   </section>
@@ -190,7 +192,7 @@ function pintar() {
   $('activo').checked = c.activo;
   $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
   if (!editando) {
-    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','preset','remoto_url','remoto_clave'])
+    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','preset','remoto_url','remoto_clave','navegador'])
       $(k).value = c[k];
     for (const k of ['radar_auto','firebase_auto','headless']) $(k).checked = c[k];
   }
@@ -198,10 +200,10 @@ function pintar() {
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
   $('cuentas').innerHTML = E.cuentas.map(x => `<tr>
     <td>${plat(x.plataforma)} ${esc(x.nombre)} ${x.activa ? '' : '<span class="muted">(pausada)</span>'}</td>
-    <td>${est(x.estado)} ${x.abierta ? '<span class="muted">Chrome abierto</span>' : ''}</td>
+    <td>${est(x.estado)} ${x.abierta ? '<span class="muted">Navegador abierto</span>' : ''}</td>
     <td>${x.hoy}/${x.limite_dia}</td>
     <td class="acc">
-      <button class="mini" onclick="login(${x.id})" title="Abre Chrome para iniciar sesión"><i class="ph ph-sign-in"></i> Sesión</button>
+      <button class="mini" onclick="login(${x.id})" title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> Sesión</button>
       <button class="mini" onclick="probar(${x.id})" title="Comprueba que la sesión sigue abierta"><i class="ph ph-check-circle"></i></button>
       <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
       <button class="mini peligro" onclick="borrarCuenta(${x.id})"><i class="ph ph-trash"></i></button></td></tr>`
@@ -253,8 +255,8 @@ async function crearCuenta() {
   $('c-nombre').value = ''; $('c-url').value = '';
   toast('Cuenta creada. Ahora pulsa "Sesión" para iniciar sesión.'); cargar();
 }
-async function login(id) { await api(`/api/bot/cuentas/${id}/login`, {});
-  toast('Se abrió Chrome: inicia sesión y luego cierra esa ventana.'); setTimeout(cargar, 1500); }
+async function login(id) { toast('Abriendo el navegador…'); const j = await api(`/api/bot/cuentas/${id}/login`, {});
+  toast(`Se abrió ${j.navegador || 'el navegador'}: inicia sesión y luego cierra esa ventana.`); setTimeout(cargar, 1500); }
 async function probar(id) { await api(`/api/bot/cuentas/${id}/probar`, {}); toast('Comprobando sesión…'); }
 async function pausarCuenta(id, activa) { await api(`/api/bot/cuentas/${id}`, {activa}); cargar(); }
 async function borrarCuenta(id) { if (!confirm('¿Borrar esta cuenta y sus subidas pendientes?')) return;
@@ -279,11 +281,11 @@ async function probarRemoto() {
 async function guardarAjustes() {
   const d = {};
   for (const k of ['gap_min','gap_max','pausa_min','pausa_max','max_intentos']) d[k] = +$(k).value;
-  for (const k of ['hora_inicio','hora_fin','preset','remoto_url','remoto_clave']) d[k] = $(k).value;
+  for (const k of ['hora_inicio','hora_fin','preset','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
   for (const k of ['radar_auto','firebase_auto','headless']) d[k] = $(k).checked;
   editando = false; await cfg(d); toast('Ajustes guardados');
 }
-document.querySelectorAll('.ajustes input, #remoto_url, #remoto_clave').forEach(i => i.addEventListener('focus', () => editando = true));
+document.querySelectorAll('.ajustes input, .ajustes select, #remoto_url, #remoto_clave').forEach(i => i.addEventListener('focus', () => editando = true));
 cargar(); setInterval(cargar, 4000);
 </script>
 </body>

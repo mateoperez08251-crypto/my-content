@@ -111,7 +111,7 @@ class _Ctx:
 
 
 @contextmanager
-def _abrir_falso(perfil, headless=False, esperar_lock=False):
+def _abrir_falso(perfil, headless=False, esperar_lock=False, **kw):
     yield _Ctx()
 
 
@@ -229,6 +229,23 @@ class Cola(unittest.TestCase):
         self._vaciar()
         self.assertEqual(self.m.db.subidas_recientes()[0]["estado"], "revisar")
         self.assertEqual(len(PlataformaFalsa.llamadas), 1)
+
+    def test_login_muestra_el_error_si_no_abre_el_navegador(self):
+        @contextmanager
+        def falla(perfil, **kw):
+            raise navegador.SinNavegador("No encontré Brave instalado en esta PC.")
+            yield  # pragma: no cover
+        with mock.patch.object(motor_mod.navegador, "abrir", falla):
+            with self.assertRaisesRegex(ValueError, "No encontré Brave"):
+                self.m.abrir_login(self.tk, espera_s=5)
+
+    def test_elige_navegador(self):
+        with mock.patch.dict(navegador._EJECUTABLES, {"brave": [__file__], "chrome": [], "edge": []}):
+            self.assertEqual(navegador.buscar_navegador("auto"), ("brave", __file__))
+        with mock.patch.dict(navegador._EJECUTABLES, {"brave": [], "chrome": [], "edge": []}):
+            self.assertEqual(navegador.buscar_navegador("auto"), ("chromium", None))
+            with self.assertRaises(navegador.SinNavegador):
+                navegador.buscar_navegador("brave")
 
     def test_limite_diario(self):
         self.m.db.editar_cuenta(self.tk, limite_dia=1)

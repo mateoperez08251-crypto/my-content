@@ -32,7 +32,8 @@ CONFIG_DEFECTO = {
     "hora_fin": "23:30",
     "max_intentos": 3,
     "preset": "default",     # preset de Smart Split si la regla no dice otro
-    "headless": False,       # False = ves el Chrome trabajando
+    "headless": False,       # False = ves el navegador trabajando
+    "navegador": "auto",     # auto (Brave > Chrome > Edge), brave, chrome, edge
     "velocidad": 1.0,        # 1 = ritmo humano normal
     "radar_desde": 0,        # la bandeja de Firebase solo cuenta lo detectado después de esto
     "remoto_url": "",        # servidor de cortes (Colab con GPU); vacío = cortar en esta PC
@@ -500,7 +501,7 @@ class Motor:
         self._actividad(f"Subiendo a {nombre}: {os.path.basename(s['archivo'])}")
         captura = ""
         try:
-            with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"]) as ctx:
+            with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"], navegador=self.cfg["navegador"]) as ctx:
                 page = navegador.pagina(ctx)
                 h = Humano(page, velocidad=self.cfg["velocidad"])
                 try:
@@ -563,28 +564,46 @@ class Motor:
             return ""
 
     # -- sesiones -------------------------------------------------------
-    def abrir_login(self, cid):
-        """Abre el Chrome de la cuenta en la página de inicio de sesión. Al cerrarlo, se comprueba."""
+    def abrir_login(self, cid, espera_s=45):
+        """Abre el navegador de la cuenta en la página de inicio de sesión. Al cerrarlo, se comprueba.
+        Espera a que la ventana se abra de verdad; si falla, el error llega al panel."""
         cuenta = self.db.cuenta(cid)
         if not cuenta:
             raise ValueError("Cuenta no encontrada.")
         if navegador.ocupado(self.perfil(cuenta)):
-            raise ValueError("Ese Chrome ya está abierto.")
-        threading.Thread(target=self._hilo_login, args=(cuenta,), daemon=True,
+            raise ValueError("El navegador de esa cuenta ya está abierto.")
+        listo = threading.Event()
+        resultado = {}
+        threading.Thread(target=self._hilo_login, args=(cuenta, listo, resultado), daemon=True,
                          name=f"bot-login-{cid}").start()
+        if not listo.wait(espera_s):
+            raise ValueError("El navegador tarda en abrir. Espera un poco y mira la barra de tareas.")
+        if resultado.get("error"):
+            raise ValueError(resultado["error"])
+        return {"navegador": resultado.get("navegador", "")}
 
-    def _hilo_login(self, cuenta):
+    def _hilo_login(self, cuenta, listo=None, resultado=None):
         mod = POR_NOMBRE[cuenta["plataforma"]]
+        resultado = resultado if resultado is not None else {}
         try:
-            with navegador.abrir(self.perfil(cuenta), headless=False) as ctx:
+            with navegador.abrir(self.perfil(cuenta), headless=False, navegador=self.cfg["navegador"]) as ctx:
                 page = navegador.pagina(ctx)
+                resultado["navegador"] = navegador.buscar_navegador(self.cfg["navegador"])[0].capitalize()
+                if listo:
+                    listo.set()
                 page.goto(mod.URL_LOGIN, wait_until="domcontentloaded")
-                self.log(f"Inicia sesión en {mod.NOMBRE} · {cuenta['nombre']} y cierra esa ventana de Chrome.")
+                self.log(f"Inicia sesión en {mod.NOMBRE} · {cuenta['nombre']} y cierra esa ventana.")
                 fin = time.time() + 30 * 60
                 while time.time() < fin and ctx.pages:
                     time.sleep(2)
         except Exception as e:
-            self.log(f"El Chrome de inicio de sesión se cerró: {e}")
+            resultado["error"] = f"No pude abrir el navegador: {e}"
+            self.log(resultado["error"])
+            if listo and not listo.is_set():
+                listo.set()
+                return
+        if listo:
+            listo.set()
         self.probar_sesion(cuenta["id"])
 
     def probar_sesion(self, cid) -> bool:
@@ -592,7 +611,7 @@ class Motor:
         mod = POR_NOMBRE[cuenta["plataforma"]]
         ok = False
         try:
-            with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"]) as ctx:
+            with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"], navegador=self.cfg["navegador"]) as ctx:
                 page = navegador.pagina(ctx)
                 page.goto(cuenta["url_subida"] or mod.URL_SUBIDA, wait_until="domcontentloaded")
                 page.wait_for_timeout(6000)

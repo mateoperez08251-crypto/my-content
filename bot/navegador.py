@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Abre Chrome con el perfil propio de cada cuenta (cookies guardadas entre sesiones)."""
+"""Abre el navegador (Brave, Chrome o Edge) con el perfil propio de cada cuenta (cookies guardadas)."""
 import os
 import threading
 from contextlib import contextmanager
@@ -30,26 +30,66 @@ ARGS = [
 ]
 
 
+class SinNavegador(Exception):
+    pass
+
+
+NAVEGADORES = ("auto", "brave", "chrome", "edge", "chromium")
+
+
+def _rutas_windows(*relativas):
+    bases = [os.environ.get(v) for v in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA")]
+    return [os.path.join(b, r) for b in bases if b for r in relativas]
+
+
+_EJECUTABLES = {
+    "brave": _rutas_windows(r"BraveSoftware\Brave-Browser\Application\brave.exe") + [
+        "/usr/bin/brave-browser", "/usr/bin/brave", "/snap/bin/brave",
+        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"],
+    "chrome": _rutas_windows(r"Google\Chrome\Application\chrome.exe") + [
+        "/usr/bin/google-chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+    "edge": _rutas_windows(r"Microsoft\Edge\Application\msedge.exe") + [
+        "/usr/bin/microsoft-edge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+}
+
+
+def buscar_navegador(preferido="auto"):
+    """(nombre, ruta.exe) del navegador a usar. 'auto' = Brave, luego Chrome, luego Edge.
+    Ruta None = el Chromium que trae Playwright."""
+    orden = ["brave", "chrome", "edge"] if preferido in ("auto", "", None) else [preferido]
+    for nombre in orden:
+        for ruta in _EJECUTABLES.get(nombre, []):
+            if ruta and os.path.isfile(ruta):
+                return nombre, ruta
+    if preferido not in ("auto", "", None, "chromium"):
+        raise SinNavegador(f"No encontré {preferido.capitalize()} instalado en esta PC.")
+    return "chromium", None
+
+
 @contextmanager
-def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False):
-    """Contexto persistente de Playwright sobre la carpeta `perfil`. Usa el Chrome instalado
-    (channel='chrome'); si no está, usa el Chromium de Playwright."""
+def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False, navegador: str = "auto"):
+    """Contexto persistente de Playwright sobre la carpeta `perfil` (cookies guardadas), con el
+    navegador instalado (Brave, Chrome o Edge) o, si no hay ninguno, el Chromium de Playwright."""
     lk = _lock(perfil)
     if not lk.acquire(blocking=esperar_lock):
-        raise PerfilOcupado("Ese Chrome ya está abierto (inicio de sesión o subida en curso).")
+        raise PerfilOcupado("Ese navegador ya está abierto (inicio de sesión o subida en curso).")
     try:
         from playwright.sync_api import sync_playwright
         os.makedirs(perfil, exist_ok=True)
+        nombre, ruta = buscar_navegador(navegador)
         with sync_playwright() as p:
             opciones = dict(user_data_dir=perfil, headless=headless, args=ARGS, no_viewport=True,
                             ignore_default_args=["--enable-automation"], locale="es-ES",
                             accept_downloads=False)
+            if ruta:
+                opciones["executable_path"] = ruta
             try:
-                ctx = p.chromium.launch_persistent_context(channel="chrome", **opciones)
-            except Exception as e:
-                if "chrome" not in str(e).lower() and "executable" not in str(e).lower():
-                    raise
                 ctx = p.chromium.launch_persistent_context(**opciones)
+            except Exception as e:
+                if not ruta and "executable" in str(e).lower():
+                    raise SinNavegador("No hay Brave, Chrome ni Edge instalado, y falta el Chromium de "
+                                       "Playwright. Instala Brave o Chrome.") from e
+                raise
             try:
                 yield ctx
             finally:
