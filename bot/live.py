@@ -1,0 +1,395 @@
+"""YouTube Live -> segmentos cerrados -> cola persistente de Smart Split/bot.
+
+La captura no espera al procesado ni comparte el hilo de subidas. Las URL firmadas
+solo existen en memoria; el estado público no expone rutas, cookies ni cabeceras.
+"""
+import atexit
+import csv
+import io
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import threading
+import time
+import uuid
+from pathlib import Path
+from urllib.parse import urlsplit
+
+ACTIVE = ('conectando', 'capturando', 'reconectando', 'deteniendo')
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS live_sesiones (
+ id TEXT PRIMARY KEY,url TEXT NOT NULL,config TEXT NOT NULL,titulo TEXT NOT NULL DEFAULT '',
+ estado TEXT NOT NULL,detalle TEXT NOT NULL DEFAULT '',creado REAL NOT NULL,actualizado REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS live_segmentos (
+ sesion TEXT NOT NULL,nombre TEXT NOT NULL,archivo TEXT NOT NULL,inicio REAL NOT NULL,fin REAL NOT NULL,
+ estado TEXT NOT NULL DEFAULT 'listo',trabajo_id INTEGER,PRIMARY KEY(sesion,nombre));
+"""
+
+
+class LiveError(ValueError):
+    pass
+
+
+class NotLive(LiveError):
+    pass
+
+
+def youtube_url(url):
+    if not isinstance(url, str) or len(url) > 2048:
+        raise LiveError('Pega una URL de YouTube Live.')
+    try:
+        parsed = urlsplit(url.strip())
+        valid = (parsed.scheme == 'https' and parsed.hostname in
+                 ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be')
+                 and parsed.port in (None, 443) and not parsed.username and not parsed.password)
+    except ValueError:
+        valid = False
+    if not valid:
+        raise LiveError('Esta versión acepta enlaces HTTPS de YouTube o youtu.be.')
+    return url.strip()
+
+
+def number(value, minimum, maximum, label):
+    try:
+        if isinstance(value, bool):
+            raise ValueError()
+        value = float(value)
+        if not math.isfinite(value) or value != int(value) or not minimum <= value <= maximum:
+            raise ValueError()
+    except (TypeError, ValueError):
+        raise LiveError(f'{label}: usa un número entero entre {minimum} y {maximum}.') from None
+    return int(value)
+
+
+class QuietLogger:
+    # yt-dlp puede incluir cookies o URL firmadas en los errores. No se registran.
+    def debug(self, message): pass
+    def warning(self, message): pass
+    def error(self, message): pass
+
+
+def resolve_live(url):
+    import yt_dlp
+    import yt_downloader
+    opts = dict(yt_downloader.opciones_base(), quiet=True, noplaylist=True,
+                socket_timeout=15, retries=1, extractor_retries=1, logger=QuietLogger(),
+                format='best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]')
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(youtube_url(url), download=False)
+    except Exception:
+        raise LiveError('No pude acceder al live. Revisa la URL, conexión o las cookies de YouTube.') from None
+    status = info.get('live_status')
+    if status == 'is_upcoming':
+        raise NotLive('El live está programado y todavía no empieza. Inícialo cuando esté transmitiendo.')
+    if status != 'is_live' and not info.get('is_live'):
+        raise NotLive('Ese enlace no está transmitiendo en vivo. Para videos terminados usa Subir desde enlace.')
+    inputs = info.get('requested_formats') or [info]
+    streams = []
+    for item in inputs:
+        address = item.get('url', '')
+        parsed = urlsplit(address)
+        host = parsed.hostname or ''
+        if parsed.scheme != 'https' or not (host.endswith('.googlevideo.com') or host in ('youtube.com','www.youtube.com')):
+            raise LiveError('YouTube no devolvió una señal HTTPS compatible para capturar.')
+        # MP4 con copia evita cargar la CPU con una segunda codificación.
+        vcodec, acodec = item.get('vcodec', 'none'), item.get('acodec', 'none')
+        if vcodec != 'none' and not vcodec.startswith(('avc1', 'h264', 'hev1', 'hvc1', 'hevc')):
+            raise LiveError('La señal usa un códec no compatible con la captura ligera. Prueba otro live.')
+        if acodec != 'none' and not acodec.startswith(('mp4a', 'aac', 'mp3')):
+            raise LiveError('El audio de esa señal no es compatible con la captura ligera.')
+        headers = {k: str(v).replace('\r','').replace('\n','') for k,v in
+                   (item.get('http_headers') or info.get('http_headers') or {}).items()
+                   if k.lower() in ('user-agent', 'referer', 'origin')}
+        streams.append({'url':address, 'headers':headers, 'video':vcodec != 'none', 'audio':acodec != 'none'})
+    if not any(x['video'] for x in streams):
+        raise LiveError('No se encontró una pista de video para el live.')
+    return {'id':str(info.get('id', '')), 'title':str(info.get('title', 'YouTube Live'))[:160], 'streams':streams}
+
+
+def ffmpeg_command(ffmpeg, streams, folder, prefix, seconds):
+    command = [ffmpeg, '-hide_banner', '-loglevel', 'error', '-y']
+    for stream in streams:
+        command += ['-rw_timeout', '15000000']
+        headers = stream.get('headers') or {}
+        if headers:
+            command += ['-headers', ''.join(f'{k}: {v}\r\n' for k,v in headers.items())]
+        command += ['-fflags', '+genpts+discardcorrupt', '-i', stream['url']]
+    for kind in ('video', 'audio'):
+        index = next((i for i, s in enumerate(streams) if s[kind]), None)
+        if index is not None:
+            command += ['-map', f'{index}:{"v" if kind == "video" else "a"}:0']
+    command += ['-c', 'copy', '-f', 'segment', '-segment_time', str(seconds),
+                '-segment_format', 'mp4', '-segment_list_type', 'csv', '-segment_list_size', '0',
+                '-segment_list', str(Path(folder) / (prefix + '.csv')), '-reset_timestamps', '1',
+                str(Path(folder) / (prefix + '_%06d.mp4'))]
+    return command
+
+
+def closed_segments(manifest):
+    """Solo líneas completas del manifiesto; nunca el archivo que sigue abierto."""
+    try:
+        text = Path(manifest).read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return []
+    text = text[:text.rfind('\n') + 1]
+    result = []
+    for row in csv.reader(io.StringIO(text)):
+        if len(row) != 3 or not re.fullmatch(r'[a-f0-9]{8}_\d{6}\.mp4', row[0]):
+            continue
+        try:
+            start, end = float(row[1]), float(row[2])
+        except ValueError:
+            continue
+        if math.isfinite(start) and math.isfinite(end) and end > start:
+            result.append((row[0], start, end))
+    return result
+
+
+def stop_process(proc):
+    if proc.poll() is None:
+        try:
+            proc.stdin.write(b'q\n'); proc.stdin.flush()
+            proc.wait(timeout=5)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill(); proc.wait(timeout=3)
+    if proc.stdin:
+        proc.stdin.close()
+
+
+class LiveManager:
+    def __init__(self, motor, resolver=resolve_live, ffmpeg=None, background=True):
+        import imageio_ffmpeg
+        self.motor, self.db, self.resolver = motor, motor.db, resolver
+        self.ffmpeg = ffmpeg or imageio_ffmpeg.get_ffmpeg_exe()
+        self.root = Path(motor.carpeta, 'live_segments').resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.RLock()
+        self.stop_all = threading.Event()
+        self.threads, self.events = {}, {}
+        with self.db._lock, self.db._con:
+            self.db._con.executescript(SCHEMA)
+            self.db._con.execute("UPDATE live_sesiones SET estado='interrumpido',detalle='La app se reinició. Los segmentos cerrados siguen en cola; vuelve a iniciar la URL para continuar capturando.' WHERE estado IN ('conectando','capturando','reconectando','deteniendo')")
+        self.reconcile()  # Recupera manifiestos y entradas no encoladas antes del cierre.
+        atexit.register(self.close)
+        if background:
+            threading.Thread(target=self._reconcile_loop, daemon=True, name='live-cola').start()
+
+    def _update(self, jid, state, detail=''):
+        self.db._q('UPDATE live_sesiones SET estado=?,detalle=?,actualizado=? WHERE id=?',
+                   (state, detail[:500], time.time(), jid))
+
+    def start(self, data):
+        if not isinstance(data, dict):
+            raise LiveError('Se esperaba la configuración del live.')
+        url = youtube_url(data.get('url'))
+        mode = data.get('mode', 'sequential')
+        if mode not in ('sequential', 'ai'):
+            raise LiveError('Elige cortes por tiempo o momentos con IA.')
+        seconds = number(data.get('seconds', 60), 10, 300, 'Duración de clip')
+        window = number(data.get('window', max(180, seconds * 3)), seconds * 2, 900, 'Ventana para IA') if mode == 'ai' else seconds
+        limit = number(data.get('buffer_mb', 1024), 256, 16384, 'Búfer en MiB')
+        if not isinstance(data.get('accounts'), list) or not data['accounts']:
+            raise LiveError('Elige al menos una cuenta de destino para los clips.')
+        accounts = sorted(set(number(x, 1, 10**9, 'Cuenta') for x in data['accounts']))
+        valid = {x['id'] for x in self.db.cuentas()}
+        if not set(accounts) <= valid:
+            raise LiveError('Una de las cuentas elegidas ya no existe.')
+        preset = str(data.get('preset') or '').strip()[:100]
+        config = dict(show_subtitles=False, emojis=False, efectos=False, export_profile='fast',
+                      video_format='vertical_blur', encuadre='difuminado', upscale='off',
+                      dubbing_language='original')
+        if preset:
+            config.update(self.motor.cargar_preset(preset) or {})
+        for key in ('source','start_time','end_time','cast_id','voice_cast','custom_output_dir',
+                    'subir_tiktok','subir_youtube','subir_facebook'):
+            config.pop(key, None)
+        config.update(clip_selection=mode, clip_duration=seconds, num_clips=1)
+        from smart_selection import needs_groq
+        from app_secrets import get_secret
+        if needs_groq(config) and not get_secret('groq', 'api_key', env='GROQ_API_KEY'):
+            raise LiveError('Configura la clave de Groq en Smart Split para estas opciones, o elige partes sin subtítulos ni doblaje.')
+        cfg = dict(mode=mode, seconds=seconds, window=window, buffer_mb=limit, accounts=accounts,
+                   preset=preset, options=config, text=str(data.get('text', ''))[:2000])
+        with self.lock:
+            if self.db._uno("SELECT id FROM live_sesiones WHERE estado IN ('conectando','capturando','reconectando','deteniendo')"):
+                raise LiveError('Ya hay un live activo. Detén su captura antes de iniciar otro.')
+            if self.stop_all.is_set():
+                raise LiveError('El capturador se está cerrando. Reinicia la app.')
+            jid, now = uuid.uuid4().hex[:16], time.time()
+            self.db._q("INSERT INTO live_sesiones(id,url,config,estado,creado,actualizado) VALUES(?,?,?,'conectando',?,?)",
+                       (jid, url, json.dumps(cfg), now, now))
+            event = self.events[jid] = threading.Event()
+            thread = self.threads[jid] = threading.Thread(target=self._capture, args=(jid,url,cfg,event), daemon=True, name='youtube-live')
+            thread.start()
+        return {'id':jid}
+
+    def stop(self, jid):
+        with self.lock:
+            row = self.db._uno('SELECT estado FROM live_sesiones WHERE id=?', (jid,))
+            if row is None:
+                raise LiveError('Live no encontrado.')
+            event = self.events.get(jid)
+            if event and row['estado'] in ACTIVE:
+                self._update(jid, 'deteniendo', 'Cerrando el segmento actual; los clips en cola se conservan.')
+                event.set()
+        return {'estado': self.db._uno('SELECT estado FROM live_sesiones WHERE id=?', (jid,))['estado']}
+
+    def _space(self, cfg):
+        used = 0
+        for file in self.root.glob('*/*.mp4'):
+            try:
+                used += file.stat().st_size
+            except FileNotFoundError:  # La cola puede terminar y limpiar un segmento a la vez.
+                pass
+        if used >= cfg['buffer_mb'] * 1024**2 or shutil.disk_usage(self.root).free < 512 * 1024**2:
+            raise LiveError('Captura detenida por límite de búfer o poco disco. Los segmentos pendientes se conservan.')
+
+    def _capture(self, jid, url, cfg, event):
+        folder = self.root / jid
+        folder.mkdir(exist_ok=True)
+        try:
+            ready_info = None
+            for attempt in range(4):
+                if event.is_set() or self.stop_all.is_set():
+                    break
+                self._space(cfg)
+                try:
+                    info = ready_info or self.resolver(url)
+                    ready_info = None
+                except NotLive:
+                    if attempt:
+                        self._update(jid, 'finalizado', 'La transmisión ya no está en vivo. Los segmentos cerrados siguen en cola.')
+                        return
+                    raise
+                except LiveError:
+                    if attempt == 3:
+                        raise
+                    self._update(jid, 'reconectando', 'No pude resolver la señal. Reintentando; puedes detener la captura.')
+                    if event.wait(5 * (attempt + 1)):
+                        break
+                    continue
+                if event.is_set() or self.stop_all.is_set():
+                    break
+                self.db._q('UPDATE live_sesiones SET titulo=? WHERE id=?', (info['title'],jid))
+                prefix = uuid.uuid4().hex[:8]
+                manifest = folder / (prefix + '.csv')
+                self._update(jid, 'capturando', 'Recibiendo la señal; los cortes se envían al cerrar cada segmento.')
+                command = ffmpeg_command(self.ffmpeg, info['streams'], folder, prefix, cfg['window'])
+                proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+                import winproc
+                winproc.adjuntar_a_job(proc)
+                try:
+                    while proc.poll() is None:
+                        self._ingest(jid, manifest)
+                        self._space(cfg)
+                        if event.wait(.25) or self.stop_all.is_set():
+                            break
+                finally:
+                    stop_process(proc)
+                    self._ingest(jid, manifest)
+                if event.is_set() or self.stop_all.is_set():
+                    break
+                if proc.returncode == 0:
+                    try:
+                        ready_info = self.resolver(url)
+                    except NotLive:
+                        self._update(jid, 'finalizado', 'La señal terminó. Los segmentos cerrados continúan procesándose.')
+                        return
+                    except LiveError:
+                        pass
+                if attempt < 3:
+                    self._update(jid, 'reconectando', 'Se interrumpió la señal. Se volverá a resolver la URL; puede haber un hueco en la captura.')
+                    if event.wait(min(5 * (attempt + 1), 15)):
+                        break
+            else:
+                raise LiveError('No se pudo mantener la captura después de varios intentos. Revisa el live y vuelve a iniciar.')
+            self._update(jid, 'detenido', 'Captura detenida. Los segmentos cerrados siguen en la cola.')
+        except LiveError as exc:
+            self._update(jid, 'detenido' if event.is_set() or self.stop_all.is_set() else 'error',
+                         'Captura detenida. Los segmentos cerrados siguen en cola.' if event.is_set() or self.stop_all.is_set() else str(exc))
+        except Exception:
+            self._update(jid, 'detenido' if event.is_set() or self.stop_all.is_set() else 'error',
+                         'Captura detenida. Los segmentos cerrados siguen en cola.' if event.is_set() or self.stop_all.is_set()
+                         else 'Falló la captura del live. Revisa conexión, yt-dlp y FFmpeg.')
+
+    def _ingest(self, jid, manifest):
+        for name, start, end in closed_segments(manifest):
+            file = Path(manifest).parent / name
+            # La fila solo se crea si el archivo cerrado existe y tiene datos.
+            try:
+                ready = file.is_file() and file.stat().st_size
+            except FileNotFoundError:
+                ready = False
+            if ready:
+                self.db._q('INSERT OR IGNORE INTO live_segmentos(sesion,nombre,archivo,inicio,fin) VALUES(?,?,?,?,?)',
+                           (jid, name, str(file), start, end))
+
+    def reconcile(self):
+        with self.lock:
+            for folder in self.root.iterdir():
+                if folder.is_dir() and re.fullmatch(r'[a-f0-9]{16}', folder.name):
+                    if self.db._uno('SELECT id FROM live_sesiones WHERE id=?', (folder.name,)):
+                        for manifest in folder.glob('*.csv'):
+                            self._ingest(folder.name, manifest)
+            for segment in self.db._todos("SELECT s.*,j.url,j.config,j.titulo FROM live_segmentos s JOIN live_sesiones j ON j.id=s.sesion WHERE s.estado='listo' ORDER BY s.rowid"):
+                cfg = json.loads(segment['config'])
+                opts = dict(cfg['options'])
+                # Un segmento capturado por tiempo produce una parte completa,
+                # incluida la cola final; los límites pueden variar por keyframes.
+                if cfg['mode'] == 'sequential':
+                    opts['clip_duration'] = 600
+                key = f"live:{segment['sesion']}:{segment['nombre']}"
+                part = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=? AND trabajo_id IS NOT NULL', (segment['sesion'],))['n'] + 1
+                tid = self.db.encolar_archivo_live(segment['url'], key, segment['archivo'], opts,
+                    f"{segment['titulo'] or 'YouTube Live'} · parte {part}",
+                    cfg['accounts'], cfg['preset'], cfg['text'])
+                self.db._q("UPDATE live_segmentos SET estado='encolado',trabajo_id=? WHERE sesion=? AND nombre=?",
+                           (tid,segment['sesion'],segment['nombre']))
+                self.motor.despertar()
+            for segment in self.db._todos("SELECT s.* FROM live_segmentos s JOIN trabajos t ON t.id=s.trabajo_id WHERE s.estado='encolado' AND t.estado='listo'"):
+                try:
+                    Path(segment['archivo']).unlink(missing_ok=True)
+                except OSError:
+                    continue
+                self.db._q("UPDATE live_segmentos SET estado='procesado' WHERE sesion=? AND nombre=?",
+                           (segment['sesion'],segment['nombre']))
+
+    def _reconcile_loop(self):
+        while not self.stop_all.wait(1):
+            try:
+                self.reconcile()
+            except Exception:
+                self.motor.log('No pude revisar la cola de lives; se conservaron los segmentos para reintentar.')
+
+    def state(self):
+        sessions = self.db._todos('SELECT id,url,titulo,estado,detalle,creado,actualizado FROM live_sesiones ORDER BY creado DESC LIMIT 15')
+        for item in sessions:
+            item['segmentos'] = self.db._todos('SELECT estado,COUNT(*) AS n FROM live_segmentos WHERE sesion=? GROUP BY estado', (item['id'],))
+            cfg = json.loads(self.db._uno('SELECT config FROM live_sesiones WHERE id=?', (item['id'],))['config'])
+            item.update(mode=cfg['mode'], seconds=cfg['seconds'], window=cfg['window'], accounts=cfg['accounts'])
+        return {'lives':sessions}
+
+    def close(self):
+        if self.stop_all.is_set():
+            return
+        self.stop_all.set()
+        for event in self.events.values():
+            event.set()
+        # Cerrar FFmpeg con q permite escribir la última fila del manifiesto.
+        deadline = time.monotonic() + 8
+        for thread in list(self.threads.values()):
+            if thread is not threading.current_thread():
+                thread.join(max(0, deadline - time.monotonic()))
+        try:
+            self.reconcile()
+        except Exception:
+            pass  # Los manifiestos se recuperan al volver a abrir la app.

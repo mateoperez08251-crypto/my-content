@@ -77,6 +77,11 @@ class DB:
         with self._lock:
             self._con.execute("PRAGMA journal_mode=WAL")
             self._con.executescript(_ESQUEMA)
+            columns = {r[1] for r in self._con.execute('PRAGMA table_info(trabajos)')}
+            for name, definition in [('archivo_local', "TEXT NOT NULL DEFAULT ''"),
+                                     ('opciones', "TEXT NOT NULL DEFAULT '{}'")]:
+                if name not in columns:
+                    self._con.execute(f'ALTER TABLE trabajos ADD COLUMN {name} {definition}')
             self._con.commit()
 
     # -- utilidades -----------------------------------------------------
@@ -100,7 +105,8 @@ class DB:
         ahora = time.time()
         self._q("UPDATE trabajos SET estado='pendiente', actualizado=? "
                 "WHERE estado IN ('descargando','cortando')", (ahora,))
-        self._q("UPDATE subidas SET estado='pendiente', actualizado=? WHERE estado='subiendo'", (ahora,))
+        self._q("UPDATE subidas SET estado='revisar', error='Reinicio durante la subida. Comprueba si ya se publicó antes de reintentar.', "
+                "actualizado=? WHERE estado='subiendo'", (ahora,))
 
     # -- cuentas --------------------------------------------------------
     def cuentas(self):
@@ -175,6 +181,28 @@ class DB:
 
     def trabajo(self, tid):
         return self._uno("SELECT * FROM trabajos WHERE id=?", (int(tid),))
+
+    def encolar_archivo_live(self, url, clave, archivo, opciones, titulo, cuentas, preset, texto_fijo=''):
+        """Fuente local de confianza, creada por el capturador. Entrada idempotente."""
+        ahora = time.time()
+        with self._lock, self._con:
+            self._con.execute(
+                "INSERT OR IGNORE INTO trabajos(clave,url,origen,titulo,cuentas,preset,texto_fijo,cortar,"
+                "creado,actualizado,archivo_local,opciones) VALUES(?,?,'live',?,?,?,?,1,?,?,?,?)",
+                (clave, url, titulo, json.dumps(cuentas), preset, texto_fijo, ahora, ahora,
+                 archivo, json.dumps(opciones)))
+            return self._con.execute('SELECT id FROM trabajos WHERE clave=?', (clave,)).fetchone()[0]
+
+    def finalizar_trabajo(self, tid, subidas):
+        """Encolar todos los resultados y marcar listo en una sola transacción."""
+        ahora = time.time()
+        with self._lock, self._con:
+            row = self._con.execute('SELECT estado FROM trabajos WHERE id=?', (tid,)).fetchone()
+            if row is None or row[0] == 'listo':
+                return
+            self._con.executemany('INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado) VALUES(?,?,?,?,?,?)',
+                                  [(tid, cid, ruta, texto, ahora, ahora) for cid, ruta, texto in subidas])
+            self._con.execute("UPDATE trabajos SET estado='listo',error='',actualizado=? WHERE id=?", (ahora, tid))
 
     def siguiente_trabajo(self):
         return self._uno("SELECT * FROM trabajos WHERE estado='pendiente' AND proximo_intento<=? "

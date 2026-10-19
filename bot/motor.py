@@ -97,6 +97,8 @@ class Motor:
         self._remoto_caido_hasta = 0.0
         self._remoto_estado = ""
         self._remoto_avisado = False   # ya se avisó por WhatsApp de que Colab se cayó
+        self._lives = None
+        self._lives_lock = threading.Lock()
         self._ultimo_vigilar = 0.0
         self.db.reparar_al_arrancar()
 
@@ -162,6 +164,15 @@ class Motor:
     def detener(self):
         self._stop.set()
         self._despertar.set()
+        if self._lives:
+            self._lives.close()
+
+    def lives(self):
+        with self._lives_lock:
+            if self._lives is None:
+                from .live import LiveManager
+                self._lives = LiveManager(self)
+            return self._lives
 
     def _bucle(self):
         while not self._stop.is_set():
@@ -307,7 +318,7 @@ class Motor:
 
     # -- preparar (descargar + cortar) ----------------------------------
     def _procesar_trabajo(self, t):
-        if t["cortar"] and self._remoto_disponible():
+        if t["cortar"] and not t.get('archivo_local') and self._remoto_disponible():
             try:
                 return self._preparar_remoto(t)
             except remoto.ServidorCaido as e:
@@ -323,15 +334,24 @@ class Motor:
             self.actividad = "Esperando a que termine otra tarea de la app"
             return
         nombre = t["titulo"] or t["url"]
+        liberar_al_fallar = True
         try:
             if t["cortar"]:
                 self.db.marcar_trabajo(t["id"], "cortando")
                 self._actividad(f"Descargando y cortando: {nombre}")
-                datos = {**(self.cargar_preset(t["preset"]) or {}), "source": t["url"],
+                local = t.get('archivo_local')
+                if local:
+                    root = os.path.realpath(os.path.join(self.carpeta, 'live_segments'))
+                    local = os.path.realpath(local)
+                    if os.path.commonpath([root, local]) != root or not os.path.isfile(local):
+                        raise RuntimeError('No se encuentra el segmento local del live.')
+                opciones = json.loads(t.get('opciones') or '{}') if local else (self.cargar_preset(t['preset']) or {})
+                datos = {**opciones, "source": local or t["url"],
                          "download_quality": "best", "subir_tiktok": False, "subir_youtube": False,
                          "subir_facebook": False, "_lanzar_error": True}
                 if not self.smart_split:
                     raise RuntimeError("Smart Split no está disponible.")
+                liberar_al_fallar = False  # Smart Split libera el bloqueo en su finally.
                 rutas, meta = self.smart_split(datos)  # libera el bloqueo él mismo
                 if not rutas:
                     raise RuntimeError("Smart Split no generó clips (mira el registro de la app).")
@@ -344,10 +364,13 @@ class Motor:
                     ruta = self.descargar(t["url"])
                 finally:
                     self.liberar()
+                    liberar_al_fallar = False
                 if not ruta or not os.path.isfile(ruta):
                     raise RuntimeError("La descarga no dejó ningún archivo.")
                 clips = [(ruta, "")]
         except Exception as e:
+            if liberar_al_fallar:
+                self.liberar()
             intentos = t["intentos"] + 1
             if intentos >= self.cfg["max_intentos"]:
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
@@ -359,11 +382,14 @@ class Motor:
             self.log(f"Falló preparar {nombre}: {e}")
             return
 
+        subidas = []
         for i, (ruta, publicacion) in enumerate(clips):
+            if t.get('archivo_local') and datos.get('clip_selection') == 'sequential':
+                publicacion = t['titulo']
             texto = self._texto(publicacion, t, i, len(clips))
             for cid in t["cuentas"]:
-                self.db.crear_subida(t["id"], cid, ruta, texto)
-        self.db.marcar_trabajo(t["id"], "listo")
+                subidas.append((cid, ruta, texto))
+        self.db.finalizar_trabajo(t['id'], subidas)
         self.log(f"Listo {nombre}: {len(clips)} clip(s) × {len(t['cuentas'])} cuenta(s) en cola de subida.")
 
     # -- servidor de cortes remoto (Colab) --------------------------------

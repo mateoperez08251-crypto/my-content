@@ -1,5 +1,11 @@
 # Smart Split: voz y edición
 
+Para recortar una transmisión mientras sigue en vivo, abre **Bot de subida →
+YouTube Live → clips**. Pega la URL, elige duración o IA y selecciona las cuentas.
+Deja el preset vacío para fondo difuminado a 720p, audio original y sin subtítulos.
+Los clips entran en la cola sin esperar a que termine el live. El modo por tiempo
+con estos ajustes no usa Groq. Consulta [uso y límites de captura](LIVE_CLIPS_PLAN.md).
+
 - Conserva el audio original o traduce y dobla al español, inglés, japonés, portugués de Brasil, francés, alemán, italiano o coreano.
 - Al elegir un idioma, el modal propone doblaje por hablantes y conservar música/ambiente. Puedes elegir una voz guardada por persona. Desactiva hablantes para elegir una sola voz femenina o masculina.
 - Conservar fondo usa Demucs y permite ajustar su volumen (75% por defecto). Si la separación falla, se detiene con un error; no se exporta silenciosamente solo la voz. La separación puede dejar restos de voz o perder efectos. Desactivar esta opción reemplaza toda la pista original.

@@ -2107,10 +2107,12 @@ def _bot_descargar(url):
 
 def _iniciar_bot():
     from bot import motor as bot_motor
-    return bot_motor.configurar(
+    motor = bot_motor.configurar(
         carpeta=paths.DATA_DIR, smart_split=run_smart_split_thread, descargar=_bot_descargar,
         ocupar=_intentar_iniciar_trabajo, liberar=_terminar_trabajo, log=log,
         notificar=_bot_notificar, firebase=lambda: firebase_db, cargar_preset=_bot_preset)
+    motor.lives()  # Recuperar segmentos cerrados; nunca reinicia una captura sin petición.
+    return motor
 
 
 def _bot():
@@ -2146,6 +2148,21 @@ def bot_estado():
 def bot_config():
     data = request.get_json(silent=True) or {}
     return _bot_respuesta(lambda: _bot().guardar_cfg(data))
+
+
+@app.route('/api/bot/lives', methods=['GET', 'POST'])
+def bot_lives():
+    def hacer():
+        manager = _bot().lives()
+        if request.method == 'GET':
+            return manager.state()
+        return manager.start(request.get_json(silent=True))
+    return _bot_respuesta(hacer)
+
+
+@app.route('/api/bot/lives/<jid>/detener', methods=['POST'])
+def bot_live_detener(jid):
+    return _bot_respuesta(lambda: _bot().lives().stop(jid))
 
 
 @app.route("/api/bot/encolar", methods=["POST"])
@@ -2476,6 +2493,10 @@ def mostrar_ventana():
 
 def _salir_limpio():
     global current_subprocess
+    from bot import motor as bot_motor
+    motor = bot_motor.obtener()
+    if motor is not None:
+        motor.detener()
     with _estado_lock:
         proc, current_subprocess = current_subprocess, None
     winproc.matar_arbol(proc)

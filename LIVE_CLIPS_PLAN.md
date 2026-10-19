@@ -1,33 +1,65 @@
 # Clips desde una URL de YouTube Live
 
-Estado: diseño comprobado frente al flujo actual; captura de lives todavía no implementada.
+Implementado en **Bot de subida → YouTube Live → clips** (`/bot#seccion-lives`).
+La captura y la cola se probaron con una señal local en tiempo real y FFmpeg real.
+Falta validar una transmisión real de YouTube y el navegador de subida en Windows.
+Las pruebas no publican contenido en cuentas reales.
 
-El programa actual descarga el video con yt-dlp y luego llama a Smart Split. Para una transmisión activa esa descarga puede seguir abierta hasta que termine el live; no debe tratarse como un archivo terminado.
+## Uso
 
-## Flujo propuesto dentro de la misma app
+1. Añade las cuentas de destino e inicia sesión desde el panel del bot.
+2. Pega una URL HTTPS de un live activo de YouTube o youtu.be.
+3. Elige **Partes por tiempo** o **Mejores momentos con IA**, duración y cuentas.
+4. Pulsa **Capturar y encolar para subir**. Mira el estado: crear la solicitud no confirma que la señal haya conectado.
+5. El bot procesa los segmentos cerrados y sube los clips según sus horarios, pausas, límites y sesiones. Activa el bot para que avance la cola.
+6. **Detener captura** cierra la parte actual; los clips pendientes siguen en la cola.
 
-1. Pegar la URL de un live de YouTube y elegir cuentas/preset del bot. La detección por radar puede añadirse después; no es necesaria para pegar un live concreto.
-2. Resolver una señal accesible con yt-dlp. Si necesita cookies de una cuenta propia, configurarlas antes. Detectar transmisiones programadas, activas y terminadas por separado.
-3. FFmpeg recibe la señal y guarda segmentos temporales. No graba la pantalla. Un manifiesto indica qué segmentos están cerrados y listos para procesar.
-4. Modo por tiempo: producir partes consecutivas, por ejemplo de 60 segundos, con la última parcial al terminar. Modo IA: reunir una ventana mayor, transcribir y elegir momentos; conservar unos segundos de contexto y eliminar selecciones solapadas.
-5. Aplicar el preset de Smart Split y poner archivos cerrados en la cola del bot. La captura continúa mientras se procesa y sube un clip.
-6. Guardar identificador del live, intervalos procesados y estado de publicación para evitar duplicados al reiniciar. Una publicación sin confirmación requiere revisión, no otro intento a ciegas.
+Dejar el preset vacío usa la configuración ligera del live: fondo difuminado vertical
+720×1280, audio original, sin subtítulos ni seguimiento. El modo por tiempo no usa
+Groq, transcripción ni selección de momentos. Un preset explícito puede añadir
+subtítulos, doblaje u otras opciones con mayor consumo.
 
-El búfer solo debe conservar los segmentos que aún necesiten procesarse, con límite de disco y política clara cuando la cola crezca. Debe reconectar si se interrumpe la señal y detenerse limpiamente cuando termine el live. Si el procesamiento o las subidas son más lentos que el live, aumenta el retraso: la publicación no es instantánea.
+La duración de clip admite 10–300 segundos. En modo IA se analiza una ventana
+de entre dos veces esa duración y 900 segundos; por defecto son al menos 180 s.
+Se elige **un momento por ventana**. Necesita transcripción y clave de Groq para
+la selección; si la selección falla, conserva el respaldo de Smart Split y lo
+indica en su registro. Las ventanas no se solapan ni comparten contexto.
 
-Los cortes sin recodificar dependen de los fotogramas clave; una duración exacta puede requerir recodificar. El historial anterior al momento de conexión solo se puede recuperar si la plataforma mantiene DVR/acceso al inicio. No se presupone compatibilidad con cualquier URL o plataforma.
+## Captura y almacenamiento
 
-## Comprobaciones antes de habilitarlo
+- yt-dlp resuelve la señal; no descarga el live entero antes de procesar. Usa las cookies de YouTube configuradas en la app cuando son necesarias. Las sesiones de las cuentas de subida se gestionan aparte.
+- FFmpeg copia las pistas compatibles a segmentos MP4 sin recodificar la captura ni grabar la pantalla. Solo se procesa un segmento cuando aparece cerrado en el manifiesto CSV. El MP4 que sigue abierto nunca entra en la cola.
+- La captura empieza en el punto disponible al conectar, sin recuperar el historial anterior por DVR. Las partes varían según los fotogramas clave; la última puede ser corta.
+- Hay una captura activa por app. La captura continúa mientras el motor procesa o sube otro clip. Los segmentos se procesan en esta PC, aunque el bot tenga configurado un servidor remoto para otros videos.
+- El búfer por defecto es 1024 MiB, configurable entre 256 y 16384 MiB. Cuenta los segmentos originales de todas las sesiones. Si alcanza el límite o quedan menos de 512 MiB libres, detiene la captura y conserva los pendientes. El límite se revisa periódicamente y puede excederse entre revisiones.
+- Un original solo se borra cuando sus clips se han exportado y encolado en una transacción. Los MP4 exportados siguen las reglas de la cola del bot; no cuentan en el límite del búfer de captura. Si la cola crece, aumenta el retraso y el uso total de disco.
+- Al cortar la conexión se vuelve a resolver la URL, con un máximo de tres reintentos. Puede haber huecos o contenido repetido si la plataforma rebobina la señal; no se promete deduplicación visual entre reconexiones.
+- Tras reiniciar se recuperan los segmentos **cerrados** y no se encola dos veces el mismo archivo. La captura queda **interrumpida**; debes iniciarla otra vez. Un cierre forzado puede perder la parte abierta, que no se procesa ni se borra automáticamente.
+- Una subida interrumpida queda en **Revisar** para comprobar si llegó a publicarse antes de reintentar.
 
-- Un live accesible continúa capturándose mientras se exporta y sube el primer clip.
-- Se procesan solo archivos cerrados, sin huecos ni intervalos duplicados.
-- Reconexión, fin del live, reinicio y disco lleno dejan un estado recuperable.
-- En modo por tiempo, audio original y sin subtítulos, no se llama a la IA de selección ni a transcripción.
-- Una cuenta sin sesión pausa las subidas sin detener innecesariamente la captura.
+Las URL firmadas de la señal y las cabeceras no se guardan en la base de datos ni
+se devuelven al panel. Los errores de extracción/captura no muestran cookies.
+El live debe ser accesible para yt-dlp con las opciones de la app; no admite
+cualquier plataforma, señal protegida ni formato de video/audio.
 
-## Fuentes técnicas
+## Verificación
 
-- [yt-dlp: opciones de live y sitios compatibles](https://github.com/yt-dlp/yt-dlp#usage-and-options)
-- [FFmpeg: segment muxer y duración de segmentos](https://ffmpeg.org/ffmpeg-formats.html#segment_002c-stream_005fsegment_002c-ssegment)
+```sh
+python -m unittest discover -s tests -p 'test_live.py' -v
+python -m unittest discover -s tests -p 'test_bot*.py'
+python -m unittest discover -s tests -p 'test_smart_sequential.py'
+```
 
-No se ha probado aquí una transmisión real ni se ha publicado contenido en ninguna cuenta.
+Las pruebas comprueban captura en tiempo real antes de finalizar la fuente,
+exportación de un segmento con Smart Split a 720p con audio sin llamar a la IA,
+última parte, parada, reconexión con URL nueva, recuperación, entrada idempotente,
+finalización atómica, límites de disco, validación y rutas HTTP.
+
+Pendientes: detectar lives desde el radar, capturas simultáneas, DVR y prueba
+completa con URL real y cuentas conectadas. No se ha medido la velocidad en la
+PC del usuario ni se garantiza publicación instantánea.
+
+## Referencias
+
+- [yt-dlp: uso y opciones](https://github.com/yt-dlp/yt-dlp#usage-and-options)
+- [FFmpeg: segment muxer](https://ffmpeg.org/ffmpeg-formats.html#segment_002c-stream_005fsegment_002c-ssegment)

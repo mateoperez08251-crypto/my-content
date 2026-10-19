@@ -67,6 +67,28 @@ a{color:var(--acento)}
 </header>
 
 <main>
+  <section class="card ancho" id="seccion-lives">
+    <h2><i class="ph-duotone ph-broadcast"></i> YouTube Live → clips</h2>
+    <p class="muted">Pega la URL de un live activo. La captura continúa mientras los segmentos cerrados se procesan y pasan a la cola de subida. Empieza desde la señal disponible ahora, sin recuperar el historial del live.</p>
+    <input id="live-url" type="url" placeholder="https://www.youtube.com/watch?v=..." aria-label="URL de YouTube Live">
+    <div class="ajustes">
+      <div><label for="live-mode">Cómo cortar</label><select id="live-mode" onchange="modoLive()">
+        <option value="sequential">Partes consecutivas · sin selección IA</option>
+        <option value="ai">Mejores momentos con IA</option></select></div>
+      <div><label for="live-seconds">Duración del clip (s)</label><input id="live-seconds" type="number" min="10" max="300" value="60" onchange="modoLive()"></div>
+      <div id="live-window-group" hidden><label for="live-window">Analizar cada (s)</label><input id="live-window" type="number" min="120" max="900" value="180"></div>
+      <div><label for="live-preset">Preset de Smart Split</label><input id="live-preset" list="smart-presets" placeholder="Vacío = modo ligero sin subtítulos"></div>
+      <div><label for="live-buffer">Búfer máximo (MiB)</label><input id="live-buffer" type="number" min="256" max="16384" value="1024"></div>
+    </div>
+    <p id="live-mode-hint" class="muted">Cortes de duración aproximada, según los fotogramas clave de la señal. La última parte puede ser más corta. Sin preset se usa fondo difuminado a 720p, audio original y sin subtítulos.</p>
+    <label>Cuentas que recibirán los clips</label><div id="chips-live" class="chips"></div>
+    <div class="fila" style="margin-top:10px">
+      <input id="live-text" placeholder="Texto o hashtags adicionales (opcional)">
+      <button id="live-start" class="prim" onclick="iniciarLive()">Capturar y encolar para subir</button>
+    </div>
+    <p class="muted">Las subidas respetan las sesiones, horarios y pausas del bot; pueden acumular retraso. Los segmentos del live se procesan en esta PC. Detener captura conserva los clips ya encolados.</p>
+    <table><thead><tr><th>Transmisión</th><th>Captura</th><th>Segmentos</th><th></th></tr></thead><tbody id="lives"></tbody></table>
+  </section>
   <section class="card">
     <h2><i class="ph-duotone ph-link"></i> Subir desde enlace</h2>
     <textarea id="urls" placeholder="Pega uno o varios enlaces (uno por línea)"></textarea>
@@ -163,7 +185,7 @@ a{color:var(--acento)}
 const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
 const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
   cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
-let E = null, selUrl = new Set(), selRegla = new Set(), editando = false;
+let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
 const loginPendientes = new Set();
 
 const $ = id => document.getElementById(id);
@@ -243,10 +265,42 @@ function pintar() {
   const reg = $('registro'), abajo = reg.scrollTop + reg.clientHeight >= reg.scrollHeight - 20;
   reg.textContent = E.registro.join('\n');
   if (abajo) reg.scrollTop = reg.scrollHeight;
-  chips('chips-url', selUrl); chips('chips-regla', selRegla);
+  chips('chips-url', selUrl); chips('chips-regla', selRegla); chips('chips-live', selLive);
 }
 
-async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); } catch (e) {} }
+async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); await cargarLives(); } catch (e) {} }
+function modoLive() {
+  const ai = $('live-mode').value === 'ai';
+  $('live-window-group').hidden = !ai;
+  const seconds = Number($('live-seconds').value) || 60;
+  $('live-window').min = String(seconds * 2);
+  if (Number($('live-window').value) < seconds * 2) $('live-window').value = Math.min(900, seconds * 3);
+  $('live-mode-hint').textContent = ai ?
+    'La IA analiza cada ventana cerrada y elige un momento. Necesita transcripción y clave de Groq; puede usar el respaldo automático de Smart Split si la selección IA falla.' :
+    'Cortes de duración aproximada, según los fotogramas clave de la señal. La última parte puede ser más corta. Sin preset se usa fondo difuminado a 720p, audio original y sin subtítulos.';
+}
+async function iniciarLive() {
+  const button = $('live-start'); button.disabled = true;
+  try {
+    const result = await api('/api/bot/lives', {url:$('live-url').value, mode:$('live-mode').value,
+      seconds:Number($('live-seconds').value), window:Number($('live-window').value),
+      preset:$('live-preset').value, buffer_mb:Number($('live-buffer').value),
+      accounts:[...selLive], text:$('live-text').value});
+    toast('Solicitud de captura creada. El estado indicará si conecta con el live.');
+    await cargarLives();
+  } catch (e) {} finally { button.disabled = false; }
+}
+async function cargarLives() {
+  const data = await api('/api/bot/lives');
+  $('lives').innerHTML = (data.lives || []).map(live => `<tr>
+    <td><a href="${esc(live.url)}" target="_blank" rel="noopener">${esc(live.titulo || 'YouTube Live')}</a>
+      <div class="muted">${live.mode === 'ai' ? `IA: ${live.seconds} s por cada ${live.window} s` : `Partes de unos ${live.seconds} s`} · ${live.accounts.map(id => esc((E.cuentas || []).find(c => c.id === id)?.nombre || `Cuenta ${id}`)).join(', ')}</div></td>
+    <td>${esc(live.estado)}<div class="muted">${esc(live.detalle)}</div></td>
+    <td>${live.segmentos.map(s => `${esc(s.estado)}: ${s.n}`).join('<br>') || 'Esperando el primer segmento'}</td>
+    <td>${['conectando','capturando','reconectando','deteniendo'].includes(live.estado) ?
+      `<button onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener captura</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No hay capturas. Elige cuentas y pega un live activo.</td></tr>';
+}
+async function detenerLive(id) { await api(`/api/bot/lives/${id}/detener`, {}); await cargarLives(); }
 async function cfg(cambios) { await api('/api/bot/config', cambios); cargar(); }
 
 async function encolar() {
