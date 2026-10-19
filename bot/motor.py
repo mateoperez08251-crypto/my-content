@@ -583,33 +583,27 @@ class Motor:
         return {"navegador": resultado.get("navegador", "")}
 
     def _hilo_login(self, cuenta, listo=None, resultado=None):
+        """Abre Brave/Chrome/Edge como programa normal con el perfil de la cuenta. Al cerrarlo,
+        el bot comprueba la sesión."""
         mod = POR_NOMBRE[cuenta["plataforma"]]
         resultado = resultado if resultado is not None else {}
+
+        def abierto(nombre, ruta):
+            resultado["navegador"] = nombre.capitalize()
+            self.log(f"Abrí {ruta} (perfil: {self.perfil(cuenta)}). Inicia sesión en {mod.NOMBRE} · "
+                     f"{cuenta['nombre']} y luego cierra esa ventana.")
+            if listo:
+                listo.set()
+
         try:
-            with navegador.abrir(self.perfil(cuenta), headless=False, navegador=self.cfg["navegador"]) as ctx:
-                page = navegador.pagina(ctx)
-                resultado["navegador"] = navegador.buscar_navegador(self.cfg["navegador"])[0].capitalize()
-                if listo:
-                    listo.set()
-                page.goto(mod.URL_LOGIN, wait_until="domcontentloaded")
-                try:
-                    page.bring_to_front()  # que no quede escondida detrás de la app
-                except Exception:
-                    pass
-                ruta = navegador.buscar_navegador(self.cfg["navegador"])[1] or "Chromium de Playwright"
-                self.log(f"Ventana abierta con {ruta} (perfil: {self.perfil(cuenta)}). Inicia sesión en "
-                         f"{mod.NOMBRE} · {cuenta['nombre']} y cierra esa ventana.")
-                fin = time.time() + 30 * 60
-                while time.time() < fin and ctx.pages:
-                    time.sleep(2)
+            navegador.abrir_normal(self.perfil(cuenta), mod.URL_LOGIN, self.cfg["navegador"], al_abrir=abierto)
         except Exception as e:
             resultado["error"] = f"No pude abrir el navegador: {e}"
             self.log(resultado["error"])
-            if listo and not listo.is_set():
+            if listo:
                 listo.set()
-                return
-        if listo:
-            listo.set()
+            return
+        self.log(f"Cerraste el navegador de {cuenta['nombre']}. Compruebo la sesión…")
         self.probar_sesion(cuenta["id"])
 
     def probar_sesion(self, cid) -> bool:

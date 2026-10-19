@@ -239,6 +239,23 @@ class Cola(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "No encontré Brave"):
                 self.m.abrir_login(self.tk, espera_s=5)
 
+    def test_login_abre_el_navegador_normal(self):
+        exe = os.path.join(self.tmp.name, "brave")
+        pathlib.Path(exe).write_text("#!/bin/sh\necho \"$@\" > \"$0.args\"\nsleep 1\n")
+        os.chmod(exe, 0o755)
+        with mock.patch.dict(navegador._EJECUTABLES, {"brave": [exe]}), \
+                mock.patch.object(self.m, "probar_sesion") as probar:
+            r = self.m.abrir_login(self.tk, espera_s=5)
+            self.assertEqual(r["navegador"], "Brave")
+            for _ in range(50):
+                if probar.called:
+                    break
+                time.sleep(0.1)
+        args = pathlib.Path(exe + ".args").read_text()
+        self.assertIn("--user-data-dir=", args)
+        self.assertIn(PlataformaFalsa.URL_LOGIN, args)  # la página de login de la plataforma
+        probar.assert_called_once_with(self.tk)
+
     def test_elige_navegador(self):
         with mock.patch.dict(navegador._EJECUTABLES, {"brave": [__file__], "chrome": [], "edge": []}):
             self.assertEqual(navegador.buscar_navegador("auto"), ("brave", __file__))

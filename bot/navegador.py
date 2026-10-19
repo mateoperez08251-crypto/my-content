@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Abre el navegador (Brave, Chrome o Edge) con el perfil propio de cada cuenta (cookies guardadas)."""
 import os
+import subprocess
 import threading
+import time
 from contextlib import contextmanager
 
 _locks: dict[str, threading.Lock] = {}
@@ -112,3 +114,28 @@ def pagina(ctx):
             pass
     page.set_default_timeout(45000)
     return page
+
+
+def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int = 30 * 60, al_abrir=None):
+    """Abre el navegador como un programa normal (sin automatización) con el perfil de la cuenta,
+    para iniciar sesión a mano. Espera a que lo cierres. Devuelve el nombre del navegador."""
+    nombre, ruta = buscar_navegador(navegador)
+    if not ruta:
+        raise SinNavegador("No encontré Brave, Chrome ni Edge instalado en esta PC.")
+    lk = _lock(perfil)
+    if not lk.acquire(blocking=False):
+        raise PerfilOcupado("El navegador de esa cuenta ya está abierto.")
+    try:
+        os.makedirs(perfil, exist_ok=True)
+        proc = subprocess.Popen([ruta, f"--user-data-dir={os.path.abspath(perfil)}", "--no-first-run",
+                                 "--no-default-browser-check", "--new-window", url])
+        if al_abrir:
+            al_abrir(nombre, ruta)
+        try:
+            proc.wait(timeout=limite_s)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+        time.sleep(2)  # que el navegador termine de guardar las cookies
+        return nombre
+    finally:
+        lk.release()
