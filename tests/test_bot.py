@@ -348,3 +348,19 @@ class ServidorDeCortes(unittest.TestCase):
         self.assertEqual([s["archivo"] for s in m.db.subidas_recientes()], [self.local])
         self.assertFalse(m._remoto_disponible())  # no lo reintenta en 30 min
         m.db._con.close()
+
+    def test_avisa_una_vez_si_colab_se_cae_y_cuando_vuelve(self):
+        avisos = []
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        m = Motor(d, log=lambda x: None, notificar=avisos.append)
+        m.guardar_cfg({"remoto_url": "http://127.0.0.1:9", "remoto_clave": "x"})
+        self.assertFalse(m._vigilar_remoto())
+        self.assertFalse(m._vigilar_remoto())
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("desconectó", avisos[0])
+        m.guardar_cfg({"remoto_url": f"http://127.0.0.1:{self.puerto}"})  # pegó el enlace nuevo
+        self.assertTrue(m._vigilar_remoto())
+        self.assertEqual(len(avisos), 2)
+        self.assertIn("volvió", avisos[1])
+        self.assertTrue(m._remoto_disponible())
+        m.db._con.close()

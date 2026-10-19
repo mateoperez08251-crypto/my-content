@@ -95,6 +95,8 @@ class Motor:
         self._libre_global = 0.0
         self._remoto_caido_hasta = 0.0
         self._remoto_estado = ""
+        self._remoto_avisado = False   # ya se avisó por WhatsApp de que Colab se cayó
+        self._ultimo_vigilar = 0.0
         self.db.reparar_al_arrancar()
 
     # -- config / log ---------------------------------------------------
@@ -118,6 +120,9 @@ class Motor:
             except (ValueError, TypeError):
                 raise ValueError(f"Valor no válido para {k}: {v}")
         self.cfg["remoto_url"] = self.cfg["remoto_url"].strip().rstrip("/")
+        if "remoto_url" in (cambios or {}) or "remoto_clave" in (cambios or {}):
+            self._remoto_caido_hasta = 0
+            self._ultimo_vigilar = 0
         if self.cfg["gap_max"] < self.cfg["gap_min"]:
             self.cfg["gap_max"] = self.cfg["gap_min"]
         if self.cfg["pausa_max"] < self.cfg["pausa_min"]:
@@ -164,6 +169,9 @@ class Motor:
                 if self.cfg["firebase_auto"] and time.time() - self._ultimo_firebase > 120:
                     self._ultimo_firebase = time.time()
                     self.revisar_firebase()
+                if self.cfg["remoto_url"] and time.time() - self._ultimo_vigilar > 300:
+                    self._ultimo_vigilar = time.time()
+                    self._vigilar_remoto()
                 if self.cfg["activo"]:
                     hizo = self._paso()
                     espera = 2 if hizo else 15
@@ -302,9 +310,7 @@ class Motor:
             try:
                 return self._preparar_remoto(t)
             except remoto.ServidorCaido as e:
-                self._remoto_caido_hasta = time.time() + 30 * 60
-                self._remoto_estado = f"Sin conexión ({e}). Corto en esta PC."
-                self.log(f"Servidor de cortes no responde: {e}. Corto en esta PC.")
+                self._remoto_caido(e)
             except remoto.ServidorOcupado:
                 self.db.marcar_trabajo(t["id"], "pendiente", "El servidor de cortes está ocupado.",
                                        proximo_intento=time.time() + 120)
@@ -366,6 +372,33 @@ class Motor:
     def _cliente_remoto(self):
         return remoto.Cliente(self.cfg["remoto_url"], self.cfg["remoto_clave"])
 
+    def _remoto_caido(self, e):
+        self._remoto_caido_hasta = time.time() + 30 * 60
+        self._remoto_estado = f"Sin conexión ({e}). Corto en esta PC."
+        self.log(f"Servidor de cortes no responde: {e}. Corto en esta PC.")
+        if not self._remoto_avisado:
+            self._remoto_avisado = True
+            self.notificar("⚠️ Bot: Colab se desconectó. Sigo cortando en tu PC. Cuando puedas, ábrelo "
+                           "y pega el enlace nuevo en el panel del bot.")
+
+    def _remoto_volvio(self):
+        self._remoto_caido_hasta = 0
+        if self._remoto_avisado:
+            self._remoto_avisado = False
+            self.notificar("✅ Bot: Colab volvió a conectar. Los próximos videos se cortan ahí.")
+            self.log("Servidor de cortes conectado de nuevo.")
+
+    def _vigilar_remoto(self):
+        """Cada 5 min comprueba que Colab responde, para avisar aunque la cola esté vacía."""
+        try:
+            info = self._cliente_remoto().probar()
+        except remoto.ServidorCaido as e:
+            self._remoto_caido(e)
+            return False
+        self._remoto_estado = "Conectado ✅" + (" (trabajando)" if info.get("status") == "running" else "")
+        self._remoto_volvio()
+        return True
+
     def probar_remoto(self):
         if not self.cfg["remoto_url"]:
             raise ValueError("Pon primero la dirección del servidor de cortes.")
@@ -374,8 +407,8 @@ class Motor:
         except remoto.ServidorCaido as e:
             self._remoto_estado = f"Sin conexión: {e}"
             raise ValueError(self._remoto_estado)
-        self._remoto_caido_hasta = 0
         self._remoto_estado = "Conectado ✅" + (" (ocupado)" if info.get("status") == "running" else "")
+        self._remoto_volvio()
         return self._remoto_estado
 
     def _preparar_remoto(self, t):
