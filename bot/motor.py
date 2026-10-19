@@ -564,9 +564,27 @@ class Motor:
             return ""
 
     # -- sesiones -------------------------------------------------------
+    def importar_cookies(self, cid, texto):
+        from .cookies import leer
+        cuenta = self.db.cuenta(cid)
+        if not cuenta:
+            raise ValueError('Cuenta no encontrada.')
+        cookies = leer(texto, cuenta['plataforma'])
+        try:
+            with navegador.abrir(self.perfil(cuenta), headless=True, navegador=self.cfg['navegador']) as ctx:
+                ctx.add_cookies(cookies)
+        except navegador.PerfilOcupado:
+            raise ValueError('Cierra la ventana de esa cuenta antes de importar cookies.') from None
+        except Exception:
+            # Los errores de Playwright pueden incluir los argumentos con cookies.
+            raise ValueError('No pude guardar las cookies. Revisa el navegador instalado y cierra el perfil de esa cuenta.') from None
+        self.db.editar_cuenta(cid, estado='sin_login')
+        self.log(f"Cookies importadas para {cuenta['nombre']}. Falta comprobar la sesión.")
+        return {'importadas': len(cookies)}
+
     def abrir_login(self, cid, espera_s=45):
         """Abre el navegador de la cuenta en la página de inicio de sesión. Al cerrarlo, se comprueba.
-        Espera a que la ventana se abra de verdad; si falla, el error llega al panel."""
+        Espera a que el proceso arranque sin fallar de inmediato; los errores llegan al panel."""
         cuenta = self.db.cuenta(cid)
         if not cuenta:
             raise ValueError("Cuenta no encontrada.")
@@ -590,7 +608,7 @@ class Motor:
 
         def abierto(nombre, ruta):
             resultado["navegador"] = nombre.capitalize()
-            self.log(f"Abrí {ruta} (perfil: {self.perfil(cuenta)}). Inicia sesión en {mod.NOMBRE} · "
+            self.log(f"Iniciado {nombre.capitalize()} (perfil: {self.perfil(cuenta)}). Inicia sesión en {mod.NOMBRE} · "
                      f"{cuenta['nombre']} y luego cierra esa ventana.")
             if listo:
                 listo.set()

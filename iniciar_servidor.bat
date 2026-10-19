@@ -9,5 +9,11 @@ echo  La contrasena sale abajo. No cierres esta ventana.
 echo.
 for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do echo  IP de esta PC:%%a
 echo.
-py content.py --servidor
+call "%~dp0seleccionar_python_bot.bat"
+if not defined BOT_PYTHON (
+    echo [ERROR] Falta Python. Ejecuta primero preparar_navegador_bot.bat.
+    pause
+    exit /b 1
+)
+"%BOT_PYTHON%" content.py --servidor
 pause

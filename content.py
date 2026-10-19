@@ -1117,7 +1117,8 @@ def facebook_disconnect():
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
-    return render_template("index.html")
+    from runtime_config import firebase_web_config
+    return render_template("index.html", firebase_web_config=firebase_web_config())
 
 
 # Ventana de pywebview (se asigna al arrancar). Sus diálogos nativos son seguros
@@ -1617,8 +1618,9 @@ def run_smart_split_thread(data):
     """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     _escribir_progreso_smart("Iniciando descargas...|0")
     try:
-        if not get_secret("groq", "api_key", env="GROQ_API_KEY"):
-            raise RuntimeError("Falta la clave de Groq (elige los clips con ella). Pulsa '🔑 Configurar clave "
+        from smart_selection import needs_groq
+        if needs_groq(data) and not get_secret("groq", "api_key", env="GROQ_API_KEY"):
+            raise RuntimeError("Falta la clave de Groq para las opciones elegidas. Pulsa '🔑 Configurar clave "
                                "de Groq' en esta ventana y pega tu clave gsk_...")
         source = _limpiar_origen(data.get('source', ''))
         prepared_cast = None
@@ -1654,6 +1656,7 @@ def run_smart_split_thread(data):
             "source": source,
             "output_path": output_path,
             "clip_duration": data.get('clip_duration', 60),
+            "clip_selection": data.get("clip_selection", "ai"),
             "num_clips": data.get('num_clips', 1),
             "start_time": data.get('start_time', ''),
             "end_time": data.get('end_time', ''),
@@ -1804,6 +1807,8 @@ def smart_split_api():
     if not isinstance(data, dict):
         return jsonify({"success": False, "error": "Se esperaba un objeto JSON."}), 400
     try:
+        from smart_selection import validate_selection
+        validate_selection(data.get('clip_selection', 'ai'), data.get('clip_duration', 60))
         validate_layout(data.get('video_format', 'vertical'), data.get('preserve_background', False),
                         data.get('background_volume', 0.75))
         validate_performance(data.get('export_profile', 'balanced'), data.get('voice_steps', 10), data.get('voice_cast'))
@@ -2177,6 +2182,24 @@ def bot_cuenta_editar(cid):
 @app.route("/api/bot/cuentas/<int:cid>/login", methods=["POST"])
 def bot_cuenta_login(cid):
     return _bot_respuesta(lambda: _bot().abrir_login(cid))
+
+
+@app.route("/api/bot/cuentas/<int:cid>/cookies", methods=["POST"])
+def bot_cuenta_cookies(cid):
+    from bot.cookies import MAX_BYTES
+    def hacer():
+        archivo = request.files.get('file')
+        if archivo is None:
+            raise ValueError('Elige un archivo JSON o cookies.txt de tu cuenta.')
+        raw = archivo.stream.read(MAX_BYTES + 1)
+        if len(raw) > MAX_BYTES:
+            raise ValueError('El archivo de cookies no puede superar 2 MiB.')
+        try:
+            texto = raw.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            raise ValueError('El archivo de cookies debe usar texto UTF-8.') from None
+        return _bot().importar_cookies(cid, texto)
+    return _bot_respuesta(hacer)
 
 
 @app.route("/api/bot/cuentas/<int:cid>/probar", methods=["POST"])

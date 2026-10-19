@@ -90,3 +90,9 @@ bot.db-*
 bot_config.json
 bot_perfiles/
 bot_errores/
+
+# Configuración local con claves de acceso; publicar solo los ejemplos.
+radar_config.json
+firebase_web.json
+cookies_youtube.txt
+configuracion_local_privada.zip

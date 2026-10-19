@@ -46,12 +46,17 @@ class LayoutBackgroundTests(unittest.TestCase):
                  patch.object(se, 'dub', return_value=(voice, [], 'Hello')) as dub, \
                  patch('smart_dubbing.separate_background', return_value=background) as separate, \
                  patch.object(se, '_crear_subs', return_value=SimpleNamespace(subs=[], en=lambda t: None)), \
-                 patch('gpu_video.opciones_moviepy', return_value={'codec':'libx264', 'preset':'ultrafast'}):
+                 patch('gpu_video.opciones_moviepy', return_value={'codec':'libx264', 'preset':'ultrafast'}), \
+                 patch('reencuadre.calcular_trayectoria', side_effect=AssertionError('No debe seguir caras')) as track, \
+                 patch.object(se, 'write_progress') as progress:
                 for layout, size in [('horizontal', [1280, 720]), ('vertical_blur', [720, 1280]), ('vertical', [720, 1280])]:
                     files = se.process_smart_split(source, str(Path(folder) / (layout + '.mp4')),
                         dubbing_language='en', preserve_background=True, video_format=layout,
-                        background_volume=.5, export_profile='fast', encuadre='difuminado',
+                        background_volume=.5, export_profile='fast',
+                        encuadre='difuminado' if layout == 'vertical' else 'caras',
                         show_subtitles=False, show_progress_bar=False, emojis=False, efectos=False)
+                    track.assert_not_called()
+                    self.assertFalse(any('Siguiendo caras' in call.args[0] for call in progress.call_args_list))
                     self.assertAlmostEqual(dub.call_args.args[0][0]['start'], .1)
                     self.assertEqual(separate.call_args.args[1:3], (2, 1))
                     with VideoFileClip(files[0]) as result:

@@ -206,7 +206,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
                         speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced",
-                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75):
+                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai"):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -219,24 +219,30 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     validate_edit_options(dubbing_language, speaker_dubbing, filter_strength, denoise_audio)
     from smart_dubbing import validate_layout
     validate_layout(video_format, preserve_background, background_volume)
+    from smart_selection import validate_selection, sequential_parts
+    validate_selection(clip_selection, clip_duration)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
     write_progress("Iniciando Smart Split...", 3)
-    print(f"Iniciando Smart Split · motor: {motor['nombre']}")
+    print("Iniciando Smart Split · cortes consecutivos sin selección IA" if clip_selection == "sequential"
+          else f"Iniciando Smart Split · motor: {motor['nombre']}")
 
     s_time = parse_time(start_time)
     e_time = parse_time(end_time)
 
-    # 1. Transcripción (por trozos: sin límite de duración)
-    local = transcripcion == "local"
-    write_progress("Transcribiendo el audio en tu GPU (Whisper local)..." if local
-                   else "Transcribiendo el audio con IA (Groq)...", 8)
-    words, segmentos = cv.transcribir(
-        video_path, s_time, e_time, modelo=motor["whisper"], idioma=None,
-        progreso=lambda n, total: write_progress(
-            "Transcribiendo en tu GPU (Whisper local)..." if local else f"Transcribiendo audio ({n + 1}/{total})...",
-            8 + int(12 * n / max(total, 1))),
-        proveedor=transcripcion, python_local=python_motor, script_local=script_local, modelo_local=whisper_local)
-    print("Transcripción completada. Total palabras:", len(words))
+    # Cortes consecutivos no necesitan analizar el audio salvo subtítulos o doblaje.
+    words, segmentos = [], []
+    needs_transcription = clip_selection == 'ai' or show_subtitles or dubbing_language != 'original'
+    if needs_transcription:
+        local = transcripcion == "local"
+        write_progress("Transcribiendo el audio en tu GPU (Whisper local)..." if local
+                       else "Transcribiendo el audio con IA (Groq)...", 8)
+        words, segmentos = cv.transcribir(
+            video_path, s_time, e_time, modelo=motor["whisper"], idioma=None,
+            progreso=lambda n, total: write_progress(
+                "Transcribiendo en tu GPU (Whisper local)..." if local else f"Transcribiendo audio ({n + 1}/{total})...",
+                8 + int(12 * n / max(total, 1))),
+            proveedor=transcripcion, python_local=python_motor, script_local=script_local, modelo_local=whisper_local)
+        print("Transcripción completada. Total palabras:", len(words))
 
     clip = VideoFileClip(video_path)
     speaker_resources = ExitStack()
@@ -248,13 +254,17 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             clip = clip.subclipped(base, fin_video)
         total_duration = clip.duration
 
-        # 2. Momentos virales (frases completas, duración decidida por el contenido)
-        write_progress("Buscando los momentos más virales (IA)...", 22)
-        frs = cv.frases(words, segmentos)
-        seleccion = cv.seleccionar(frs, int(num_clips), float(clip_duration), total_duration,
-                                   motor=motor_ia, avisar=print)
+        # 2. Momentos con IA o partes consecutivas de duración fija.
+        if clip_selection == 'sequential':
+            write_progress("Dividiendo en partes consecutivas, sin selección IA...", 22)
+            seleccion = sequential_parts(total_duration, clip_duration)
+        else:
+            write_progress("Buscando los momentos más virales (IA)...", 22)
+            frs = cv.frases(words, segmentos)
+            seleccion = cv.seleccionar(frs, int(num_clips), float(clip_duration), total_duration,
+                                       motor=motor_ia, avisar=print)
         for c in seleccion:
-            print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['puntuacion']}/100 · {c['titulo']}")
+            print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['titulo']}")
 
         orig_w, orig_h = clip.w, clip.h
         fixed_crop_w = int(orig_h * 9 / 16) if (orig_w / orig_h) > (9 / 16) else orig_w
@@ -288,13 +298,14 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             p0 = 25 + int(idx * tramo)
 
             # 3. Reencuadre: caras + hablante activo, anticipándose a quien va a hablar
-            write_progress(f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0)
             if fixed_crop_w < orig_w and encuadre in ("caras", "zoom_dinamico"):
+                write_progress(f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0)
                 tiempos, centros = reencuadre.calcular_trayectoria(
                     video_path, base + st, base + et, fixed_crop_w, palabras_abs, motor["reencuadre"],
                     progreso=lambda f, p0=p0, tramo=tramo: write_progress(
                         f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.3 * f)))
             else:
+                write_progress(f"Preparando encuadre sin seguimiento · clip {parte_num} de {len(seleccion)}...", p0)
                 tiempos, centros = [0.0], [orig_w / 2]
 
             with ExitStack() as resources:
@@ -336,7 +347,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 if dubbing_language in ("ja", "ko") and show_subtitles:
                     opciones_sub["fuente"] = "cjk"
                 subs = _crear_subs(palabras_clip if show_subtitles else [], final_w, final_h, subtitle_style, subtitle_scale, opciones_sub,
-                                   emojis, motor_ia)
+                                   emojis and clip_selection == "ai", motor_ia)
                 pulsos = _pulsos_zoom(subs) if encuadre == "zoom_dinamico" else []
                 write_progress(f"Renderizando clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.35))
 
@@ -400,8 +411,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 publicacion = cv.texto_publicacion(info)
                 try:
                     with open(os.path.splitext(out_name)[0] + ".txt", "w", encoding="utf-8") as f:
-                        f.write(f"{info['titulo']}\n\n{publicacion}\n\nPuntuación viral: {info['puntuacion']}/100\n"
-                                f"Gancho: {info.get('gancho', '')}\n")
+                        f.write(f"{info['titulo']}\n\n{publicacion}\n\n")
+                        if clip_selection == 'ai':
+                            f.write(f"Puntuación viral: {info['puntuacion']}/100\nGancho: {info.get('gancho', '')}\n")
+                        else:
+                            f.write("Corte consecutivo por tiempo, sin evaluación IA.\n")
                         if translated:
                             f.write(f"\nDoblaje ({dubbing_language}):\n{translated}\n")
                 except OSError:
@@ -410,7 +424,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     meta_salida.append({"archivo": out_name, "titulo": info["titulo"], "descripcion": info["descripcion"],
                                         "hashtags": info["hashtags"], "publicacion": publicacion,
                                         "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
-                                        "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report})
+                                        "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report,
+                                        "clip_selection": clip_selection})
                 # processed_clip/subclip comparten el lector del clip padre: no se cierran aquí.
 
         write_progress("¡Proceso finalizado con éxito!", 100)
@@ -567,7 +582,8 @@ def main(argv):
                 cfg.get("speaker_dubbing", False), cfg.get("speaker_config"),
                 cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False), cfg.get("export_profile", "balanced"),
                 cfg.get("preserve_background", False), cfg.get("upscale", "off"),
-                cfg.get("video_format", "vertical"), cfg.get("background_volume", 0.75))
+                cfg.get("video_format", "vertical"), cfg.get("background_volume", 0.75),
+                cfg.get("clip_selection", "ai"))
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)

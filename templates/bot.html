@@ -81,6 +81,8 @@ a{color:var(--acento)}
 
   <section class="card">
     <h2><i class="ph-duotone ph-user-circle"></i> Cuentas <small>Inicia sesión una vez por cuenta</small></h2>
+    <p class="muted">Sesión abre una ventana propia en la PC donde ejecutas la app, aunque tengas «Navegador oculto» activado. El bot usa su propio perfil por cuenta y actúa dentro del navegador sin mover tu cursor del escritorio. Inicia sesión y cierra esa ventana para guardar la sesión.</p>
+    <p class="muted">También puedes importar cookies JSON o Netscape de tu propia cuenta y pulsar Comprobar sesión. Las cookies se guardan en el perfil de esa cuenta; no garantizan evitar verificaciones o bloqueos.</p>
     <table><thead><tr><th>Cuenta</th><th>Sesión</th><th>Hoy</th><th></th></tr></thead><tbody id="cuentas"></tbody></table>
     <div class="fila" style="margin-top:12px">
       <select id="c-plat" style="max-width:130px"><option value="tiktok">TikTok</option>
@@ -99,7 +101,7 @@ a{color:var(--acento)}
     <input id="r-origen" placeholder="@bromaslachelchaelkuni5017 o *">
     <div class="chips" id="chips-regla"></div>
     <div class="fila" style="margin-top:8px">
-      <input id="r-preset" placeholder="Preset de Smart Split (vacío = el de ajustes)">
+      <input list="smart-presets" id="r-preset" placeholder="Preset de Smart Split (vacío = el de ajustes)">
       <input id="r-texto" placeholder="Texto fijo (opcional)">
     </div>
     <div class="fila" style="margin-top:8px">
@@ -116,7 +118,7 @@ a{color:var(--acento)}
       <div><label>Sube desde</label><input id="hora_inicio" type="time"></div>
       <div><label>Hasta</label><input id="hora_fin" type="time"></div>
       <div><label>Reintentos por subida</label><input id="max_intentos" type="number" min="1"></div>
-      <div><label>Preset por defecto</label><input id="preset"></div>
+      <div><label>Preset por defecto</label><input id="preset" list="smart-presets"></div>
       <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
         <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
     </div>
@@ -155,12 +157,14 @@ a{color:var(--acento)}
   </section>
 </main>
 <div id="toast"></div>
+<datalist id="smart-presets"></datalist>
 
 <script>
 const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
 const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
   cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
 let E = null, selUrl = new Set(), selRegla = new Set(), editando = false;
+const loginPendientes = new Set();
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -203,7 +207,8 @@ function pintar() {
     <td>${est(x.estado)} ${x.abierta ? '<span class="muted">Navegador abierto</span>' : ''}</td>
     <td>${x.hoy}/${x.limite_dia}</td>
     <td class="acc">
-      <button class="mini" onclick="login(${x.id})" title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> Sesión</button>
+      <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
+      <button class="mini" onclick="importarCookies(${x.id})" title="Importar cookies de tu propia cuenta"><i class="ph ph-file-arrow-up"></i> Cookies</button>
       <button class="mini" onclick="probar(${x.id})" title="Comprueba que la sesión sigue abierta"><i class="ph ph-check-circle"></i></button>
       <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
       <button class="mini peligro" onclick="borrarCuenta(${x.id})"><i class="ph ph-trash"></i></button></td></tr>`
@@ -255,8 +260,33 @@ async function crearCuenta() {
   $('c-nombre').value = ''; $('c-url').value = '';
   toast('Cuenta creada. Ahora pulsa "Sesión" para iniciar sesión.'); cargar();
 }
-async function login(id) { toast('Abriendo el navegador…'); const j = await api(`/api/bot/cuentas/${id}/login`, {});
-  toast(`Se abrió ${j.navegador || 'el navegador'}: inicia sesión y luego cierra esa ventana.`); setTimeout(cargar, 1500); }
+async function login(id) {
+  if (loginPendientes.has(id)) return;
+  loginPendientes.add(id); if (E) pintar();
+  toast('Iniciando el navegador en la PC donde corre la app…');
+  try {
+    const j = await api(`/api/bot/cuentas/${id}/login`, {});
+    toast(`${j.navegador || 'Navegador'} iniciado: busca su ventana en esa PC, inicia sesión y ciérrala al terminar.`);
+  } catch (e) { /* api muestra el error real */ }
+  finally { loginPendientes.delete(id); cargar(); }
+}
+function importarCookies(id) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json,.txt';
+  input.onchange = async () => {
+    const file = input.files[0]; if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast('El archivo no puede superar 2 MiB.', true); return; }
+    const form = new FormData(); form.append('file', file);
+    try {
+      const response = await fetch(`/api/bot/cuentas/${id}/cookies`, {method:'POST', body:form});
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'No se pudieron importar las cookies.');
+      toast(`${result.importadas} cookies importadas. Pulsa Comprobar sesión o Sesión para revisarla.`);
+      cargar();
+    } catch (error) { toast(error.message, true); }
+  };
+  input.click();
+}
 async function probar(id) { await api(`/api/bot/cuentas/${id}/probar`, {}); toast('Comprobando sesión…'); }
 async function pausarCuenta(id, activa) { await api(`/api/bot/cuentas/${id}`, {activa}); cargar(); }
 async function borrarCuenta(id) { if (!confirm('¿Borrar esta cuenta y sus subidas pendientes?')) return;
@@ -286,7 +316,15 @@ async function guardarAjustes() {
   editando = false; await cfg(d); toast('Ajustes guardados');
 }
 document.querySelectorAll('.ajustes input, .ajustes select, #remoto_url, #remoto_clave').forEach(i => i.addEventListener('focus', () => editando = true));
-cargar(); setInterval(cargar, 4000);
+async function cargarPresets() {
+  try {
+    const result = await api('/api/smart_presets');
+    $('smart-presets').replaceChildren(...Object.keys(result.presets || {}).map(name => {
+      const option = document.createElement('option'); option.value = name; return option;
+    }));
+  } catch (e) {}
+}
+cargarPresets(); cargar(); setInterval(cargar, 4000);
 </script>
 </body>
 </html>

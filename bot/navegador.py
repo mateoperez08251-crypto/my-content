@@ -121,18 +121,45 @@ def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int =
     para iniciar sesión a mano. Espera a que lo cierres. Devuelve el nombre del navegador."""
     nombre, ruta = buscar_navegador(navegador)
     if not ruta:
-        raise SinNavegador("No encontré Brave, Chrome ni Edge instalado en esta PC.")
+        # La automatización también permite Chromium. Su ventana de login debe
+        # usar el mismo ejecutable y perfil, sin lanzar Playwright sobre el login.
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                ruta = p.chromium.executable_path
+            if not os.path.isfile(ruta):
+                raise FileNotFoundError(ruta)
+        except (ImportError, FileNotFoundError) as e:
+            raise SinNavegador("No encontré Brave, Chrome, Edge ni Chromium. Instala Chrome o "
+                               "ejecuta python -m playwright install chromium en el entorno de la app.") from e
     lk = _lock(perfil)
     if not lk.acquire(blocking=False):
         raise PerfilOcupado("El navegador de esa cuenta ya está abierto.")
     try:
         os.makedirs(perfil, exist_ok=True)
+        opciones = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.name == "nt":
+            inicio = subprocess.STARTUPINFO()
+            inicio.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            inicio.wShowWindow = subprocess.SW_SHOWNORMAL
+            opciones["startupinfo"] = inicio
         proc = subprocess.Popen([ruta, f"--user-data-dir={os.path.abspath(perfil)}", "--no-first-run",
-                                 "--no-default-browser-check", "--new-window", url])
+                                 "--no-default-browser-check", "--new-window", url], **opciones)
+        # Popen solo confirma que se creó el proceso. No anunciar éxito si el
+        # navegador falla enseguida (perfil bloqueado, ejecutable roto, etc.).
+        inicio_s = min(0.75, limite_s)
+        try:
+            codigo = proc.wait(timeout=inicio_s)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            raise SinNavegador(f"{nombre.capitalize()} terminó al iniciar (código {codigo}). "
+                               "Cierra las ventanas del perfil del bot y vuelve a pulsar Sesión. "
+                               "Si la app corre en otra PC, la ventana se abre allí.")
         if al_abrir:
             al_abrir(nombre, ruta)
         try:
-            proc.wait(timeout=limite_s)
+            proc.wait(timeout=max(0.1, limite_s - inicio_s))
         except subprocess.TimeoutExpired:
             proc.terminate()
         time.sleep(2)  # que el navegador termine de guardar las cookies

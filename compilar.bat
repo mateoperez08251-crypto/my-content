@@ -48,7 +48,7 @@ echo       OK
 :: 4. Instalar dependencias del proyecto
 :: ============================================
 echo [2/5] Instalando dependencias del proyecto...
-py -m pip install flask firebase-admin pyautogui pynput send2trash requests pyperclip imageio imageio-ffmpeg pillow opencv-python mediapipe pystray edge-tts --quiet
+py -m pip install flask firebase-admin playwright pyautogui pynput send2trash requests pyperclip imageio imageio-ffmpeg pillow opencv-python mediapipe pystray edge-tts --quiet
 echo       OK
 
 :: ============================================

@@ -54,3 +54,40 @@ Verificación: `python -m unittest discover -s tests -p 'test_smart_speakers.py'
 Modelo elegido: [VoxCPM2 oficial](https://github.com/OpenBMB/VoxCPM), por su soporte multilingüe y referencias de voz integrado en la app. No es una afirmación de que sea el mejor para todos los casos. Requiere Python >=3.10 y <3.13.
 
 Validación: `python -m unittest discover -s tests -p 'test_smart*.py'` y `python tests/smart_pipeline_smoke.py`. Modelos y servicios simulados en las pruebas; exportación FFmpeg real. Falta validar calidad y velocidad con los pesos, Groq y la GPU del usuario.
+
+## PC de bajos recursos y bot
+
+En la parte superior de Smart Split pulsa **PC de bajos recursos · fondo difuminado sin seguimiento**. Selecciona salida vertical 9:16, video completo centrado sobre una copia ampliada y difuminada, exportación rápida a 720p, transcripción en Groq y mejora de resolución apagada. Desactiva la selección de mejores momentos para cortar todo el video en partes consecutivas. Conserva el motor elegido para cuando vuelvas a activar la selección IA. No cambia tus opciones de voz y subtítulos; doblaje o efectos adicionales siguen consumiendo recursos.
+
+Escribe un nombre y pulsa **Guardar ajustes para el bot**. En el bot elige ese nombre en **Preset por defecto** o en la regla del canal y guarda. Las reglas con preset propio tienen prioridad sobre el preset por defecto; los trabajos ya encolados conservan su nombre de preset. El mismo preset se envía al servidor remoto si está configurado. No se guardan el archivo de origen, los intervalos ni las referencias de hablantes del video manual.
+
+El modo difuminado omite el análisis de seguimiento de caras. La transcripción y selección dependen de las opciones elegidas; la composición del fondo y exportación siguen siendo necesarias; no hay una medición de velocidad para tu PC.
+
+### Apagar la búsqueda de momentos
+
+El botón **Buscar los mejores momentos con IA** permite alternar entre selección IA y partes consecutivas. Apagado, procesa todo el intervalo elegido en partes de la duración indicada (por ejemplo 0–60, 60–120, 120–180); la última conserva el resto y puede ser más corta. La cantidad de mejores clips queda desactivada. Los cortes son por tiempo y pueden interrumpir frases.
+
+El preset guarda `clip_selection: sequential` para el bot local y remoto. No llama al modelo de selección ni genera títulos, descripciones o emojis con IA. Si mantienes subtítulos o doblaje, necesita transcribir el audio; el doblaje sigue usando sus modelos. Sin subtítulos y con audio original, no transcribe. El fondo difuminado evita el seguimiento por separado. Actualiza ambas PCs/servidor a esta versión antes de usar el nuevo preset.
+
+Validación: `node tests/test_smart_presets.js` y `python -m unittest discover -s tests -p 'test_smart_sequential.py'`.
+
+## Ventana del bot y cookies de cuentas propias
+
+- **Sesión** abre Brave, Chrome o Edge en una ventana visible con el perfil exclusivo de esa cuenta. Si no hay uno instalado, también admite el Chromium de Playwright. En una PC recién formateada puede faltar: instala Chrome o ejecuta `python -m playwright install chromium` con el Python de la app (después de instalar sus dependencias).
+- La ventana aparece en la PC que ejecuta el servidor de la app, incluso si accedes al panel desde un teléfono u otra PC. No aparece en el navegador del teléfono. El ajuste **Navegador oculto** afecta a las subidas automáticas; el login es visible.
+- El bot controla la página con Playwright: no mueve el cursor del escritorio ni escribe en otras aplicaciones. Cada cuenta tiene su carpeta de perfil y conserva la sesión al cerrar su ventana.
+- **Cookies** importa un archivo JSON (lista, exportación de Cookie-Editor o cookies de storage state) o Netscape cookies.txt de tu propia cuenta, hasta 2 MiB. Cierra primero la ventana del perfil. Solo se aceptan cookies de la plataforma elegida y se omiten las vencidas. No se guardan archivos de importación, no se registran ni devuelven los valores; se añaden al perfil del navegador.
+- Después pulsa **Comprobar sesión** o abre **Sesión** para revisarla. Importar cookies no confirma que la sesión sea válida ni incluye todo el almacenamiento local de una web. No evita verificaciones, restricciones ni bloqueos de las plataformas.
+- La apertura detecta un proceso que termina inmediatamente y devuelve el error al panel. Que el proceso arranque no comprueba por sí solo que la ventana sea visible o que hayas iniciado sesión.
+
+Pruebas: `python -m unittest discover -s tests -p 'test_bot_browser_cookies.py'` y `python -m unittest discover -s tests -p 'test_bot.py'`. Apertura y cookies simuladas; queda pendiente comprobar la ventana real en tu Windows y autenticar tus cuentas.
+
+## Preparar el navegador en Windows
+
+Ejecuta **preparar_navegador_bot.bat** dentro de la carpeta actualizada del proyecto. Usa `CONTENTAPP_PYTHON` si está definida; después busca el entorno `.venv`/`venv` y Python instalado. Si falta Python, intenta instalar Python 3.12 con winget para el usuario. Instala Playwright en ese mismo Python. Con navegador automático reutiliza Brave, Chrome o Edge; descarga Chromium solo si hace falta. Respeta el navegador que ya estuviera configurado en el bot. Abre una ventana de diagnóstico con perfil independiente y espera a que la cierres. Después, abre el programa y pulsa **Sesión** en la cuenta que quieras usar. No instala todos los modelos de IA ni reconstruye el ejecutable. Windows y winget no se han probado desde este entorno Linux.
+
+## Configuración privada fuera del repositorio
+
+Firebase Web ahora se lee de `firebase_web.json` en la carpeta de datos (`CONTENTAPP_DATA_DIR`, si está definida), o del JSON de `CONTENTAPP_FIREBASE_WEB_CONFIG`. Copia tu configuración local privada antes de abrir la versión nueva: sin ella el acceso de Firebase muestra un aviso y no se omite la autenticación. Solo se pasan al navegador las claves públicas previstas para Firebase Web; nunca un archivo de cuenta de servicio. `firebase_web.example.json` muestra el formato.
+
+`radar_config.json` deja de estar versionado. El archivo existente se conserva como configuración local; `radar_config.example.json` contiene campos vacíos. Retirarlo de main no borra copias del historial: cambia las credenciales reales del radar que estuvieron publicadas. El panel administrador sigue leyendo su clave desde secrets.json o CONTENTAPP_ADMIN_PASSWORD, sin clave por defecto.

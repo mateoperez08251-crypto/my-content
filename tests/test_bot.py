@@ -231,11 +231,7 @@ class Cola(unittest.TestCase):
         self.assertEqual(len(PlataformaFalsa.llamadas), 1)
 
     def test_login_muestra_el_error_si_no_abre_el_navegador(self):
-        @contextmanager
-        def falla(perfil, **kw):
-            raise navegador.SinNavegador("No encontré Brave instalado en esta PC.")
-            yield  # pragma: no cover
-        with mock.patch.object(motor_mod.navegador, "abrir", falla):
+        with mock.patch.object(motor_mod.navegador, "abrir_normal", side_effect=navegador.SinNavegador("No encontré Brave instalado en esta PC.")):
             with self.assertRaisesRegex(ValueError, "No encontré Brave"):
                 self.m.abrir_login(self.tk, espera_s=5)
 
