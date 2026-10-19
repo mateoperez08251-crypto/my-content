@@ -15,6 +15,32 @@ from bot.motor import Motor
 
 
 class BrowserStartupTests(unittest.TestCase):
+    def test_windows_login_without_subprocess_sw_shownormal(self):
+        with tempfile.TemporaryDirectory() as profile:
+            opened = Mock()
+            proc = Mock()
+            proc.wait.side_effect = [subprocess.TimeoutExpired('chrome', .75), 0]
+            startup = SimpleNamespace(dwFlags=0, wShowWindow=0)
+            launch = Mock(return_value=proc)
+            # Reproducir el módulo de Windows sin SW_SHOWNORMAL, también en Linux.
+            windows_subprocess = SimpleNamespace(DEVNULL=subprocess.DEVNULL,
+                STARTUPINFO=lambda: startup, STARTF_USESHOWWINDOW=1,
+                Popen=launch, TimeoutExpired=subprocess.TimeoutExpired)
+            windows_os = SimpleNamespace(name='nt', path=navegador.os.path,
+                                         makedirs=navegador.os.makedirs)
+            with patch.object(navegador, 'buscar_navegador', return_value=('chrome', '/fake/chrome')), \
+                 patch.object(navegador, 'subprocess', windows_subprocess), \
+                 patch.object(navegador, 'os', windows_os), \
+                 patch.object(navegador.time, 'sleep'):
+                name = navegador.abrir_normal(profile, 'https://www.tiktok.com/login', al_abrir=opened)
+            self.assertEqual(name, 'chrome')
+            self.assertEqual(startup.dwFlags & 1, 1)
+            self.assertEqual(startup.wShowWindow, 1)
+            self.assertIs(launch.call_args.kwargs['startupinfo'], startup)
+            self.assertIn('--new-window', launch.call_args.args[0])
+            opened.assert_called_once()
+            self.assertFalse(navegador.ocupado(profile))
+
     def test_exits_before_open_does_not_report_success_and_releases_profile(self):
         with tempfile.TemporaryDirectory() as profile:
             opened = Mock()

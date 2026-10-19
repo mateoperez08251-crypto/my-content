@@ -141,7 +141,8 @@ def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int =
         if os.name == "nt":
             inicio = subprocess.STARTUPINFO()
             inicio.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            inicio.wShowWindow = subprocess.SW_SHOWNORMAL
+            # SW_SHOWNORMAL = 1 en Win32; subprocess no exporta esa constante.
+            inicio.wShowWindow = 1
             opciones["startupinfo"] = inicio
         proc = subprocess.Popen([ruta, f"--user-data-dir={os.path.abspath(perfil)}", "--no-first-run",
                                  "--no-default-browser-check", "--new-window", url], **opciones)
