@@ -2220,6 +2220,84 @@ def bot_trabajo_accion(tid, accion):
     return _bot_respuesta(hacer)
 
 
+# ---- Servidor de cortes: otra copia de la app (p. ej. Colab con GPU) corta para el bot ----
+_remoto_lock = threading.Lock()
+_remoto_trabajos = {}
+
+
+def _remoto_hilo(jid, datos):
+    try:
+        rutas, meta = run_smart_split_thread(datos)  # libera el bloqueo de trabajo al terminar
+        with _remoto_lock:
+            _remoto_trabajos[jid].update(estado="listo", rutas=rutas, meta=meta or [])
+    except Exception as e:
+        with _remoto_lock:
+            _remoto_trabajos[jid].update(estado="error", error=str(e)[:500])
+
+
+@app.route("/api/bot/remoto/cortar", methods=["POST"])
+def remoto_cortar():
+    d = request.get_json(silent=True) or {}
+    source = str(d.get("source", "")).strip()
+    if not source.startswith("http"):
+        return jsonify({"success": False, "error": "Falta el enlace del video."}), 400
+    if not _intentar_iniciar_trabajo():
+        return jsonify({"success": False, "ocupado": True, "error": "El servidor está ocupado."}), 409
+    datos = {**(d.get("preset") or {}), "source": source, "download_quality": "best",
+             "subir_tiktok": False, "subir_youtube": False, "subir_facebook": False, "_lanzar_error": True}
+    jid = uuid.uuid4().hex[:12]
+    with _remoto_lock:
+        # se olvidan los trabajos de hace más de un día
+        for viejo in [k for k, v in _remoto_trabajos.items() if time.time() - v["creado"] > 86400]:
+            _remoto_trabajos.pop(viejo, None)
+        _remoto_trabajos[jid] = {"estado": "cortando", "rutas": [], "meta": [], "error": "", "creado": time.time()}
+    threading.Thread(target=_remoto_hilo, args=(jid, datos), daemon=True).start()
+    return jsonify({"success": True, "id": jid})
+
+
+@app.route("/api/bot/remoto/<jid>", methods=["GET", "DELETE"])
+def remoto_estado(jid):
+    with _remoto_lock:
+        t = dict(_remoto_trabajos.get(jid) or {})
+    if not t:
+        return jsonify({"success": False, "error": "Trabajo no encontrado (¿se reinició el servidor?)."}), 404
+    if request.method == "DELETE":
+        for r in t["rutas"]:
+            try:
+                os.remove(r)
+            except OSError:
+                pass
+        with _remoto_lock:
+            _remoto_trabajos.pop(jid, None)
+        return jsonify({"success": True})
+    progreso = ""
+    try:
+        with open(SMART_PROGRESS, "r", encoding="utf-8") as f:
+            progreso = f.read().strip()
+    except OSError:
+        pass
+    por_archivo = {m.get("archivo"): m for m in t["meta"]}
+    clips = [{"n": i, "nombre": os.path.basename(r),
+              "publicacion": (por_archivo.get(r) or {}).get("publicacion") or ""}
+             for i, r in enumerate(t["rutas"])]
+    return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
+                    "progreso": progreso, "clips": clips})
+
+
+@app.route("/api/bot/remoto/<jid>/clip/<int:n>", methods=["GET"])
+def remoto_clip(jid, n):
+    with _remoto_lock:
+        rutas = list((_remoto_trabajos.get(jid) or {}).get("rutas") or [])
+    if n < 0 or n >= len(rutas) or not os.path.isfile(rutas[n]):
+        return jsonify({"success": False, "error": "Clip no encontrado."}), 404
+    return send_from_directory(os.path.dirname(rutas[n]), os.path.basename(rutas[n]), as_attachment=True)
+
+
+@app.route("/api/bot/remoto_probar", methods=["POST"])
+def remoto_probar():
+    return _bot_respuesta(lambda: {"mensaje": _bot().probar_remoto()})
+
+
 @app.route("/api/bot/captura/<int:sid>", methods=["GET"])
 def bot_captura(sid):
     s = _bot().db.subida(sid)
@@ -2382,7 +2460,9 @@ def _arrancar_servidor():
     threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
     threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
     # El bot de subida también corre en modo servidor (p. ej. la PC principal manejada desde otra)
-    if os.environ.get("CONTENTAPP_BOT", "1") != "0" and not os.environ.get("RUNPOD_POD_ID"):
+    # (no en RunPod ni Colab: ahí la app solo corta para el bot de tu PC)
+    if os.environ.get("CONTENTAPP_BOT", "1") != "0" and not os.environ.get("RUNPOD_POD_ID") \
+            and not os.environ.get("COLAB_RELEASE_TAG"):
         threading.Thread(target=_iniciar_bot, daemon=True, name="bot-arranque").start()
 
         def _radar_servidor():

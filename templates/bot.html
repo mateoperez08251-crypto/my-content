@@ -118,6 +118,13 @@ a{color:var(--acento)}
       <div><label>Reintentos por subida</label><input id="max_intentos" type="number" min="1"></div>
       <div><label>Preset por defecto</label><input id="preset"></div>
     </div>
+    <label style="margin-top:12px">Servidor de cortes (Colab con GPU) — opcional. Si se apaga, corta esta PC.</label>
+    <div class="fila">
+      <input id="remoto_url" placeholder="https://xxxx.ngrok-free.app (vacío = cortar en esta PC)">
+      <input id="remoto_clave" type="password" placeholder="Contraseña de la app en Colab" style="max-width:220px">
+      <button onclick="probarRemoto()"><i class="ph ph-plugs-connected"></i> Probar</button>
+    </div>
+    <div class="muted" id="remoto-estado" style="margin-top:4px"></div>
     <div class="fila" style="margin-top:12px">
       <label class="switch"><input type="checkbox" id="radar_auto"> Radar de la PC → cola</label>
       <label class="switch"><input type="checkbox" id="firebase_auto"> Radar de la nube → cola</label>
@@ -181,10 +188,11 @@ function pintar() {
   $('activo').checked = c.activo;
   $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
   if (!editando) {
-    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','preset'])
+    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','preset','remoto_url','remoto_clave'])
       $(k).value = c[k];
     for (const k of ['radar_auto','firebase_auto','headless']) $(k).checked = c[k];
   }
+  $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
   $('cuentas').innerHTML = E.cuentas.map(x => `<tr>
     <td>${plat(x.plataforma)} ${esc(x.nombre)} ${x.activa ? '' : '<span class="muted">(pausada)</span>'}</td>
@@ -261,14 +269,19 @@ async function guardarRegla() {
 }
 async function borrarRegla(id) { await api(`/api/bot/reglas/${id}`, undefined, 'DELETE'); cargar(); }
 async function accion(tipo, id, a) { await api(`/api/bot/${tipo}/${id}/${a}`, {}); cargar(); }
+async function probarRemoto() {
+  await guardarAjustes();
+  try { const j = await api('/api/bot/remoto_probar', {}); toast(j.mensaje); } catch (e) {}
+  cargar();
+}
 async function guardarAjustes() {
   const d = {};
   for (const k of ['gap_min','gap_max','pausa_min','pausa_max','max_intentos']) d[k] = +$(k).value;
-  for (const k of ['hora_inicio','hora_fin','preset']) d[k] = $(k).value;
+  for (const k of ['hora_inicio','hora_fin','preset','remoto_url','remoto_clave']) d[k] = $(k).value;
   for (const k of ['radar_auto','firebase_auto','headless']) d[k] = $(k).checked;
   editando = false; await cfg(d); toast('Ajustes guardados');
 }
-document.querySelectorAll('.ajustes input').forEach(i => i.addEventListener('focus', () => editando = true));
+document.querySelectorAll('.ajustes input, #remoto_url, #remoto_clave').forEach(i => i.addEventListener('focus', () => editando = true));
 cargar(); setInterval(cargar, 4000);
 </script>
 </body>

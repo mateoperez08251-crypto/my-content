@@ -14,7 +14,7 @@ import time
 import traceback
 from datetime import datetime
 
-from . import navegador
+from . import navegador, remoto
 from .db import DB
 from .humano import Humano
 from .plataformas import POR_NOMBRE
@@ -35,7 +35,10 @@ CONFIG_DEFECTO = {
     "headless": False,       # False = ves el Chrome trabajando
     "velocidad": 1.0,        # 1 = ritmo humano normal
     "radar_desde": 0,        # la bandeja de Firebase solo cuenta lo detectado después de esto
+    "remoto_url": "",        # servidor de cortes (Colab con GPU); vacío = cortar en esta PC
+    "remoto_clave": "",
 }
+OCULTA = "••••••"
 
 ESPERA_REINTENTO_MIN = [10, 30, 120]
 ESPERA_TRABAJO_MIN = [15, 60, 180]
@@ -90,6 +93,8 @@ class Motor:
         self._hilo = None
         self._ultimo_firebase = 0.0
         self._libre_global = 0.0
+        self._remoto_caido_hasta = 0.0
+        self._remoto_estado = ""
         self.db.reparar_al_arrancar()
 
     # -- config / log ---------------------------------------------------
@@ -102,7 +107,7 @@ class Motor:
 
     def guardar_cfg(self, cambios: dict):
         for k, v in (cambios or {}).items():
-            if k not in CONFIG_DEFECTO:
+            if k not in CONFIG_DEFECTO or (k == "remoto_clave" and v == OCULTA):
                 continue
             tipo = type(CONFIG_DEFECTO[k])
             try:
@@ -112,6 +117,7 @@ class Motor:
                     self.cfg[k] = tipo(v)
             except (ValueError, TypeError):
                 raise ValueError(f"Valor no válido para {k}: {v}")
+        self.cfg["remoto_url"] = self.cfg["remoto_url"].strip().rstrip("/")
         if self.cfg["gap_max"] < self.cfg["gap_min"]:
             self.cfg["gap_max"] = self.cfg["gap_min"]
         if self.cfg["pausa_max"] < self.cfg["pausa_min"]:
@@ -292,6 +298,18 @@ class Motor:
 
     # -- preparar (descargar + cortar) ----------------------------------
     def _procesar_trabajo(self, t):
+        if t["cortar"] and self._remoto_disponible():
+            try:
+                return self._preparar_remoto(t)
+            except remoto.ServidorCaido as e:
+                self._remoto_caido_hasta = time.time() + 30 * 60
+                self._remoto_estado = f"Sin conexión ({e}). Corto en esta PC."
+                self.log(f"Servidor de cortes no responde: {e}. Corto en esta PC.")
+            except remoto.ServidorOcupado:
+                self.db.marcar_trabajo(t["id"], "pendiente", "El servidor de cortes está ocupado.",
+                                       proximo_intento=time.time() + 120)
+                self.actividad = "El servidor de cortes está ocupado; espero"
+                return
         if not self.ocupar():
             self.db.marcar_trabajo(t["id"], "pendiente", "Esperando: hay otra tarea en la app.",
                                    proximo_intento=time.time() + 60)
@@ -340,6 +358,61 @@ class Motor:
                 self.db.crear_subida(t["id"], cid, ruta, texto)
         self.db.marcar_trabajo(t["id"], "listo")
         self.log(f"Listo {nombre}: {len(clips)} clip(s) × {len(t['cuentas'])} cuenta(s) en cola de subida.")
+
+    # -- servidor de cortes remoto (Colab) --------------------------------
+    def _remoto_disponible(self):
+        return bool(self.cfg["remoto_url"]) and time.time() >= self._remoto_caido_hasta
+
+    def _cliente_remoto(self):
+        return remoto.Cliente(self.cfg["remoto_url"], self.cfg["remoto_clave"])
+
+    def probar_remoto(self):
+        if not self.cfg["remoto_url"]:
+            raise ValueError("Pon primero la dirección del servidor de cortes.")
+        try:
+            info = self._cliente_remoto().probar()
+        except remoto.ServidorCaido as e:
+            self._remoto_estado = f"Sin conexión: {e}"
+            raise ValueError(self._remoto_estado)
+        self._remoto_caido_hasta = 0
+        self._remoto_estado = "Conectado ✅" + (" (ocupado)" if info.get("status") == "running" else "")
+        return self._remoto_estado
+
+    def _preparar_remoto(self, t):
+        nombre = t["titulo"] or t["url"]
+        cli = self._cliente_remoto()
+        self.db.marcar_trabajo(t["id"], "cortando")
+        self._actividad(f"Cortando en el servidor remoto: {nombre}")
+        datos = dict(self.cargar_preset(t["preset"]) or {})
+        jid = cli.iniciar(t["url"], datos)
+        carpeta = os.path.join(self.carpeta, "videos_procesados", "remoto", f"trabajo_{t['id']}")
+
+        def progreso(texto):
+            self.actividad = f"Cortando en el servidor remoto: {nombre} · {texto}"
+            self._remoto_estado = "Trabajando ✅"
+
+        try:
+            clips = cli.esperar_y_bajar(jid, carpeta, progreso, cancelar=self._stop.is_set)
+        except remoto.FalloTrabajo as e:
+            intentos = t["intentos"] + 1
+            if intentos >= self.cfg["max_intentos"]:
+                self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
+                self.notificar(f"❌ Bot: no pude preparar {nombre}: {e}")
+            else:
+                espera = ESPERA_TRABAJO_MIN[min(intentos - 1, len(ESPERA_TRABAJO_MIN) - 1)]
+                self.db.marcar_trabajo(t["id"], "pendiente", str(e), intentos=intentos,
+                                       proximo_intento=time.time() + espera * 60)
+            self.log(f"El servidor remoto falló con {nombre}: {e}")
+            return
+        except remoto.ServidorCaido:
+            self.db.marcar_trabajo(t["id"], "pendiente", "Se perdió la conexión con el servidor de cortes.")
+            raise
+        for i, (ruta, publicacion) in enumerate(clips):
+            texto = self._texto(publicacion, t, i, len(clips))
+            for cid in t["cuentas"]:
+                self.db.crear_subida(t["id"], cid, ruta, texto)
+        self.db.marcar_trabajo(t["id"], "listo")
+        self.log(f"Listo (remoto) {nombre}: {len(clips)} clip(s) × {len(t['cuentas'])} cuenta(s).")
 
     @staticmethod
     def _texto(publicacion, t, i, total):
@@ -515,7 +588,8 @@ class Motor:
             c["abierta"] = navegador.ocupado(self.perfil(c))
             cuentas.append(c)
         return {
-            "config": self.cfg,
+            "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
+            "remoto": self._remoto_estado,
             "actividad": self.actividad,
             "en_horario": _en_horario(self.cfg["hora_inicio"], self.cfg["hora_fin"]),
             "cuentas": cuentas,

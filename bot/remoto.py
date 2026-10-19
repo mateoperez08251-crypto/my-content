@@ -1,0 +1,124 @@
+# -*- coding: utf-8 -*-
+"""Cliente del servidor de cortes: otra copia de Content App (p. ej. Colab con GPU) en modo
+servidor corta el video y el bot se trae los clips para subirlos desde esta PC."""
+import os
+import time
+
+import requests
+
+
+class ServidorCaido(Exception):
+    """No hay conexión (Colab apagado, enlace viejo, contraseña mala...)."""
+
+
+class ServidorOcupado(Exception):
+    pass
+
+
+class FalloTrabajo(Exception):
+    """El servidor respondió, pero el corte falló (descarga bloqueada, falta clave de Groq...)."""
+
+
+class Cliente:
+    def __init__(self, url, clave, timeout=30):
+        self.url = (url or "").strip().rstrip("/")
+        self.s = requests.Session()
+        self.s.auth = ("colab", clave or "")
+        self.s.headers["ngrok-skip-browser-warning"] = "1"
+        self.timeout = timeout
+
+    def _pedir(self, metodo, ruta, **kw):
+        try:
+            r = self.s.request(metodo, self.url + ruta, timeout=kw.pop("timeout", self.timeout), **kw)
+        except requests.RequestException as e:
+            raise ServidorCaido(type(e).__name__) from e
+        if r.status_code == 401:
+            raise ServidorCaido("contraseña incorrecta")
+        if r.status_code in (502, 503, 504) or "ngrok" in r.headers.get("server", "").lower() and r.status_code >= 400:
+            raise ServidorCaido(f"el enlace no responde (HTTP {r.status_code})")
+        return r
+
+    def _json(self, r):
+        try:
+            return r.json()
+        except ValueError:
+            raise ServidorCaido(f"respuesta rara del servidor (HTTP {r.status_code})")
+
+    def probar(self):
+        r = self._pedir("GET", "/api/health")
+        if r.status_code != 200:
+            raise ServidorCaido(f"HTTP {r.status_code}")
+        return self._json(r)
+
+    def iniciar(self, url_video, preset):
+        r = self._pedir("POST", "/api/bot/remoto/cortar", json={"source": url_video, "preset": preset})
+        d = self._json(r)
+        if r.status_code == 409:
+            raise ServidorOcupado()
+        if r.status_code == 404:
+            raise ServidorCaido("el servidor tiene una versión vieja de la app; actualízalo")
+        if not d.get("success"):
+            raise FalloTrabajo(d.get("error") or f"HTTP {r.status_code}")
+        return d["id"]
+
+    def esperar_y_bajar(self, jid, carpeta, progreso=None, cancelar=None, limite_s=4 * 3600, cada_s=10):
+        """Espera a que termine el corte, baja los clips y los borra del servidor.
+        Devuelve [(ruta_local, publicacion), ...]."""
+        fin = time.time() + limite_s
+        fallos = 0
+        while True:
+            if cancelar and cancelar():
+                raise FalloTrabajo("Bot detenido.")
+            if time.time() > fin:
+                raise FalloTrabajo("El servidor tardó más de 4 horas.")
+            try:
+                r = self._pedir("GET", f"/api/bot/remoto/{jid}")
+                fallos = 0
+            except ServidorCaido:
+                fallos += 1  # cortes cortos del túnel: se toleran unos minutos
+                if fallos >= 18:
+                    raise
+                time.sleep(cada_s)
+                continue
+            d = self._json(r)
+            if r.status_code == 404:
+                raise ServidorCaido("el servidor se reinició y perdió el trabajo")
+            if d.get("estado") == "error":
+                raise FalloTrabajo(d.get("error") or "falló el corte")
+            if d.get("estado") == "listo":
+                break
+            if progreso:
+                texto = (d.get("progreso") or "").split("|")
+                progreso(f"{texto[1]}%" if len(texto) > 1 and texto[1].lstrip("-").isdigit() else texto[0][:60])
+            time.sleep(cada_s)
+
+        if not d.get("clips"):
+            raise FalloTrabajo("El servidor no generó clips.")
+        os.makedirs(carpeta, exist_ok=True)
+        salida = []
+        for c in d["clips"]:
+            destino = os.path.join(carpeta, os.path.basename(c["nombre"]) or f"clip_{c['n']}.mp4")
+            self._bajar(f"/api/bot/remoto/{jid}/clip/{c['n']}", destino)
+            salida.append((destino, c.get("publicacion") or ""))
+        try:
+            self._pedir("DELETE", f"/api/bot/remoto/{jid}")
+        except ServidorCaido:
+            pass
+        return salida
+
+    def _bajar(self, ruta, destino, intentos=3):
+        tmp = destino + ".part"
+        for i in range(intentos):
+            try:
+                with self.s.get(self.url + ruta, stream=True, timeout=(15, 300)) as r:
+                    if r.status_code != 200:
+                        raise FalloTrabajo(f"no pude bajar un clip (HTTP {r.status_code})")
+                    with open(tmp, "wb") as f:
+                        for trozo in r.iter_content(1 << 20):
+                            f.write(trozo)
+                os.replace(tmp, destino)
+                return
+            except requests.RequestException as e:
+                if i == intentos - 1:
+                    raise ServidorCaido(f"se cortó la descarga del clip ({type(e).__name__})") from e
+                time.sleep(5)

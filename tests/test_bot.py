@@ -268,3 +268,83 @@ class Utilidades(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+try:
+    import content as _content  # app completa (Flask); se salta si faltan dependencias
+except Exception:  # pragma: no cover
+    _content = None
+
+
+@unittest.skipUnless(_content, "sin dependencias de la app")
+class ServidorDeCortes(unittest.TestCase):
+    """El bot manda el corte a otra copia de la app (como Colab) y se trae los clips."""
+
+    @classmethod
+    def setUpClass(cls):
+        import socket
+        import threading
+        from werkzeug.serving import make_server
+        cls.tmp = tempfile.TemporaryDirectory()
+
+        def falso_split(datos):
+            try:
+                rutas = []
+                for i in range(2):
+                    p = os.path.join(cls.tmp.name, f"remoto_{i}.mp4")
+                    pathlib.Path(p).write_bytes(b"clip%d" % i)
+                    rutas.append(p)
+                cls.datos_remotos = datos
+                return rutas, [{"archivo": rutas[0], "publicacion": "Desde Colab #gpu"}]
+            finally:
+                _content._terminar_trabajo()
+
+        cls.parche = mock.patch.object(_content, "run_smart_split_thread", falso_split)
+        cls.parche.start()
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            cls.puerto = s.getsockname()[1]
+        cls.srv = make_server("127.0.0.1", cls.puerto, _content.app, threaded=True)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.parche.stop()
+        cls.tmp.cleanup()
+
+    def _motor(self, url):
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        m = Motor(d, smart_split=lambda datos: self.fail("no debía cortar en local") if url.endswith(
+            str(self.puerto)) else ([self.local], []), ocupar=lambda: True, log=lambda x: None,
+            cargar_preset=lambda n: {"num_clips": 2})
+        m.guardar_cfg({"remoto_url": url, "remoto_clave": "x", "velocidad": 0})
+        cid = m.db.crear_cuenta("A", "tiktok")
+        m.db.editar_cuenta(cid, estado="ok")
+        m.encolar("https://youtu.be/abc", cuentas=[cid], titulo="Video")
+        return m
+
+    def test_corta_en_remoto_y_baja_los_clips(self):
+        m = self._motor(f"http://127.0.0.1:{self.puerto}")
+        orig = motor_mod.remoto.Cliente.esperar_y_bajar
+        with mock.patch.object(motor_mod.remoto.Cliente, "esperar_y_bajar",
+                               lambda s, jid, carpeta, progreso=None, cancelar=None:
+                               orig(s, jid, carpeta, progreso, cancelar, cada_s=0.2)):
+            self.assertTrue(m.probar_remoto().startswith("Conectado"))
+            t = m.db.siguiente_trabajo()
+            m._procesar_trabajo(t)
+        self.assertEqual(self.datos_remotos["num_clips"], 2)
+        self.assertEqual(m.db.trabajo(t["id"])["estado"], "listo")
+        subidas = sorted(m.db.subidas_recientes(), key=lambda s: s["id"])
+        self.assertEqual([pathlib.Path(s["archivo"]).read_bytes() for s in subidas], [b"clip0", b"clip1"])
+        self.assertEqual(subidas[0]["texto"], "Desde Colab #gpu")
+        m.db._con.close()
+
+    def test_si_colab_esta_apagado_corta_en_local(self):
+        self.local = os.path.join(self.tmp.name, "local.mp4")
+        pathlib.Path(self.local).write_bytes(b"l")
+        m = self._motor("http://127.0.0.1:9")  # nadie escucha
+        m._procesar_trabajo(m.db.siguiente_trabajo())
+        self.assertEqual([s["archivo"] for s in m.db.subidas_recientes()], [self.local])
+        self.assertFalse(m._remoto_disponible())  # no lo reintenta en 30 min
+        m.db._con.close()
