@@ -2504,7 +2504,7 @@
             <a href="#" class="nav-item" onclick="openVoiceClonerModal()"><i class="ph-duotone ph-microphone-stage"></i>
                 Clonador de Voz</a>
             <a href="/bot" class="nav-item"><i class="ph-duotone ph-robot"></i> Bot de subida</a>
-            <a href="#" class="nav-item" onclick="openChrome()"><i class="ph-duotone ph-browser"></i> Abrir Chrome
+            <a href="#" class="nav-item" onclick="openChrome()"><i class="ph-duotone ph-browser"></i> Abrir navegador
                 Studio</a>
             <a href="#" class="nav-item" onclick="openAudioExtractModal()"><i class="ph-duotone ph-waveform"></i>
                 Extraer Audio</a>
@@ -4428,8 +4428,10 @@
 
         // Fetch para abrir chrome
         async function openChrome() {
-            appendLog("Abriendo Chrome especial (TikTok Studio)...", "info");
-            await fetch('/api/abrir_chrome', { method: 'POST' });
+            appendLog("Abriendo el navegador especial (TikTok Studio)...", "info");
+            const r = await fetch('/api/abrir_chrome', { method: 'POST' }).then(x => x.json()).catch(() => ({}));
+            if (r.success) appendLog(`Se abrió ${r.navegador || 'el navegador'}.`, "info");
+            else appendLog(`No se pudo abrir el navegador: ${r.error || 'error desconocido'}`, "error");
         }
 
         // Monitor Toggle

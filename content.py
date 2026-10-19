@@ -1321,16 +1321,23 @@ def open_file():
 
 @app.route("/api/abrir_chrome", methods=["POST"])
 def abrir_chrome():
-    log("Abriendo Chrome especial...")
+    from bot.navegador import buscar_navegador
     base_dir = paths.data_path("chrome_tiktok")
-    args = ["cmd", "/c", "start", "", "chrome",
+    try:
+        nombre, exe = buscar_navegador("auto")  # Brave > Chrome > Edge
+    except Exception:
+        nombre, exe = "chromium", None
+    if not exe:
+        return jsonify({"success": False, "error": "No encontré Brave, Chrome ni Edge instalado."})
+    log(f"Abriendo {nombre.capitalize()} especial...")
+    args = [exe,
             "--restore-last-session", "--disable-blink-features=AutomationControlled",
             "--disable-infobars", "--remote-debugging-port=9222",
             f"--user-data-dir={base_dir}", "--profile-directory=Default",
             "https://www.tiktok.com/tiktokstudio/upload"]
     try:
         subprocess.Popen(args, **winproc.popen_kwargs())
-        return jsonify({"success": True})
+        return jsonify({"success": True, "navegador": nombre})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
