@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot de subida</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+<style>
+:root{--bg:#07080b;--panel:#111318;--borde:#23262e;--texto:#e8ecf2;--suave:#8b93a3;--acento:#00f2fe;
+--ok:#4ade80;--mal:#f87171;--aviso:#fbbf24;--azul:#60a5fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--texto);font:14px/1.45 Inter,sans-serif}
+header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--borde);
+position:sticky;top:0;background:rgba(7,8,11,.92);backdrop-filter:blur(8px);z-index:5;flex-wrap:wrap}
+header h1{font:700 20px Outfit,sans-serif;margin:0;display:flex;align-items:center;gap:8px}
+#actividad{color:var(--suave);flex:1;min-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#actividad b{color:var(--texto);font-weight:500}
+main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr));gap:16px;padding:18px 22px;max-width:1500px;margin:auto}
+.card{min-width:0;overflow-x:auto;background:var(--panel);border:1px solid var(--borde);border-radius:12px;padding:16px}
+.card h2{font:600 15px Outfit,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.card h2 small{font:400 12px Inter;color:var(--suave);margin-left:auto}
+.ancho{grid-column:1/-1}
+input,select,textarea{background:#0b0d11;border:1px solid var(--borde);color:var(--texto);border-radius:8px;
+padding:8px 10px;font:inherit;width:100%}
+textarea{resize:vertical;min-height:62px}
+label{font-size:12px;color:var(--suave);display:block;margin:8px 0 4px}
+.fila{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fila>*{flex:1}
+button{background:#1b1f27;color:var(--texto);border:1px solid var(--borde);border-radius:8px;padding:7px 12px;
+font:500 13px Inter;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto}
+button:hover{border-color:#3a3f4b}
+button.prim{background:var(--acento);color:#001014;border:0;font-weight:600}
+button.peligro:hover{border-color:var(--mal);color:var(--mal)}
+button.mini{padding:4px 8px;font-size:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{border:1px solid var(--borde);border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;user-select:none}
+.chip.on{border-color:var(--acento);color:var(--acento);background:rgba(0,242,254,.08)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--suave);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--borde)}
+td{padding:7px 8px;border-bottom:1px solid #181b22;vertical-align:top}
+td.acc{white-space:nowrap;text-align:right}
+.est{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.e-ok,.e-listo{color:var(--ok)} .e-error,.e-sin_login,.e-sin_destino{color:var(--mal)}
+.e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#555} .e-revisar{color:var(--aviso)}
+.plat{display:inline-flex;align-items:center;gap:4px}
+.muted{color:var(--suave);font-size:12px}
+.err{color:var(--mal);font-size:12px;max-width:380px;word-break:break-word}
+.tabla-scroll{max-height:420px;overflow:auto}
+#registro{background:#05060a;border:1px solid var(--borde);border-radius:8px;padding:10px;height:220px;overflow:auto;
+font:12px/1.5 ui-monospace,Consolas,monospace;color:#9ae6b4;white-space:pre-wrap}
+.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}
+.switch input{width:auto}
+.ajustes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px 12px}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1b1f27;border:1px solid var(--borde);
+padding:10px 16px;border-radius:8px;display:none;z-index:9}
+a{color:var(--acento)}
+@media(max-width:520px){main{grid-template-columns:1fr;padding:12px}header{padding:12px}}
+</style>
+</head>
+<body>
+<header>
+  <h1><i class="ph-duotone ph-robot"></i> Bot de subida</h1>
+  <div id="actividad">Cargando…</div>
+  <label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Encendido</label>
+  <a href="/"><button><i class="ph ph-arrow-left"></i> Volver</button></a>
+</header>
+
+<main>
+  <section class="card">
+    <h2><i class="ph-duotone ph-link"></i> Subir desde enlace</h2>
+    <textarea id="urls" placeholder="Pega uno o varios enlaces (uno por línea)"></textarea>
+    <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
+    <div class="chips" id="chips-url"></div>
+    <div class="fila" style="margin-top:10px">
+      <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
+      <input id="texto-url" placeholder="Texto o hashtags fijos (opcional)">
+      <button class="prim" onclick="encolar()"><i class="ph ph-plus"></i> Añadir a la cola</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><i class="ph-duotone ph-user-circle"></i> Cuentas <small>Inicia sesión una vez por cuenta</small></h2>
+    <table><thead><tr><th>Cuenta</th><th>Sesión</th><th>Hoy</th><th></th></tr></thead><tbody id="cuentas"></tbody></table>
+    <div class="fila" style="margin-top:12px">
+      <select id="c-plat" style="max-width:130px"><option value="tiktok">TikTok</option>
+        <option value="youtube">YouTube</option><option value="facebook">Facebook</option></select>
+      <input id="c-nombre" placeholder="Nombre (ej. TikTok Bromas)">
+      <input id="c-limite" type="number" min="1" value="6" style="max-width:80px" title="Máximo de subidas por día">
+      <button onclick="crearCuenta()"><i class="ph ph-plus"></i> Añadir</button>
+    </div>
+    <input id="c-url" style="margin-top:8px" placeholder="Facebook: enlace para crear Reels de tu página (opcional)">
+  </section>
+
+  <section class="card">
+    <h2><i class="ph-duotone ph-signpost"></i> Reglas: qué canal va a qué cuentas</h2>
+    <table><thead><tr><th>Canal detectado</th><th>Sube a</th><th>Preset</th><th></th></tr></thead><tbody id="reglas"></tbody></table>
+    <label>Canal (@usuario o enlace). Pon * para "cualquier otro canal"</label>
+    <input id="r-origen" placeholder="@bromaslachelchaelkuni5017 o *">
+    <div class="chips" id="chips-regla"></div>
+    <div class="fila" style="margin-top:8px">
+      <input id="r-preset" placeholder="Preset de Smart Split (vacío = el de ajustes)">
+      <input id="r-texto" placeholder="Texto fijo (opcional)">
+    </div>
+    <div class="fila" style="margin-top:8px">
+      <label class="switch"><input type="checkbox" id="r-cortar" checked> Cortar en clips</label>
+      <button onclick="guardarRegla()"><i class="ph ph-floppy-disk"></i> Guardar regla</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><i class="ph-duotone ph-sliders"></i> Ritmo humano</h2>
+    <div class="ajustes">
+      <div><label>Entre subidas de una cuenta (min)</label><div class="fila"><input id="gap_min" type="number"><input id="gap_max" type="number"></div></div>
+      <div><label>Descanso entre cualquier subida (min)</label><div class="fila"><input id="pausa_min" type="number"><input id="pausa_max" type="number"></div></div>
+      <div><label>Sube desde</label><input id="hora_inicio" type="time"></div>
+      <div><label>Hasta</label><input id="hora_fin" type="time"></div>
+      <div><label>Reintentos por subida</label><input id="max_intentos" type="number" min="1"></div>
+      <div><label>Preset por defecto</label><input id="preset"></div>
+    </div>
+    <div class="fila" style="margin-top:12px">
+      <label class="switch"><input type="checkbox" id="radar_auto"> Radar de la PC → cola</label>
+      <label class="switch"><input type="checkbox" id="firebase_auto"> Radar de la nube → cola</label>
+      <label class="switch"><input type="checkbox" id="headless"> Chrome oculto</label>
+      <button class="prim" onclick="guardarAjustes()"><i class="ph ph-floppy-disk"></i> Guardar</button>
+    </div>
+  </section>
+
+  <section class="card ancho">
+    <h2><i class="ph-duotone ph-upload-simple"></i> Subidas <small id="res-subidas"></small></h2>
+    <div class="tabla-scroll"><table><thead><tr><th>#</th><th>Cuenta</th><th>Clip</th><th>Estado</th><th>Detalle</th><th></th></tr></thead>
+    <tbody id="subidas"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2><i class="ph-duotone ph-film-reel"></i> Videos en cola <small id="res-trabajos"></small></h2>
+    <div class="tabla-scroll"><table><thead><tr><th>Video</th><th>Origen</th><th>Estado</th><th></th></tr></thead>
+    <tbody id="trabajos"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2><i class="ph-duotone ph-terminal-window"></i> Registro</h2>
+    <div id="registro"></div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
+const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
+  cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
+let E = null, selUrl = new Set(), selRegla = new Set(), editando = false;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const est = e => `<span class="est e-${esc(e)}">${NOMBRE_EST[e] || esc(e)}</span>`;
+const plat = p => `<span class="plat"><i class="ph ${ICON[p] || 'ph-globe'}"></i></span>`;
+const base = r => esc(String(r || '').split(/[\\/]/).pop());
+
+function toast(t, mal) { const el = $('toast'); el.textContent = t; el.style.color = mal ? 'var(--mal)' : '';
+  el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => el.style.display = 'none', 3500); }
+
+async function api(url, body, metodo) {
+  const r = await fetch(url, {method: metodo || (body !== undefined ? 'POST' : 'GET'),
+    headers: {'Content-Type': 'application/json'}, body: body !== undefined ? JSON.stringify(body) : undefined});
+  const j = await r.json().catch(() => ({success: false, error: 'Respuesta no válida'}));
+  if (!j.success) { toast(j.error || 'Error', true); throw new Error(j.error); }
+  return j;
+}
+
+function chips(id, sel) {
+  $(id).innerHTML = (E.cuentas || []).map(c =>
+    `<span class="chip ${sel.has(c.id) ? 'on' : ''}" data-id="${c.id}"><i class="ph ${ICON[c.plataforma]}"></i> ${esc(c.nombre)}</span>`
+  ).join('') || '<span class="muted">Primero añade una cuenta.</span>';
+  $(id).querySelectorAll('.chip').forEach(ch => ch.onclick = () => {
+    const i = +ch.dataset.id; sel.has(i) ? sel.delete(i) : sel.add(i); ch.classList.toggle('on'); });
+}
+
+function pintar() {
+  const c = E.config;
+  $('activo').checked = c.activo;
+  $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
+  if (!editando) {
+    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','preset'])
+      $(k).value = c[k];
+    for (const k of ['radar_auto','firebase_auto','headless']) $(k).checked = c[k];
+  }
+  const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
+  $('cuentas').innerHTML = E.cuentas.map(x => `<tr>
+    <td>${plat(x.plataforma)} ${esc(x.nombre)} ${x.activa ? '' : '<span class="muted">(pausada)</span>'}</td>
+    <td>${est(x.estado)} ${x.abierta ? '<span class="muted">Chrome abierto</span>' : ''}</td>
+    <td>${x.hoy}/${x.limite_dia}</td>
+    <td class="acc">
+      <button class="mini" onclick="login(${x.id})" title="Abre Chrome para iniciar sesión"><i class="ph ph-sign-in"></i> Sesión</button>
+      <button class="mini" onclick="probar(${x.id})" title="Comprueba que la sesión sigue abierta"><i class="ph ph-check-circle"></i></button>
+      <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
+      <button class="mini peligro" onclick="borrarCuenta(${x.id})"><i class="ph ph-trash"></i></button></td></tr>`
+  ).join('') || '<tr><td colspan="4" class="muted">Añade tu primera cuenta abajo.</td></tr>';
+  $('reglas').innerHTML = E.reglas.map(r => `<tr>
+    <td>${r.origen === '*' ? '<b>* cualquier otro</b>' : esc(r.origen)}</td>
+    <td>${(r.cuentas || []).map(id => nombres[id] ? `${plat(nombres[id].plataforma)} ${esc(nombres[id].nombre)}` : '').join('<br>') || '<span class="err">ninguna</span>'}</td>
+    <td>${esc(r.preset || 'por defecto')}${r.cortar ? '' : ' · sin cortar'}</td>
+    <td class="acc"><button class="mini" onclick="editarRegla(${r.id})"><i class="ph ph-pencil"></i></button>
+      <button class="mini peligro" onclick="borrarRegla(${r.id})"><i class="ph ph-trash"></i></button></td></tr>`
+  ).join('') || '<tr><td colspan="4" class="muted">Sin reglas: lo del radar no tendrá destino. Crea al menos la regla *.</td></tr>';
+  $('subidas').innerHTML = E.subidas.map(s => `<tr>
+    <td class="muted">${s.id}</td><td>${plat(s.plataforma)} ${esc(s.cuenta_nombre || '¿borrada?')}</td>
+    <td title="${esc(s.texto)}">${base(s.archivo)}</td><td>${est(s.estado)}</td>
+    <td>${s.url_publicada ? `<a href="${esc(s.url_publicada)}" target="_blank">ver</a>` : ''}
+      ${s.error ? `<div class="err">${esc(s.error)} ${s.captura ? `· <a href="/api/bot/captura/${s.id}" target="_blank">captura</a>` : ''}</div>` : ''}
+      ${s.estado === 'pendiente' && s.intentos ? `<span class="muted">intento ${s.intentos}</span>` : ''}</td>
+    <td class="acc">${s.estado === 'revisar' ? `<button class="mini" onclick="accion('subidas',${s.id},'ok')" title="Sí se publicó"><i class="ph ph-check"></i></button>` : ''}${s.estado !== 'ok' ? `<button class="mini" onclick="accion('subidas',${s.id},'reintentar')" title="Reintentar ya"><i class="ph ph-arrow-clockwise"></i></button>
+      <button class="mini peligro" onclick="accion('subidas',${s.id},'borrar')"><i class="ph ph-trash"></i></button>` : ''}</td></tr>`
+  ).join('') || '<tr><td colspan="6" class="muted">Aún no hay subidas.</td></tr>';
+  $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
+    <td><a href="${esc(t.url)}" target="_blank">${esc(t.titulo || t.url)}</a><div class="muted">${esc(t.canal)}</div>
+      ${t.error && t.estado !== 'omitido' ? `<div class="err">${esc(t.error)}</div>` : ''}</td>
+    <td class="muted">${esc(t.origen)}</td><td>${est(t.estado)}</td>
+    <td class="acc">${['error','sin_destino','omitido'].includes(t.estado) ? `<button class="mini" onclick="accion('trabajos',${t.id},'reintentar')"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
+      <button class="mini peligro" onclick="accion('trabajos',${t.id},'borrar')"><i class="ph ph-trash"></i></button></td></tr>`
+  ).join('') || '<tr><td colspan="4" class="muted">La cola está vacía.</td></tr>';
+  const rs = E.resumen.subidas || {};
+  $('res-subidas').textContent = `${rs.ok || 0} subidas · ${rs.pendiente || 0} en cola · ${rs.error || 0} con error`;
+  const rt = E.resumen.trabajos || {};
+  $('res-trabajos').textContent = `${rt.pendiente || 0} por preparar`;
+  const reg = $('registro'), abajo = reg.scrollTop + reg.clientHeight >= reg.scrollHeight - 20;
+  reg.textContent = E.registro.join('\n');
+  if (abajo) reg.scrollTop = reg.scrollHeight;
+  chips('chips-url', selUrl); chips('chips-regla', selRegla);
+}
+
+async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); } catch (e) {} }
+async function cfg(cambios) { await api('/api/bot/config', cambios); cargar(); }
+
+async function encolar() {
+  await api('/api/bot/encolar', {url: $('urls').value, cuentas: [...selUrl], cortar: $('cortar').checked,
+    texto_fijo: $('texto-url').value});
+  $('urls').value = ''; toast('Añadido a la cola'); cargar();
+}
+async function crearCuenta() {
+  await api('/api/bot/cuentas', {nombre: $('c-nombre').value, plataforma: $('c-plat').value,
+    limite_dia: +$('c-limite').value || 6, url_subida: $('c-url').value});
+  $('c-nombre').value = ''; $('c-url').value = '';
+  toast('Cuenta creada. Ahora pulsa "Sesión" para iniciar sesión.'); cargar();
+}
+async function login(id) { await api(`/api/bot/cuentas/${id}/login`, {});
+  toast('Se abrió Chrome: inicia sesión y luego cierra esa ventana.'); setTimeout(cargar, 1500); }
+async function probar(id) { await api(`/api/bot/cuentas/${id}/probar`, {}); toast('Comprobando sesión…'); }
+async function pausarCuenta(id, activa) { await api(`/api/bot/cuentas/${id}`, {activa}); cargar(); }
+async function borrarCuenta(id) { if (!confirm('¿Borrar esta cuenta y sus subidas pendientes?')) return;
+  await api(`/api/bot/cuentas/${id}`, {}, 'DELETE'); cargar(); }
+let reglaId = null;
+function editarRegla(id) { const r = E.reglas.find(x => x.id === id); if (!r) return; reglaId = r.id; $('r-origen').value = r.origen; $('r-preset').value = r.preset;
+  $('r-texto').value = r.texto_fijo; $('r-cortar').checked = !!r.cortar; selRegla = new Set(r.cuentas);
+  chips('chips-regla', selRegla); $('r-origen').focus(); }
+async function guardarRegla() {
+  await api('/api/bot/reglas', {id: reglaId, origen: $('r-origen').value, cuentas: [...selRegla],
+    preset: $('r-preset').value, texto_fijo: $('r-texto').value, cortar: $('r-cortar').checked});
+  reglaId = null; selRegla = new Set(); $('r-origen').value = $('r-preset').value = $('r-texto').value = '';
+  toast('Regla guardada'); cargar();
+}
+async function borrarRegla(id) { await api(`/api/bot/reglas/${id}`, undefined, 'DELETE'); cargar(); }
+async function accion(tipo, id, a) { await api(`/api/bot/${tipo}/${id}/${a}`, {}); cargar(); }
+async function guardarAjustes() {
+  const d = {};
+  for (const k of ['gap_min','gap_max','pausa_min','pausa_max','max_intentos']) d[k] = +$(k).value;
+  for (const k of ['hora_inicio','hora_fin','preset']) d[k] = $(k).value;
+  for (const k of ['radar_auto','firebase_auto','headless']) d[k] = $(k).checked;
+  editando = false; await cfg(d); toast('Ajustes guardados');
+}
+document.querySelectorAll('.ajustes input').forEach(i => i.addEventListener('focus', () => editando = true));
+cargar(); setInterval(cargar, 4000);
+</script>
+</body>
+</html>

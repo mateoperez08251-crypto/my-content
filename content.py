@@ -1778,11 +1778,15 @@ def run_smart_split_thread(data):
                 if _cancelado():
                     raise Exception("Cancelado.")
         log(">>> PROCESO SMART SPLIT COMPLETADO <<<")
+        return result_paths, resultado["meta"]
     except Exception as e:
         log(f"PROCESO SMART SPLIT ABORTADO: {e}")
         _escribir_progreso_smart(f"Error: {e}|-1")
+        if data.get("_lanzar_error"):
+            raise
     finally:
         _terminar_trabajo()
+    return [], []
 
 
 @app.route("/api/smart_split", methods=["POST"])
@@ -2049,6 +2053,181 @@ def get_inbox():
         return jsonify({"videos": videos})
     except Exception as e:
         return jsonify({"error": str(e)})
+
+
+# ---- Bot de subida (radar/URL -> descarga -> clips -> Chrome) ------------
+def _bot_notificar(texto):
+    """Avisa por el mismo correo/WhatsApp del radar y con una notificación de Windows."""
+    try:
+        show_notification("Bot de subida", texto[:200])
+    except Exception:
+        pass
+    try:
+        with open(paths.data_path("radar_config.json"), "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        cfg = {}
+    try:
+        from firebase_radar.local_radar import send_email, send_whatsapp  # pyrefly: ignore [missing-import]
+        if cfg.get("radar_whatsapp_phone") and cfg.get("radar_whatsapp_apikey"):
+            send_whatsapp(cfg["radar_whatsapp_phone"], cfg["radar_whatsapp_apikey"], texto)
+        if cfg.get("radar_email") and cfg.get("radar_password"):
+            send_email(cfg, "[Bot] Aviso del bot de subida", texto)
+    except Exception as e:
+        log(f"[bot] no se pudo enviar el aviso: {e}")
+
+
+def _bot_preset(nombre):
+    try:
+        with open(_presets_path(), "r", encoding="utf-8") as f:
+            presets = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return presets.get(nombre) or presets.get("default") or {}
+
+
+def _bot_descargar(url):
+    _asegurar_yt_dlp()
+    import yt_downloader
+    return yt_downloader.download_video(url, output_dir=paths.data_path("videos_descargados"),
+                                        quality="best", cancel_checker=lambda: cancel_requested)
+
+
+def _iniciar_bot():
+    from bot import motor as bot_motor
+    return bot_motor.configurar(
+        carpeta=paths.DATA_DIR, smart_split=run_smart_split_thread, descargar=_bot_descargar,
+        ocupar=_intentar_iniciar_trabajo, liberar=_terminar_trabajo, log=log,
+        notificar=_bot_notificar, firebase=lambda: firebase_db, cargar_preset=_bot_preset)
+
+
+def _bot():
+    from bot import motor as bot_motor
+    m = bot_motor.obtener()
+    if m is None:
+        m = _iniciar_bot()
+    return m
+
+
+def _bot_respuesta(fn):
+    try:
+        res = fn()
+        return jsonify({"success": True, **(res if isinstance(res, dict) else {})})
+    except (ValueError, KeyError, TypeError) as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        log(f"[bot] error en el panel: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/bot")
+def bot_panel():
+    return render_template("bot.html")
+
+
+@app.route("/api/bot/estado", methods=["GET"])
+def bot_estado():
+    return _bot_respuesta(lambda: _bot().estado())
+
+
+@app.route("/api/bot/config", methods=["POST"])
+def bot_config():
+    data = request.get_json(silent=True) or {}
+    return _bot_respuesta(lambda: _bot().guardar_cfg(data))
+
+
+@app.route("/api/bot/encolar", methods=["POST"])
+def bot_encolar():
+    data = request.get_json(silent=True) or {}
+
+    def hacer():
+        urls = [u.strip() for u in str(data.get("url", "")).replace(",", "\n").splitlines() if u.strip()]
+        if not urls:
+            raise ValueError("Pega al menos un enlace.")
+        ids = [_bot().encolar(u, origen="manual", cuentas=data.get("cuentas") or None,
+                              cortar=data.get("cortar", True), texto_fijo=data.get("texto_fijo", ""))
+               for u in urls]
+        return {"ids": ids}
+    return _bot_respuesta(hacer)
+
+
+@app.route("/api/bot/cuentas", methods=["POST"])
+def bot_cuenta_crear():
+    d = request.get_json(silent=True) or {}
+    return _bot_respuesta(lambda: {"id": _bot().db.crear_cuenta(
+        d.get("nombre"), d.get("plataforma"), d.get("limite_dia", 6), d.get("url_subida", ""))})
+
+
+@app.route("/api/bot/cuentas/<int:cid>", methods=["POST", "DELETE"])
+def bot_cuenta_editar(cid):
+    d = request.get_json(silent=True) or {}
+    if request.method == "DELETE":
+        return _bot_respuesta(lambda: _bot().db.borrar_cuenta(cid))
+    return _bot_respuesta(lambda: _bot().db.editar_cuenta(cid, **{
+        k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida")}))
+
+
+@app.route("/api/bot/cuentas/<int:cid>/login", methods=["POST"])
+def bot_cuenta_login(cid):
+    return _bot_respuesta(lambda: _bot().abrir_login(cid))
+
+
+@app.route("/api/bot/cuentas/<int:cid>/probar", methods=["POST"])
+def bot_cuenta_probar(cid):
+    def hacer():
+        threading.Thread(target=_bot().probar_sesion, args=(cid,), daemon=True).start()
+    return _bot_respuesta(hacer)
+
+
+@app.route("/api/bot/reglas", methods=["POST"])
+def bot_regla_guardar():
+    d = request.get_json(silent=True) or {}
+    return _bot_respuesta(lambda: {"id": _bot().db.guardar_regla(
+        d.get("origen"), d.get("cuentas") or [], d.get("preset", ""), d.get("texto_fijo", ""),
+        d.get("cortar", True), d.get("id"))})
+
+
+@app.route("/api/bot/reglas/<int:rid>", methods=["DELETE"])
+def bot_regla_borrar(rid):
+    return _bot_respuesta(lambda: _bot().db.borrar_regla(rid))
+
+
+@app.route("/api/bot/subidas/<int:sid>/<accion>", methods=["POST"])
+def bot_subida_accion(sid, accion):
+    def hacer():
+        if accion == "reintentar":
+            _bot().db.reintentar_subida(sid)
+            _bot().despertar()
+        elif accion == "borrar":
+            _bot().db.borrar_subida(sid)
+        elif accion == "ok":  # lo revisaste y sí se publicó
+            _bot().db.marcar_subida(sid, "ok", error="")
+        else:
+            raise ValueError("Acción no válida.")
+    return _bot_respuesta(hacer)
+
+
+@app.route("/api/bot/trabajos/<int:tid>/<accion>", methods=["POST"])
+def bot_trabajo_accion(tid, accion):
+    def hacer():
+        if accion == "reintentar":
+            _bot().db.marcar_trabajo(tid, "pendiente", intentos=0, proximo_intento=0)
+            _bot().despertar()
+        elif accion == "borrar":
+            _bot().db.borrar_trabajo(tid)
+        else:
+            raise ValueError("Acción no válida.")
+    return _bot_respuesta(hacer)
+
+
+@app.route("/api/bot/captura/<int:sid>", methods=["GET"])
+def bot_captura(sid):
+    s = _bot().db.subida(sid)
+    ruta = (s or {}).get("captura") or ""
+    carpeta = os.path.join(paths.DATA_DIR, "bot_errores")
+    if not ruta or os.path.dirname(os.path.abspath(ruta)) != os.path.abspath(carpeta) or not os.path.isfile(ruta):
+        return jsonify({"success": False, "error": "Sin captura"}), 404
+    return send_from_directory(carpeta, os.path.basename(ruta))
 
 
 @app.route("/api/start", methods=["POST"])
@@ -2320,6 +2499,14 @@ if __name__ == "__main__":
             time.sleep(1800)
 
     threading.Thread(target=start_radar, daemon=True, name="radar").start()
+
+    def _arrancar_bot():
+        try:
+            _iniciar_bot()
+        except Exception as e:
+            print(f"[bot] no arrancó: {e}")
+
+    threading.Thread(target=_arrancar_bot, daemon=True, name="bot-arranque").start()
 
     try:
         import webview  # type: ignore

@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>tiktok mock</title>
+<style>button,div[contenteditable]{display:block;min-width:200px;min-height:30px;margin:10px;border:1px solid #888}</style>
+<input type="file" accept="video/*" id="f">
+<div id="zona" style="display:none">
+  <div class="public-DraftEditor-content" contenteditable="true" id="cap">nombre_del_archivo</div>
+  <button data-e2e="post_video_button" id="post" disabled>Publicar</button>
+</div>
+<div id="ok"></div>
+<script>
+f.onchange=()=>{zona.style.display='block';setTimeout(()=>post.disabled=false,800)};
+post.onclick=()=>{window.CAPTION=cap.innerText;ok.textContent='Tu video se ha publicado'};
+</script>

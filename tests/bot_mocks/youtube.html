@@ -1,0 +1,23 @@
+<!doctype html><meta charset="utf-8"><title>yt mock</title>
+<style>*[id],tp-yt-paper-radio-button{display:block;min-width:200px;min-height:24px;margin:8px;border:1px solid #888}</style>
+<input type="file" name="Filedata" id="f">
+<div id="dlg" style="display:none">
+ <div id="title-textarea"><div id="textbox" contenteditable="true">archivo</div></div>
+ <div id="description-textarea"><div id="textbox" contenteditable="true"></div></div>
+ <tp-yt-paper-radio-button name="VIDEO_MADE_FOR_KIDS_NOT_MFK" id="nokids">No es para niños</tp-yt-paper-radio-button>
+ <button id="next-button">Siguiente</button>
+ <tp-yt-paper-radio-button name="PUBLIC" id="pub" style="display:none">Público</tp-yt-paper-radio-button>
+ <a class="ytcp-video-info" href="https://youtube.com/shorts/ABC123">link</a>
+ <button id="done-button" disabled>Publicar</button>
+</div>
+<div id="ok"></div>
+<script>
+let n=0;window.EST={};
+f.onchange=()=>{dlg.style.display='block';setTimeout(()=>document.getElementById('done-button').disabled=false,1200)};
+nokids.onclick=()=>EST.nokids=true;
+document.getElementById('next-button').onclick=()=>{n++;if(n>=3)pub.style.display='block'};
+pub.onclick=()=>EST.pub=true;
+document.getElementById('done-button').onclick=()=>{
+ const t=document.querySelectorAll('#textbox');EST.titulo=t[0].innerText;EST.desc=t[1].innerText;EST.n=n;
+ ok.textContent='Video publicado'};
+</script>

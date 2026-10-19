@@ -139,6 +139,7 @@ if exist "VideoAI" xcopy /e /i /y "VideoAI" "%DIST%\VideoAI" >nul 2>&1
 echo \venv\> exclude.txt
 echo \__pycache__\>> exclude.txt
 if exist "firebase_radar" xcopy /e /i /y /exclude:exclude.txt "firebase_radar" "%DIST%\firebase_radar" >nul 2>&1
+if exist "bot" xcopy /e /i /y /exclude:exclude.txt "bot" "%DIST%\bot" >nul 2>&1
 del exclude.txt
 
 :: Crear carpetas vacÃ­as necesarias en runtime

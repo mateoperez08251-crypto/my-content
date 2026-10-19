@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>fb mock</title>
+<style>div[role],button{display:block;min-width:200px;min-height:28px;margin:8px;border:1px solid #888}</style>
+<input type="file" accept="video/*,video/mp4" id="f">
+<div role="button" id="sig" style="display:none">Siguiente</div>
+<div id="paso2" style="display:none">
+  <div contenteditable="true" role="textbox" id="desc"></div>
+  <div role="button" id="pub">Publicar</div>
+</div>
+<div id="ok"></div>
+<script>
+f.onchange=()=>{sig.style.display='block'};
+sig.onclick=()=>{sig.style.display='none';paso2.style.display='block'};
+pub.onclick=()=>{window.DESC=desc.innerText;ok.textContent='Tu reel está publicado'};
+</script>

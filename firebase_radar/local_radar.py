@@ -297,8 +297,18 @@ def radar_monitor():
             if cfg.get("radar_whatsapp_notify") and cfg.get("radar_whatsapp_phone"):
                 send_whatsapp(cfg["radar_whatsapp_phone"], cfg.get("radar_whatsapp_apikey", ""),
                               f"🔔 {it['channel']} publicó:\n{it['title']}\n{it['link']}")
-            # Auto-pipeline: dispara Smart Split con un preset guardado
-            if cfg.get("radar_auto_clip") and it["platform"] == "youtube":
+            # Bot de subida: si está encendido, él descarga, corta y sube (con reglas y reintentos)
+            bot_activo = False
+            try:
+                from bot import motor as bot_motor  # pyrefly: ignore [missing-import]
+                m = bot_motor.obtener()
+                bot_activo = bool(m and m.cfg.get("radar_auto"))
+                if bot_activo:
+                    bot_motor.desde_radar(it)
+            except Exception as exc:
+                _log(f"Bot no disponible: {exc}")
+            # Auto-pipeline antiguo: solo si el bot no se encarga
+            if not bot_activo and cfg.get("radar_auto_clip") and it["platform"] == "youtube":
                 threading.Thread(target=_auto_clip, args=(it, cfg.get("radar_auto_preset", "default")),
                                  daemon=True).start()
     # Poda estado > 90 días para no crecer sin fin
