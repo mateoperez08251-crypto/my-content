@@ -4,6 +4,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+from contextlib import closing
 
 _guard = threading.Lock()
 
@@ -25,8 +26,10 @@ def preparar(legacy):
             source = next((p for p in (legacy, root)
                            if os.path.isfile(os.path.join(p, 'bot.db'))), None)
             if source:
-                with sqlite3.connect(os.path.join(source, 'bot.db')) as old:
-                    with sqlite3.connect(os.path.join(stage, 'bot.db')) as new:
+                # Connection.__exit__ gestiona la transacción, pero NO cierra
+                # el archivo. Windows exige liberar ambos antes de moverlo.
+                with closing(sqlite3.connect(os.path.join(source, 'bot.db'))) as old:
+                    with closing(sqlite3.connect(os.path.join(stage, 'bot.db'))) as new:
                         old.backup(new)  # Incluye las transacciones del archivo WAL.
                 config = os.path.join(source, 'bot_config.json')
                 if os.path.isfile(config):
