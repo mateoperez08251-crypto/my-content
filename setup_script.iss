@@ -9,6 +9,8 @@ OutputBaseFilename=Instalador_ContentAppPro
 Compression=lzma2/fast
 SolidCompression=yes
 PrivilegesRequired=admin
+SetupIconFile=static\icons\my-content.ico
+UninstallDisplayIcon={app}\static\icons\my-content.ico
 
 [Files]
 ; === CORE: Ejecutable compilado por PyInstaller ===
@@ -24,6 +26,8 @@ Source: "firebase_radar\*"; DestDir: "{app}\firebase_radar"; Excludes: "function
 
 ; === MÓDULOS PYTHON PRINCIPALES ===
 Source: "content.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "desktop_tray.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "windows_icon.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "modulo_ia.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "editor.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "smart_editor.py"; DestDir: "{app}"; Flags: ignoreversion
@@ -72,8 +76,8 @@ Source: "instalar_dependencias.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "instalar_git.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\ContentAppPro"; Filename: "{app}\ContentAppPro.exe"
-Name: "{commondesktop}\ContentAppPro"; Filename: "{app}\ContentAppPro.exe"; Tasks: desktopicon
+Name: "{group}\ContentAppPro"; Filename: "{app}\ContentAppPro.exe"; IconFilename: "{app}\static\icons\my-content.ico"
+Name: "{commondesktop}\ContentAppPro"; Filename: "{app}\ContentAppPro.exe"; IconFilename: "{app}\static\icons\my-content.ico"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Crear un icono en el escritorio"; GroupDescription: "Iconos adicionales:"
@@ -105,3 +109,4 @@ Name: "{app}\firebase_radar"; Permissions: users-modify
 Type: filesandordirs; Name: "{app}\temp"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: filesandordirs; Name: "{app}\uploads"
+
