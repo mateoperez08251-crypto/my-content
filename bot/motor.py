@@ -100,6 +100,8 @@ class Motor:
         self.actividad = "En espera"
         self._stop = threading.Event()
         self._despertar = threading.Event()
+        self._sesiones_guard = threading.Lock()
+        self._comprobando = set()
         self._hilo = None
         self._ultimo_firebase = 0.0
         self._libre_global = self.cfg['proxima_global']
@@ -703,7 +705,15 @@ class Motor:
         cuenta = self.db.cuenta(cid)
         if not cuenta:
             raise ValueError("Cuenta no encontrada.")
-        navegador.cerrar_normal(self.perfil(cuenta))
+        try:
+            recuperada = navegador.cerrar_normal(self.perfil(cuenta), recuperar=True, navegador=self.cfg['navegador'])
+        except Exception as error:
+            self.log(f"No pude cerrar la ventana de {cuenta['nombre']}: {error}")
+            raise
+        if recuperada:
+            # Una ventana de una ejecución anterior no tiene hilo de login.
+            self.log(f"Ventana recuperada y cerrada: {cuenta['nombre']}. Compruebo la sesión…")
+            self.solicitar_comprobacion(cid)
         return {"mensaje": "Ventana cerrada. Compruebo la sesión en segundo plano."}
 
     def abrir_login(self, cid, espera_s=45):
@@ -748,7 +758,42 @@ class Motor:
         self.log(f"Cerraste el navegador de {cuenta['nombre']}. Compruebo la sesión…")
         self.probar_sesion(cuenta["id"])
 
+    def _reservar_comprobacion(self, cid):
+        if not self.db.cuenta(cid):
+            raise ValueError('Cuenta no encontrada.')
+        with self._sesiones_guard:
+            if cid in self._comprobando:
+                return False
+            self._comprobando.add(cid)
+            return True
+
+    def solicitar_comprobacion(self, cid):
+        cid = int(cid)
+        if not self._reservar_comprobacion(cid):
+            return {'mensaje': 'Ya estoy comprobando esta cuenta. Espera a que termine.', 'en_curso': True}
+        try:
+            threading.Thread(target=self._comprobacion_reservada, args=(cid,), daemon=True,
+                             name=f'bot-sesion-{cid}').start()
+        except Exception:
+            with self._sesiones_guard:
+                self._comprobando.discard(cid)
+            raise
+        return {'mensaje': 'Comprobando sesión…', 'en_curso': True}
+
     def probar_sesion(self, cid) -> bool:
+        cid = int(cid)
+        if not self._reservar_comprobacion(cid):
+            return False
+        return self._comprobacion_reservada(cid)
+
+    def _comprobacion_reservada(self, cid):
+        try:
+            return self._comprobar_sesion(cid)
+        finally:
+            with self._sesiones_guard:
+                self._comprobando.discard(cid)
+
+    def _comprobar_sesion(self, cid) -> bool:
         cuenta = self.db.cuenta(cid)
         if not cuenta:
             raise ValueError('Cuenta no encontrada.')
@@ -770,7 +815,7 @@ class Motor:
             # Un fallo al abrir/cargar no prueba que se haya perdido la sesión.
             # Mantener bloqueada la publicación hasta lograr una comprobación.
             if navegador.es_perfil_ocupado(e):
-                motivo = ('El perfil sigue abierto. Pulsa Sesión y luego Cerrar ventana; '
+                motivo = ('El perfil sigue abierto. Pulsa Cerrar ventana; '
                           'la comprobación se hará al cerrarse. Cierra cualquier otra copia de My Content.')
             elif etapa == 'abrir':
                 motivo = 'No se pudo abrir el navegador. Ejecuta preparar_navegador_bot.bat y revisa el navegador elegido.'
@@ -789,11 +834,14 @@ class Motor:
     # -- panel ----------------------------------------------------------
     def estado(self):
         cuentas = []
+        with self._sesiones_guard:
+            comprobando = set(self._comprobando)
         for c in self.db.cuentas():
             c = dict(c)
             c["hoy"] = self.db.subidas_ok_hoy(c["id"])
             c["abierta"] = navegador.ocupado(self.perfil(c))
             c["login_abierto"] = navegador.login_abierto(self.perfil(c))
+            c["comprobando"] = c['id'] in comprobando
             cuentas.append(c)
         pendientes = self.db.subidas_pendientes()
         for s in pendientes:
