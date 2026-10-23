@@ -149,6 +149,22 @@ a{color:var(--acento)}
     </div>
   </section>
 
+  <section class="card" id="seccion-locales">
+    <h2><i class="ph-duotone ph-file-video"></i> Subir archivos de mi PC</h2>
+    <p class="ayuda">Elige videos ya terminados, la plataforma y sus cuentas. Se guardará una copia en la carpeta de datos del bot y se publicarán tal como están, sin cortar ni usar Colab.</p>
+    <label for="local-archivos">Uno o varios videos MP4 o MOV · máximo 4 GiB cada uno</label>
+    <input id="local-archivos" type="file" multiple accept=".mp4,.mov,video/mp4,video/quicktime" onchange="elegirArchivosLocales()">
+    <label for="local-plataforma">Plataforma de destino</label>
+    <select id="local-plataforma" onchange="selLocal.clear(); pintarLocales()"><option value="tiktok">TikTok</option><option value="youtube">YouTube</option><option value="facebook">Facebook</option></select>
+    <label>Cuentas de esa plataforma que recibirán cada video</label><div id="chips-locales" class="chips"></div>
+    <label for="local-texto">Texto y hashtags para estos videos (opcional)</label>
+    <textarea id="local-texto" maxlength="10000" placeholder="Si lo dejas vacío, se usa el nombre de cada video sin la extensión."></textarea>
+    <p class="muted">Cada video genera una publicación por cuenta elegida. Se respetan el horario, las pausas y el límite diario. En “Solo editar y guardar” quedan guardados sin publicarse; usa “Solo publicar los clips guardados” para subirlos.</p>
+    <div id="local-lista" class="ayuda" aria-live="polite"></div>
+    <button class="prim" id="local-enviar" onclick="encolarArchivosLocales()" disabled>Guardar y añadir a la cola</button>
+    <p class="muted">Mientras se copian, mantén la app abierta. Un reintento conserva el destino y evita duplicar el archivo en la cola. Para otro lote, vuelve a elegir archivos.</p>
+  </section>
+
   <section class="card">
     <h2><i class="ph-duotone ph-user-circle"></i> Cuentas <small>Inicia sesión una vez por cuenta</small></h2>
     <p class="muted" id="carpeta-datos" style="overflow-wrap:anywhere"></p>
@@ -241,6 +257,7 @@ const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-f
 const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',sin_comprobar:'Sin comprobar',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
   cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
+let selLocal = new Set(), archivosLocales = [], enviandoLocales = false;
 const loginPendientes = new Set();
 const cookiesPendientes = new Set();
 const cierresPendientes = new Set();
@@ -263,11 +280,12 @@ async function api(url, body, metodo) {
   return j;
 }
 
-function chips(id, sel) {
-  $(id).innerHTML = (E.cuentas || []).map(c =>
+function chips(id, sel, cuentas = E.cuentas || [], bloqueado = false) {
+  $(id).innerHTML = cuentas.map(c =>
     `<span class="chip ${sel.has(c.id) ? 'on' : ''}" data-id="${c.id}"><i class="ph ${ICON[c.plataforma]}"></i> ${esc(c.nombre)}</span>`
   ).join('') || '<span class="muted">Primero añade una cuenta.</span>';
   $(id).querySelectorAll('.chip').forEach(ch => ch.onclick = () => {
+    if (bloqueado) return;
     const i = +ch.dataset.id; sel.has(i) ? sel.delete(i) : sel.add(i); ch.classList.toggle('on'); });
 }
 
@@ -314,9 +332,9 @@ function pintar() {
       <button class="mini peligro" onclick="accion('subidas',${s.id},'borrar')"><i class="ph ph-trash"></i></button>` : ''}</td></tr>`
   ).join('') || '<tr><td colspan="6" class="muted">Aún no hay subidas.</td></tr>';
   $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
-    <td><a href="${esc(t.url)}" target="_blank">${esc(t.titulo || t.url)}</a><div class="muted">${esc(t.canal)}</div>
+    <td>${t.origen === 'local' ? esc(t.titulo) : `<a href="${esc(t.url)}" target="_blank">${esc(t.titulo || t.url)}</a>`}<div class="muted">${esc(t.canal)}</div>
       ${t.error && t.estado !== 'omitido' ? `<div class="err">${esc(t.error)}</div>` : ''}</td>
-    <td class="muted">${esc(t.origen)}<br>Preset: ${esc(t.preset)}</td><td>${est(t.estado)}</td>
+    <td class="muted">${t.origen === 'local' ? 'Archivo de tu PC · sin cortes' : `${esc(t.origen)}<br>Preset: ${esc(t.preset)}`}</td><td>${est(t.estado)}</td>
     <td class="acc">${['error','sin_destino','omitido'].includes(t.estado) ? `<button class="mini" onclick="accion('trabajos',${t.id},'reintentar')"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
       <button class="mini peligro" onclick="accion('trabajos',${t.id},'borrar')"><i class="ph ph-trash"></i></button></td></tr>`
   ).join('') || '<tr><td colspan="4" class="muted">La cola está vacía.</td></tr>';
@@ -328,6 +346,7 @@ function pintar() {
   reg.textContent = E.registro.join('\n');
   if (abajo) reg.scrollTop = reg.scrollHeight;
   chips('chips-url', selUrl); chips('chips-regla', selRegla); chips('chips-live', selLive);
+  pintarLocales();
 }
 
 async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); if (!presetCargado && Object.keys(presetsGuardados).length) iniciarPreset(); await cargarLives(); } catch (e) {} }
@@ -370,6 +389,83 @@ async function encolar() {
     texto_fijo: $('texto-url').value, preset: $('url-preset').value});
   $('urls').value = ''; toast('Añadido a la cola'); cargar();
 }
+
+function elegirArchivosLocales() {
+  archivosLocales = Array.from($('local-archivos').files || []).map(file => ({file, estado:'pendiente',
+    clave:Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join(''),
+    mensaje:'Por guardar', datos:null}));
+  pintarLocales();
+}
+
+function pintarLocales() {
+  const bloqueado = enviandoLocales || archivosLocales.some(a => a.datos);
+  $('local-archivos').disabled = enviandoLocales;
+  $('local-plataforma').disabled = bloqueado;
+  $('local-texto').disabled = bloqueado;
+  const cuentas = (E?.cuentas || []).filter(c => c.plataforma === $('local-plataforma').value);
+  selLocal = new Set([...selLocal].filter(id => cuentas.some(c => c.id === id)));
+  chips('chips-locales', selLocal, cuentas, bloqueado);
+  $('local-lista').innerHTML = archivosLocales.map(a =>
+    `<div><b>${esc(a.file.name)}</b> · ${esc(a.mensaje)}</div>`).join('');
+  $('local-enviar').disabled = enviandoLocales || !archivosLocales.some(a => a.estado !== 'guardado');
+  $('local-enviar').textContent = enviandoLocales ? 'Guardando archivos…' :
+    archivosLocales.some(a => a.estado === 'error') ? 'Reintentar pendientes' : 'Guardar y añadir a la cola';
+}
+
+function enviarArchivoLocal(item) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData(); form.append('archivo', item.file); form.append('clave', item.clave);
+    form.append('plataforma', item.datos.plataforma); form.append('cuentas', JSON.stringify(item.datos.cuentas));
+    form.append('texto', item.datos.texto);
+    const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/bot/archivos');
+    xhr.upload.onprogress = event => {
+      item.mensaje = event.lengthComputable ? `Copiando: ${Math.round(event.loaded / event.total * 100)} %` : 'Copiando…';
+      pintarLocales();
+    };
+    xhr.upload.onload = () => { item.mensaje = 'Guardando y creando la cola…'; pintarLocales(); };
+    xhr.onerror = () => reject(new Error('No se pudo confirmar el guardado. Pulsa Reintentar pendientes.'));
+    xhr.onabort = () => reject(new Error('Transferencia interrumpida. Puedes reintentar.'));
+    xhr.onload = () => {
+      let data;
+      try { data = JSON.parse(xhr.responseText); } catch (e) { reject(new Error('El servidor no confirmó el guardado. Puedes reintentar.')); return; }
+      if (xhr.status < 200 || xhr.status >= 300 || !data.success) reject(new Error(data.error || 'No se pudo guardar el video.'));
+      else resolve(data);
+    };
+    xhr.send(form);
+  });
+}
+
+async function encolarArchivosLocales() {
+  if (enviandoLocales) return;
+  const pendientes = archivosLocales.filter(a => a.estado !== 'guardado');
+  if (!pendientes.length) return;
+  if (!selLocal.size && pendientes.some(a => !a.datos)) { toast('Elige al menos una cuenta de destino.', true); return; }
+  for (const item of pendientes) {
+    if (!/\.(mp4|mov)$/i.test(item.file.name) || !item.file.size || item.file.size > 4 * 1024 ** 3) {
+      toast('Elige videos MP4 o MOV con contenido y de hasta 4 GiB cada uno.', true); return;
+    }
+  }
+  enviandoLocales = true;
+  for (const item of pendientes) {
+    item.datos ||= {plataforma:$('local-plataforma').value, cuentas:[...selLocal], texto:$('local-texto').value};
+  }
+  pintarLocales();
+  try {
+    for (const item of pendientes) {
+      item.estado = 'enviando'; item.mensaje = 'Copiando…'; pintarLocales();
+      try {
+        const result = await enviarArchivoLocal(item);
+        item.estado = 'guardado'; item.mensaje = `Guardado · ${result.publicaciones} publicación(es) en cola`;
+      } catch (error) {
+        item.estado = 'error'; item.mensaje = error.message;
+      }
+      pintarLocales();
+    }
+  } finally {
+    enviandoLocales = false; pintarLocales(); await cargar();
+  }
+}
+
 async function crearCuenta() {
   await api('/api/bot/cuentas', {nombre: $('c-nombre').value, plataforma: $('c-plat').value,
     limite_dia: +$('c-limite').value || 6, url_subida: $('c-url').value});

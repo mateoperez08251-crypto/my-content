@@ -192,6 +192,31 @@ class DB:
     def trabajo(self, tid):
         return self._uno("SELECT * FROM trabajos WHERE id=?", (int(tid),))
 
+    def trabajo_por_clave(self, clave):
+        return self._uno('SELECT * FROM trabajos WHERE clave=?', (clave,))
+
+    def encolar_local(self, clave, nombre, archivo, cuentas, plataforma, texto):
+        """El archivo ya se guardó: trabajo listo y destinos se confirman juntos.
+        Repetir una petición cuya respuesta se perdió no duplica publicaciones."""
+        ahora = time.time()
+        with self._lock, self._con:
+            anterior = self._con.execute('SELECT id FROM trabajos WHERE clave=?', (clave,)).fetchone()
+            if anterior:
+                return anterior[0], False
+            for cid in cuentas:
+                cuenta = self._con.execute('SELECT plataforma FROM cuentas WHERE id=?', (cid,)).fetchone()
+                if not cuenta or cuenta[0] != plataforma:
+                    raise ValueError('Una cuenta ya no existe o no es de la plataforma seleccionada.')
+            cur = self._con.execute(
+                "INSERT INTO trabajos(clave,url,origen,titulo,cuentas,texto_fijo,cortar,estado,creado,actualizado,archivo_local) "
+                "VALUES(?,'','local',?,?,?,0,'listo',?,?,?)",
+                (clave, nombre, json.dumps(cuentas), texto, ahora, ahora, archivo))
+            tid = cur.lastrowid
+            self._con.executemany(
+                'INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado) VALUES(?,?,?,?,?,?)',
+                [(tid, cid, archivo, texto, ahora, ahora) for cid in cuentas])
+            return tid, True
+
     def encolar_archivo_live(self, url, clave, archivo, opciones, titulo, cuentas, preset, texto_fijo=''):
         """Fuente local de confianza, creada por el capturador. Entrada idempotente."""
         ahora = time.time()
