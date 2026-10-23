@@ -142,6 +142,7 @@ a{color:var(--acento)}
     <div class="chips" id="chips-url"></div>
     <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar regla del canal o preset por defecto</option></select>
     <p class="muted">Con “Cortar” activado se usa Smart Split. Cada parte se publica una vez en cada cuenta elegida; 10 partes y 2 cuentas son 20 publicaciones.</p>
+    <p class="muted">Con “Mejores momentos con IA”, cada clip lleva su título de la IA sin guiones bajos, seguido de su descripción y hashtags.</p>
     <div class="fila" style="margin-top:10px">
       <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
       <input id="texto-url" placeholder="Texto o hashtags fijos (opcional)">
@@ -158,7 +159,7 @@ a{color:var(--acento)}
     <select id="local-plataforma" onchange="selLocal.clear(); pintarLocales()"><option value="tiktok">TikTok</option><option value="youtube">YouTube</option><option value="facebook">Facebook</option></select>
     <label>Cuentas de esa plataforma que recibirán cada video</label><div id="chips-locales" class="chips"></div>
     <label for="local-texto">Texto y hashtags para estos videos (opcional)</label>
-    <textarea id="local-texto" maxlength="10000" placeholder="Si lo dejas vacío, se usa el nombre de cada video sin la extensión."></textarea>
+    <textarea id="local-texto" maxlength="10000" placeholder="Si lo dejas vacío, se usa el nombre de cada video sin extensión y con espacios en lugar de _."></textarea>
     <p class="muted">Cada video genera una publicación por cuenta elegida. Se respetan el horario, las pausas y el límite diario. En “Solo editar y guardar” quedan guardados sin publicarse; usa “Solo publicar los clips guardados” para subirlos.</p>
     <div id="local-lista" class="ayuda" aria-live="polite"></div>
     <button class="prim" id="local-enviar" onclick="encolarArchivosLocales()" disabled>Guardar y añadir a la cola</button>

@@ -2351,6 +2351,7 @@ def remoto_cortar():
 
 @app.route("/api/bot/remoto/<jid>", methods=["GET", "DELETE"])
 def remoto_estado(jid):
+    from texto_publicacion import crear_publicacion
     with _remoto_lock:
         t = dict(_remoto_trabajos.get(jid) or {})
     if not t:
@@ -2372,7 +2373,7 @@ def remoto_estado(jid):
         pass
     por_archivo = {m.get("archivo"): m for m in t["meta"]}
     clips = [{"n": i, "nombre": os.path.basename(r), "bytes": os.path.getsize(r) if os.path.isfile(r) else 0,
-              "publicacion": (por_archivo.get(r) or {}).get("publicacion") or ""}
+              "publicacion": crear_publicacion(por_archivo.get(r) or {})}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
                     "progreso": progreso, "clips": clips})

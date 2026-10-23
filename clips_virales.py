@@ -530,8 +530,9 @@ def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print):
 
 
 def texto_publicacion(clip):
-    """Descripción lista para subir: descripción + hashtags."""
-    return f"{clip.get('descripcion', '').strip()} {' '.join(clip.get('hashtags') or [])}".strip()
+    """Título del momento, descripción y hashtags para TikTok / Shorts / Reels."""
+    from texto_publicacion import crear_publicacion
+    return crear_publicacion(clip)
 
 
 def emojis_para(frases_txt, motor="pro"):

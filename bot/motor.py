@@ -14,6 +14,7 @@ import threading
 import time
 import traceback
 from datetime import datetime
+from texto_publicacion import crear_publicacion, limpiar_titulo
 
 from . import archivos, locales, navegador, remoto
 from .planificacion import estimar
@@ -321,7 +322,7 @@ class Motor:
             cuenta = self.db.cuenta(cid)
             if not cuenta or cuenta['plataforma'] != plataforma:
                 raise ValueError('Elige cuentas de la plataforma seleccionada.')
-        texto = texto or os.path.splitext(nombre)[0]
+        texto = texto or limpiar_titulo(os.path.splitext(nombre)[0])
         carpeta, ruta = locales.guardar(self.carpeta, stream, nombre, extension)
         conservar = False
         try:
@@ -425,7 +426,7 @@ class Motor:
                 if not rutas:
                     raise RuntimeError("Smart Split no generó clips (mira el registro de la app).")
                 por_archivo = {m.get("archivo"): m for m in (meta or [])}
-                clips = [(r, (por_archivo.get(r) or {}).get("publicacion") or "") for r in rutas]
+                clips = [(r, crear_publicacion(por_archivo.get(r) or {})) for r in rutas]
             else:
                 self.db.marcar_trabajo(t["id"], "descargando")
                 self._actividad(f"Descargando: {nombre}")
@@ -562,7 +563,7 @@ class Motor:
     def _texto(publicacion, t, i, total):
         texto = (publicacion or "").strip()
         if not texto:
-            base = (t["titulo"] or "").strip() or "Mira esto"
+            base = limpiar_titulo(t["titulo"]) or "Mira esto"
             texto = f"{base} (Parte {i + 1})" if total > 1 else base
             if "#" not in texto:
                 texto += " #viral #fyp"
@@ -610,15 +611,28 @@ class Motor:
         self.db.marcar_subida(s["id"], "subiendo", intentos=s["intentos"] + 1)
         self._actividad(f"Subiendo a {nombre}: {os.path.basename(s['archivo'])}")
         captura = ""
+        confirmada = False
+        fallo_subida = None
         try:
-            with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"], navegador=self.cfg["navegador"]) as ctx:
-                page = navegador.pagina(ctx)
-                h = Humano(page, velocidad=self.cfg["velocidad"])
-                try:
-                    url = mod.subir(page, h, s["archivo"], s["texto"], cuenta["url_subida"])
-                except Exception:
-                    captura = self._captura(page, s["id"])
+            try:
+                with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"], navegador=self.cfg["navegador"]) as ctx:
+                    page = navegador.pagina(ctx)
+                    h = Humano(page, velocidad=self.cfg["velocidad"],
+                               progreso=lambda paso: self._actividad(f"{nombre}: {paso}"))
+                    try:
+                        url = mod.subir(page, h, s["archivo"], s["texto"], cuenta["url_subida"])
+                        confirmada = True
+                    except Exception as exc:
+                        fallo_subida = exc
+                        captura = self._captura(page, s["id"])
+                        raise
+            except Exception:
+                if not confirmada:
+                    # Un fallo al cerrar Playwright no debe ocultar una publicación incierta.
+                    if isinstance(fallo_subida, SinConfirmar):
+                        raise fallo_subida
                     raise
+                self.log(f"{nombre}: publicación confirmada; falló el cierre del navegador. No se repite.")
         except SesionCerrada as e:
             self.db.marcar_subida(s["id"], "pendiente", intentos=s["intentos"], error=str(e), captura=captura)
             self.db.editar_cuenta(cuenta["id"], estado="sin_login")
