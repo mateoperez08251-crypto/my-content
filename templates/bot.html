@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bot de subida</title>
+<link rel="icon" type="image/svg+xml" href="/static/icons/my-content.svg">
+<link rel="alternate icon" href="/static/icons/my-content.ico">
+<meta name="theme-color" content="#0B1525">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <style>
@@ -72,7 +75,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 </head>
 <body>
 <header>
-  <h1><i class="ph-duotone ph-robot"></i> Bot de subida</h1>
+  <h1><img src="/static/icons/bot.svg" width="32" height="32" alt=""> Bot de subida</h1>
   <div id="actividad">Cargando…</div>
   <label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Encendido</label>
   <a href="/"><button><i class="ph ph-arrow-left"></i> Volver</button></a>
@@ -253,7 +256,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
   </section>
 
   <section class="card ancho" id="avisos-bot">
-    <h2>Avisos del bot por WhatsApp y correo</h2>
+    <h2><img src="/static/icons/avisos.svg" width="28" height="28" alt=""> Avisos del bot por WhatsApp y correo</h2>
     <p class="ayuda">Usa el número, la API y el correo que ya guardaste en Radar. Las publicaciones confirmadas y los fallos tienen prioridad. Los demás eventos se agrupan; cada resumen muestra cantidades y los últimos ejemplos. Los envíos se separan al menos un minuto.</p>
     <div class="ajustes">
       <label><input type="checkbox" id="avisos_activos"> Activar avisos del bot</label>

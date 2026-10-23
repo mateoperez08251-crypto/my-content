@@ -34,6 +34,7 @@ if not getattr(sys, "frozen", False):
 if MODO_SERVIDOR:
     os.environ["CONTENTAPP_SERVIDOR"] = "1"
 
+import atexit
 import collections
 import datetime
 import faulthandler
@@ -54,6 +55,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory
 
 import paths
 import winproc
+from desktop_tray import Bandeja
 from app_secrets import get_secret
 from modulo_ia import ia_bp
 
@@ -514,26 +516,14 @@ def send_email_alert(remitente, password, destinatario, subject, body):
         return False
 
 
+_bandeja = Bandeja(paths.res_path('static', 'icons', 'my-content.png'), log=lambda texto: log(texto))
+atexit.register(_bandeja.cerrar)
+
+
 def show_notification(title, message):
-    if not winproc.ES_WINDOWS:
-        return
-    try:
-        safe_title = str(title).replace("'", "''")
-        safe_message = str(message).replace("'", "''")
-        ps_script = f"""
-        Add-Type -AssemblyName System.Windows.Forms
-        $notify = New-Object System.Windows.Forms.NotifyIcon
-        $notify.Icon = [System.Drawing.SystemIcons]::Information
-        $notify.BalloonTipIcon = 'Info'
-        $notify.BalloonTipTitle = '{safe_title}'
-        $notify.BalloonTipText = '{safe_message}'
-        $notify.Visible = $true
-        $notify.ShowBalloonTip(5000)
-        """
-        subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", ps_script],
-                         **winproc.popen_kwargs())
-    except Exception as e:
-        log(f"Error al enviar notificación: {e}")
+    if winproc.ES_WINDOWS and not MODO_SERVIDOR:
+        return _bandeja.notificar(title, message)
+    return False
 
 
 def channel_monitor_thread(data):
@@ -1119,6 +1109,11 @@ def facebook_disconnect():
 def index():
     from runtime_config import firebase_web_config
     return render_template("index.html", firebase_web_config=firebase_web_config())
+
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(paths.res_path('static', 'icons'), 'my-content.ico', mimetype='image/vnd.microsoft.icon')
 
 
 # Ventana de pywebview (se asigna al arrancar). Sus diálogos nativos son seguros
@@ -2564,6 +2559,7 @@ def mostrar_ventana():
 
 def _salir_limpio():
     global current_subprocess
+    _bandeja.cerrar()
     from bot import motor as bot_motor
     motor = bot_motor.obtener()
     if motor is not None:
@@ -2737,47 +2733,33 @@ if __name__ == "__main__":
         _window = window
 
         def on_closing():
+            if not _bandeja.disponible:
+                return True  # Sin bandeja, cerrar de verdad en vez de dejar la app invisible.
             window.hide()  # ocultar a la bandeja en lugar de cerrar
             return False
 
         window.events.closing += on_closing
 
-        def run_tray():
-            try:
-                import pystray
-                from PIL import Image, ImageDraw
+        if winproc.ES_WINDOWS:
+            from windows_icon import aplicar as aplicar_icono_ventana
+            window.events.loaded += lambda: aplicar_icono_ventana(
+                'Content App Premium', paths.res_path('static', 'icons', 'my-content.ico'), log)
 
-                def create_image():
-                    image = Image.new('RGB', (64, 64), color=(9, 17, 30))
-                    ImageDraw.Draw(image).rectangle((16, 16, 48, 48), fill=(41, 121, 255))
-                    return image
+        def show_window():
+            window.show()
+            window.restore()
 
-                def show_window(icon, item):
-                    window.show()
-
-                def quit_app(icon, item):
-                    icon.stop()
-                    try:
-                        window.destroy()
-                    except Exception:
-                        pass
-                    _salir_limpio()
-
-                menu = pystray.Menu(
-                    pystray.MenuItem("Mostrar App", show_window, default=True),
-                    pystray.MenuItem("Salir", quit_app),
-                )
-                pystray.Icon("ContentApp", create_image(), "Content App Premium", menu).run()
-            except Exception as e:
-                print("Error iniciando bandeja del sistema:", e)
-
-        threading.Thread(target=run_tray, daemon=True, name="tray").start()
+        if winproc.ES_WINDOWS:
+            _bandeja.iniciar(show_window, _salir_limpio)
         _arranque("Abriendo ventana...")
-        webview.start(private_mode=False)
+        webview.start(private_mode=False, icon=paths.res_path('static', 'icons',
+                       'my-content.ico' if winproc.ES_WINDOWS else 'my-content.png'))
         _salir_limpio()
     except ImportError:
         print("Módulo pywebview no encontrado. Abriendo en el navegador...")
         import webbrowser
+        if winproc.ES_WINDOWS:
+            _bandeja.iniciar(lambda: webbrowser.open(URL_APP), _salir_limpio)
         if not hidden_mode:
             time.sleep(1.5)
             webbrowser.open(URL_APP)
