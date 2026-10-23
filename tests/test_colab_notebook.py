@@ -9,7 +9,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -26,6 +26,89 @@ def functions_from(cell, namespace):
     tree = ast.parse(cells()[cell])
     definitions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
     exec(compile(ast.Module(body=definitions, type_ignores=[]), cell, 'exec'), namespace)
+
+
+class ColabOptionalTokenTests(unittest.TestCase):
+    def run_secrets(self, *, enabled=False, environ=None, previous=None, stored=None, entered=None):
+        userdata = Mock()
+        userdata.get.side_effect = stored or PermissionError('Secret unavailable')
+        getpass = Mock(side_effect=entered or AssertionError('Unexpected credential prompt'))
+        namespace = dict(
+            os=SimpleNamespace(environ=environ if environ is not None else {
+                'CONTENTAPP_CLAVE': 'example-password', 'GROQ_API_KEY': 'example-groq'}),
+            getpass=SimpleNamespace(getpass=getpass), DATA=Path('/tmp/example-colab'),
+            PORT=5001, PYTHON='/example/python', print=Mock(), app_env=previous or {})
+        source = cells()['secrets']
+        if enabled:
+            # The same option a user changes through the Colab checkbox.
+            source = source.replace('USAR_HF_TOKEN = False', 'USAR_HF_TOKEN = True', 1)
+        with patch.dict('sys.modules', {'google.colab': SimpleNamespace(userdata=userdata)}):
+            exec(compile(source, 'secrets', 'exec'), namespace)
+        return namespace, userdata, getpass
+
+    def test_default_ignores_inherited_and_previous_hugging_face_tokens(self):
+        namespace, userdata, getpass = self.run_secrets(
+            environ={'CONTENTAPP_CLAVE': 'example-password', 'GROQ_API_KEY': 'example-groq',
+                     'HF_TOKEN': 'bad-inherited-token', 'HUGGING_FACE_HUB_TOKEN': 'bad-legacy-token'},
+            previous={'HF_TOKEN': 'previous-token', 'CONTENTAPP_VIDEO_PYTHON': '/voice/python',
+                      'SMART_DIARIZATION_PYTHON': '/detector/python'})
+        self.assertNotIn('HF_TOKEN', namespace['app_env'])
+        self.assertNotIn('HUGGING_FACE_HUB_TOKEN', namespace['app_env'])
+        self.assertEqual(namespace['app_env']['GROQ_API_KEY'], 'example-groq')
+        self.assertEqual(namespace['app_env']['CONTENTAPP_VIDEO_PYTHON'], '/voice/python')
+        self.assertEqual(namespace['app_env']['SMART_DIARIZATION_PYTHON'], '/detector/python')
+        userdata.get.assert_not_called()
+        getpass.assert_not_called()
+        self.assertNotIn('bad-inherited-token', str(namespace['print'].call_args_list))
+
+    def test_without_colab_secret_access_only_password_and_groq_are_prompted(self):
+        namespace, userdata, getpass = self.run_secrets(
+            environ={}, entered=['example-password', 'example-groq'])
+        self.assertEqual([c.args[0] for c in userdata.get.call_args_list],
+                         ['CONTENTAPP_CLAVE', 'GROQ_API_KEY'])
+        self.assertEqual(getpass.call_count, 2)
+        self.assertEqual(namespace['app_env']['CONTENTAPP_CLAVE'], 'example-password')
+        self.assertNotIn('HF_TOKEN', namespace['app_env'])
+
+    def test_enabled_can_load_token_from_colab_without_printing_it(self):
+        namespace, userdata, getpass = self.run_secrets(
+            enabled=True, stored=lambda name: '  example-private-hf  ')
+        userdata.get.assert_called_once_with('HF_TOKEN')
+        getpass.assert_not_called()
+        self.assertEqual(namespace['app_env']['HF_TOKEN'], 'example-private-hf')
+        self.assertNotIn('example-private-hf', str(namespace['print'].call_args_list))
+
+    def test_enabled_can_skip_token_even_when_colab_denies_access(self):
+        namespace, userdata, getpass = self.run_secrets(enabled=True, entered=[''])
+        userdata.get.assert_called_once_with('HF_TOKEN')
+        getpass.assert_called_once()
+        self.assertNotIn('HF_TOKEN', namespace['app_env'])
+        self.assertIn('cortes y subtítulos', str(namespace['print'].call_args_list))
+
+    def test_enabled_accepts_hidden_entry_when_secret_is_missing(self):
+        namespace, _, _ = self.run_secrets(enabled=True, entered=['  example-entered-hf  '])
+        self.assertEqual(namespace['app_env']['HF_TOKEN'], 'example-entered-hf')
+        self.assertNotIn('example-entered-hf', str(namespace['print'].call_args_list))
+
+    def test_app_password_is_still_required(self):
+        with self.assertRaisesRegex(ValueError, 'contraseña'):
+            self.run_secrets(environ={}, entered=[''])
+
+    def test_no_voice_preparation_needs_no_token_or_model_commands(self):
+        namespace = dict(PREPARAR_DOBLAJE=False, PREPARAR_FONDO=False, app_env={},
+                         stop_app=Mock(), run=Mock(), pip_install=Mock(), print=Mock())
+        exec(compile(cells()['models'], 'models', 'exec'), namespace)
+        namespace['run'].assert_not_called()
+        namespace['pip_install'].assert_not_called()
+        self.assertIn('Preparación terminada', str(namespace['print'].call_args_list))
+
+    def test_voice_preparation_without_token_explains_how_to_skip(self):
+        namespace = dict(PREPARAR_DOBLAJE=True, PREPARAR_FONDO=False, app_env={},
+                         stop_app=Mock(), run=Mock(), pip_install=Mock(), print=Mock())
+        with self.assertRaisesRegex(ValueError, 'PREPARAR_DOBLAJE = False'):
+            exec(compile(cells()['models'], 'models', 'exec'), namespace)
+        namespace['run'].assert_not_called()
+        namespace['pip_install'].assert_not_called()
 
 
 class ColabNotebookTests(unittest.TestCase):

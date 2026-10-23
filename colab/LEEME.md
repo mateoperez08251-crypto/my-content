@@ -3,8 +3,8 @@
 Abre `My_Content_Colab.ipynb` desde **Archivo → Subir libreta** en [Google Colab](https://colab.research.google.com/).
 
 1. Selecciona una GPU en el tipo de entorno.
-2. Ejecuta las celdas 1–4. Configura `GROQ_API_KEY`, `HF_TOKEN` y una contraseña `CONTENTAPP_CLAVE` mediante Secretos de Colab o las entradas ocultas.
-3. Para cortes y subtítulos, deja `PREPARAR_DOBLAJE` y `PREPARAR_FONDO` en `False`. Si usarás doblaje, activa las opciones necesarias, acepta las condiciones de [pyannote Community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) y ejecuta la celda 5.
+2. Ejecuta las celdas 1–4. Configura `GROQ_API_KEY` y una contraseña `CONTENTAPP_CLAVE` mediante Secretos de Colab o las entradas ocultas. **Hugging Face es opcional:** deja desmarcada `USAR_HF_TOKEN` en la celda 4 para que no pida el token ni consulte ese secreto. Tampoco hereda un token del entorno al iniciar la app en este modo.
+3. Para cortes y subtítulos, deja `PREPARAR_DOBLAJE` y `PREPARAR_FONDO` en `False`, conserva el audio original y no actives Detectar hablantes. Si usarás varias voces, activa `PREPARAR_DOBLAJE`, marca `USAR_HF_TOKEN` en la celda 4, configura `HF_TOKEN`, acepta las condiciones de [pyannote Community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) y ejecuta la celda 5. El token se puede dejar vacío; solo la preparación del detector lo exige.
 4. La **celda 6** arranca la aplicación y genera el botón **Abrir My Content en otra ventana** y su URL del proxy de Colab. No requiere ngrok.
 5. Si el navegador impide abrir la URL, la celda **6B** muestra la app dentro de la libreta. La 7 muestra diagnóstico y regenera el enlace sin reiniciar.
 6. Descarga los resultados con la celda 8 y detén la app con la 9.
@@ -30,4 +30,4 @@ La libreta clona `main` del repositorio público; los cambios de Smart Split ya 
 
 El enlace solo dura mientras estén activos la libreta y el entorno. Google advierte que [abrir el proxy en otra pestaña puede fallar](https://github.com/googlecolab/colabtools/blob/main/google/colab/output/_util.py); por eso se incluye la vista iframe. También se aplican los [límites de Colab](https://research.google.com/colaboratory/faq.html), incluidas las restricciones de interfaces web en el nivel gratuito sin saldo.
 
-Validación local: `python -m unittest discover -s tests -p 'test_colab_notebook.py'`. Comprueba sintaxis, arranque mediante healthcheck, errores del proxy y ocultación de claves en el diagnóstico con servicios simulados. No equivale a una ejecución real de los modelos o del proxy de Google.
+Validación local: `python -m unittest discover -s tests -p 'test_colab_notebook.py'`. Comprueba sintaxis, claves opcionales (sin pedir Hugging Face cuando está desactivado), preparación sin voces, arranque mediante healthcheck, errores del proxy y ocultación de claves en el diagnóstico con servicios simulados. No equivale a una ejecución real de los modelos o del proxy de Google.
