@@ -1,5 +1,6 @@
 """Importa cookies de una cuenta propia; no registra ni devuelve sus valores."""
 import json
+import errno
 import math
 import time
 from urllib.parse import urlsplit
@@ -7,6 +8,37 @@ from urllib.parse import urlsplit
 MAX_BYTES = 2 * 1024 * 1024
 DOMINIOS = {'tiktok': ('tiktok.com',), 'youtube': ('youtube.com', 'google.com'),
             'facebook': ('facebook.com',)}
+
+
+def error_importacion(error, etapa):
+    """Clasifica el fallo sin devolver argumentos, rutas ni valores de cookies."""
+    detalle = str(error).lower()
+    if (getattr(error, 'errno', None) in (errno.ENOSPC, getattr(errno, 'EDQUOT', -1))
+            or getattr(error, 'winerror', None) == 112
+            or any(t in detalle for t in ('enospc', 'no space left', 'disk full',
+                                          'not enough space on the disk', 'espacio en disco insuficiente',
+                                          'winerror 112', 'disk_full'))):
+        return '[COOKIES_ESPACIO] No hay espacio para guardar el perfil. Libera espacio en el disco de datos y en el disco temporal de Windows y vuelve a importar.'
+    if isinstance(error, PermissionError) or any(t in detalle for t in ('access is denied', 'permission denied', 'eacces')):
+        return '[COOKIES_PERMISOS] Windows no permite escribir en el perfil. Revisa los permisos de la carpeta de datos de la app.'
+    if etapa == 'abrir':
+        if isinstance(error, ModuleNotFoundError) and getattr(error, 'name', '') in ('playwright', 'playwright.sync_api'):
+            return '[COOKIES_DEPENDENCIA] Falta Playwright en el Python de la app. Ejecuta preparar_navegador_bot.bat y reinicia la app.'
+        if isinstance(error, ModuleNotFoundError):
+            return '[COOKIES_DEPENDENCIA] Falta una dependencia para abrir el navegador. Repara la instalación de Playwright en el Python que ejecuta la app.'
+        if any(t in detalle for t in ('processsingleton', 'singletonlock', 'profile in use',
+                                      'user data directory is already in use', 'profile is already in use')):
+            return '[COOKIES_PERFIL_OCUPADO] El perfil sigue abierto en otro proceso. Cierra la ventana de esa cuenta y espera a que termine la comprobación de sesión.'
+        if any(t in detalle for t in ("executable doesn't exist", 'executable does not exist', 'playwright install')):
+            return '[COOKIES_NAVEGADOR_FALTA] No está instalado el navegador de automatización. Ejecuta preparar_navegador_bot.bat o selecciona el navegador instalado que usas con esta cuenta.'
+        if type(error).__name__ == 'TimeoutError':
+            return '[COOKIES_TIEMPO_ABRIR] El navegador tardó demasiado en abrir el perfil. Cierra la ventana de esa cuenta y vuelve a intentarlo.'
+        if type(error).__name__ == 'TargetClosedError' or 'target page, context or browser has been closed' in detalle:
+            return '[COOKIES_NAVEGADOR_CERRADO] El navegador se cerró al abrir el perfil. Comprueba que la cuenta no tenga otra ventana abierta y que el navegador seleccionado arranque desde Sesión.'
+        return '[COOKIES_ABRIR] No se pudo abrir el navegador para importar. Pulsa Sesión en esta cuenta para comprobar su arranque y revisa el navegador seleccionado.'
+    if any(t in detalle for t in ('invalid cookie', 'invalid parameters', 'expected ', 'failed to deserialize', 'sameparty', 'samesite')):
+        return '[COOKIES_FORMATO] El navegador rechazó los datos de las cookies. Exporta de nuevo tu cuenta en JSON o Netscape y vuelve a importar.'
+    return '[COOKIES_GUARDAR] El navegador abrió, pero no aceptó las cookies. Exporta de nuevo tu cuenta e intenta importarlas con la ventana de esa cuenta cerrada.'
 
 
 def leer(texto, plataforma):
@@ -93,3 +125,4 @@ def leer(texto, plataforma):
     if not result:
         raise ValueError('No hay cookies vigentes de esa plataforma en el archivo.')
     return result
+

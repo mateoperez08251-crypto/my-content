@@ -188,6 +188,7 @@ const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',pendiente:'En cola',subie
   cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
 const loginPendientes = new Set();
+const cookiesPendientes = new Set();
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -233,7 +234,7 @@ function pintar() {
     <td class="acc">
       <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
       <button class="mini" onclick="cerrarVentana(${x.id})" ${x.login_abierto ? '' : 'disabled'} title="Cierra la ventana de inicio de sesión y comprueba la cuenta">Cerrar ventana</button>
-      <button class="mini" onclick="importarCookies(${x.id})" title="Importar cookies de tu propia cuenta"><i class="ph ph-file-arrow-up"></i> Cookies</button>
+      <button class="mini" onclick="importarCookies(${x.id})" ${x.abierta || cookiesPendientes.has(x.id) ? 'disabled' : ''} title="Importa cookies con la ventana de esa cuenta cerrada"><i class="ph ph-file-arrow-up"></i> Cookies</button>
       <button class="mini" onclick="probar(${x.id})" title="Comprueba que la sesión sigue abierta"><i class="ph ph-check-circle"></i></button>
       <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
       <button class="mini peligro" onclick="borrarCuenta(${x.id})"><i class="ph ph-trash"></i></button></td></tr>`
@@ -336,11 +337,19 @@ async function login(id) {
   finally { loginPendientes.delete(id); cargar(); }
 }
 function importarCookies(id) {
+  if (cookiesPendientes.has(id)) return;
+  if (E?.cuentas?.find(c => c.id === id)?.abierta) {
+    toast('Cierra la ventana de esa cuenta y espera a que termine la comprobación de sesión.', true);
+    return;
+  }
   const input = document.createElement('input');
   input.type = 'file'; input.accept = '.json,.txt';
   input.onchange = async () => {
     const file = input.files[0]; if (!file) return;
     if (file.size > 2 * 1024 * 1024) { toast('El archivo no puede superar 2 MiB.', true); return; }
+    if (cookiesPendientes.has(id)) return;
+    cookiesPendientes.add(id); if (E) pintar();
+    toast('Abriendo el perfil para importar las cookies…');
     const form = new FormData(); form.append('file', file);
     try {
       const response = await fetch(`/api/bot/cuentas/${id}/cookies`, {method:'POST', body:form});
@@ -349,6 +358,7 @@ function importarCookies(id) {
       toast(`${result.importadas} cookies importadas. Pulsa Comprobar sesión o Sesión para revisarla.`);
       cargar();
     } catch (error) { toast(error.message, true); }
+    finally { cookiesPendientes.delete(id); cargar(); }
   };
   input.click();
 }

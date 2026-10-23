@@ -593,19 +593,26 @@ class Motor:
 
     # -- sesiones -------------------------------------------------------
     def importar_cookies(self, cid, texto):
-        from .cookies import leer
+        from .cookies import leer, error_importacion
         cuenta = self.db.cuenta(cid)
         if not cuenta:
             raise ValueError('Cuenta no encontrada.')
         cookies = leer(texto, cuenta['plataforma'])
+        etapa = 'abrir'
         try:
             with navegador.abrir(self.perfil(cuenta), headless=True, navegador=self.cfg['navegador']) as ctx:
+                etapa = 'guardar'
                 ctx.add_cookies(cookies)
         except navegador.PerfilOcupado:
             raise ValueError('Cierra la ventana de esa cuenta antes de importar cookies.') from None
-        except Exception:
-            # Los errores de Playwright pueden incluir los argumentos con cookies.
-            raise ValueError('No pude guardar las cookies. Revisa el navegador instalado y cierra el perfil de esa cuenta.') from None
+        except navegador.SinNavegador:
+            raise ValueError('[COOKIES_NAVEGADOR_FALTA] No se encontró el navegador de esta cuenta. Revisa el navegador seleccionado o ejecuta preparar_navegador_bot.bat.') from None
+        except Exception as error:
+            mensaje = error_importacion(error, etapa)
+            # Nunca registrar la excepción original: Playwright puede incluir
+            # los argumentos de add_cookies y sus valores en el mensaje.
+            self.log(f'Importación de cookies, cuenta {cid}: {mensaje}')
+            raise ValueError(mensaje) from None
         self.db.editar_cuenta(cid, estado='sin_login')
         self.log(f"Cookies importadas para {cuenta['nombre']}. Falta comprobar la sesión.")
         return {'importadas': len(cookies)}
