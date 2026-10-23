@@ -4,6 +4,8 @@ servidor corta el video y el bot se trae los clips para subirlos desde esta PC."
 import os
 import time
 import json
+import re
+from urllib.parse import urlsplit
 
 import requests
 from . import archivos
@@ -74,6 +76,34 @@ class Cliente:
         if not d.get("success"):
             raise FalloTrabajo(d.get("error") or f"HTTP {r.status_code}")
         return d["id"]
+
+    def cookies_youtube(self, metodo='GET', texto=None):
+        """Importar en el servidor elegido, sin redirigir credenciales ni exponer valores."""
+        url = urlsplit(self.url)
+        if url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment:
+            raise ValueError('Para las cookies de Colab usa la URL HTTPS de la celda 6C.')
+        if metodo not in ('GET', 'POST', 'DELETE'):
+            raise ValueError('Acción de cookies no válida.')
+        opciones = {'allow_redirects': False}
+        if metodo == 'POST':
+            from .cookies_descarga import a_netscape
+            opciones['files'] = {'archivo': ('cookies_youtube.txt', a_netscape(texto).encode('utf-8'), 'text/plain')}
+        r = self._pedir(metodo, '/api/cookies_youtube', **opciones)
+        if 300 <= r.status_code < 400:
+            raise ServidorCaido('El servidor redirigió la petición. Revisa la URL de la celda 6C; no se reenviaron las cookies.')
+        if r.status_code == 404:
+            raise ServidorCaido('Actualiza My Content en Colab y repite las celdas 6 y 6C.')
+        if r.status_code != 200:
+            raise ServidorCaido(f'El servidor no aceptó la operación de cookies (HTTP {r.status_code}).')
+        data = self._json(r)
+        if not isinstance(data, dict) or data.get('success') is not True or type(data.get('hay')) is not bool:
+            raise ServidorCaido('El servidor no confirmó el estado de las cookies.')
+        if (metodo == 'POST' and not data['hay']) or (metodo == 'DELETE' and data['hay']):
+            raise ServidorCaido('El servidor no confirmó el cambio de cookies.')
+        fecha = data.get('fecha') or ''
+        if not isinstance(fecha, str) or not re.fullmatch(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}', fecha):
+            fecha = ''
+        return {'hay': data['hay'], 'fecha': fecha}
 
     def esperar_y_bajar(self, jid, carpeta, progreso=None, cancelar=None, limite_s=4 * 3600, cada_s=10):
         """Espera al corte y guarda todos los clips y su manifiesto en esta PC.

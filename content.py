@@ -1183,42 +1183,27 @@ def subir_archivo():
 
 def _cookies_a_netscape(texto):
     """Acepta cookies.txt (Netscape) o el JSON de extensiones como Cookie-Editor."""
-    texto = texto.strip().lstrip("﻿")
-    if texto.startswith("["):
-        filas = ["# Netscape HTTP Cookie File"]
-        for c in json.loads(texto):
-            dominio = c.get("domain", "")
-            filas.append("\t".join([
-                dominio, "TRUE" if dominio.startswith(".") else "FALSE", c.get("path", "/"),
-                "TRUE" if c.get("secure") else "FALSE", str(int(c.get("expirationDate") or 0)),
-                c.get("name", ""), c.get("value", "")]))
-        texto = "\n".join(filas)
-    if "youtube.com" not in texto:
-        raise ValueError("El archivo no trae cookies de youtube.com. Expórtalo con youtube.com abierto y tu sesión iniciada.")
-    return texto + "\n"
+    from bot.cookies_descarga import a_netscape
+    return a_netscape(texto)
 
 
 @app.route("/api/cookies_youtube", methods=["GET", "POST", "DELETE"])
 def cookies_youtube():
-    """cookies.txt de YouTube: sin ellas YouTube bloquea descargas desde servidores (RunPod)."""
+    """Mismas cookies de descarga para Smart Split, enlaces y bot en este equipo."""
+    from bot import cookies_descarga
     ruta = paths.data_path("cookies_youtube.txt")
-    if request.method == "DELETE":
-        if os.path.exists(ruta):
-            os.remove(ruta)
-        return jsonify({"success": True, "hay": False})
-    if request.method == "POST":
-        archivo = request.files.get("archivo")
-        texto = archivo.read().decode("utf-8", "replace") if archivo else (request.form.get("texto") or "")
-        try:
-            limpio = _cookies_a_netscape(texto)
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e)}), 400
-        os.makedirs(os.path.dirname(ruta), exist_ok=True)
-        with open(ruta, "w", encoding="utf-8") as f:
-            f.write(limpio)
-    hay = os.path.isfile(ruta) and os.path.getsize(ruta) > 0
-    return jsonify({"success": True, "hay": hay,
-                    "fecha": time.strftime("%d/%m/%Y %H:%M", time.localtime(os.path.getmtime(ruta))) if hay else ""})
+    try:
+        if request.method == "DELETE":
+            estado = cookies_descarga.quitar(ruta)
+        elif request.method == "POST":
+            estado = cookies_descarga.guardar(ruta, cookies_descarga.leer_peticion(request))
+        else:
+            estado = cookies_descarga.estado(ruta)
+        return jsonify({"success": True, **estado})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except OSError:
+        return jsonify({"success": False, "error": "No se pudieron gestionar las cookies. Revisa el espacio y los permisos de la carpeta de datos."}), 500
 
 
 def _probar_groq(clave):
@@ -2202,6 +2187,32 @@ def bot_encolar():
                               preset=data.get('preset', ''))
                for u in urls]
         return {"ids": ids}
+    return _bot_respuesta(hacer)
+
+
+@app.route('/api/bot/cookies_youtube', methods=['GET', 'POST', 'DELETE'])
+def bot_cookies_youtube():
+    destino = request.args.get('destino', 'pc')
+    if destino == 'pc':
+        return cookies_youtube()
+
+    def hacer():
+        from bot import cookies_descarga
+        if destino != 'colab':
+            raise ValueError('Elige esta PC o Colab como destino de las cookies.')
+        cfg = dict(_bot().cfg)
+        url = cfg.get('remoto_url', '').strip().rstrip('/')
+        if not url or not cfg.get('remoto_clave'):
+            raise ValueError('Guarda primero la URL HTTPS y la contraseña del servidor de cortes.')
+        if request.args.get('servidor', '').strip().rstrip('/') != url:
+            raise ValueError('La URL guardada de Colab cambió. Vuelve a abrir Cookies y revisa el destino.')
+        texto = cookies_descarga.leer_peticion(request) if request.method == 'POST' else None
+        from bot.remoto import Cliente
+        cli = Cliente(url, cfg['remoto_clave'])
+        try:
+            return cli.cookies_youtube(request.method, texto)
+        finally:
+            cli.s.close()
     return _bot_respuesta(hacer)
 
 
