@@ -1,4 +1,5 @@
 import ast
+import errno
 import io
 import json
 import subprocess
@@ -87,6 +88,61 @@ class BrowserStartupTests(unittest.TestCase):
 
 
 class CookieTests(unittest.TestCase):
+    def test_import_errors_identify_stage_without_exposing_cookie_values(self):
+        secret = 'private-cookie-value-never-log'
+        casos = [
+            (OSError(errno.ENOSPC, secret), 'COOKIES_ESPACIO'),
+            (PermissionError(secret), 'COOKIES_PERMISOS'),
+            (ModuleNotFoundError(secret, name='playwright'), 'COOKIES_DEPENDENCIA'),
+            (RuntimeError('ProcessSingleton ' + secret), 'COOKIES_PERFIL_OCUPADO'),
+            (RuntimeError("Executable doesn't exist " + secret), 'COOKIES_NAVEGADOR_FALTA'),
+            (RuntimeError(secret), 'COOKIES_ABRIR'),
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            logger = Mock()
+            motor = Motor(folder, log=logger)
+            try:
+                cid = motor.db.crear_cuenta('Propia', 'tiktok')
+                motor.db.editar_cuenta(cid, estado='ok')
+                data = json.dumps([{'domain': '.tiktok.com', 'name': 'test', 'value': secret}])
+                for error, expected in casos:
+                    with self.subTest(expected=expected), patch.object(navegador, 'abrir', side_effect=error):
+                        with self.assertRaisesRegex(ValueError, expected) as exc:
+                            motor.importar_cookies(cid, data)
+                        self.assertNotIn(secret, str(exc.exception))
+                        self.assertNotIn(secret, str(logger.call_args_list))
+                        self.assertEqual(motor.db.cuenta(cid)['estado'], 'ok')
+
+                context = Mock()
+                @contextmanager
+                def opened(*args, **kwargs):
+                    yield context
+                for message, expected in [(secret, 'COOKIES_GUARDAR'),
+                                          ('Invalid cookie ' + secret, 'COOKIES_FORMATO')]:
+                    context.add_cookies.side_effect = RuntimeError(message)
+                    with patch.object(navegador, 'abrir', opened):
+                        with self.assertRaisesRegex(ValueError, expected) as exc:
+                            motor.importar_cookies(cid, data)
+                    self.assertNotIn(secret, str(exc.exception))
+                    self.assertNotIn(secret, str(logger.call_args_list))
+            finally:
+                motor.db._con.close()
+
+    def test_missing_browser_and_busy_profile_remain_specific(self):
+        with tempfile.TemporaryDirectory() as folder:
+            motor = Motor(folder)
+            try:
+                cid = motor.db.crear_cuenta('Propia', 'tiktok')
+                data = json.dumps([{'domain': '.tiktok.com', 'name': 'test', 'value': 'private-value'}])
+                for error, expected in [(navegador.SinNavegador('private-value'), 'COOKIES_NAVEGADOR_FALTA'),
+                                        (navegador.PerfilOcupado('private-value'), 'Cierra la ventana')]:
+                    with patch.object(navegador, 'abrir', side_effect=error):
+                        with self.assertRaisesRegex(ValueError, expected) as exc:
+                            motor.importar_cookies(cid, data)
+                        self.assertNotIn('private-value', str(exc.exception))
+            finally:
+                motor.db._con.close()
+
     def test_json_filters_foreign_domains_and_normalizes_export(self):
         data = [{'domain': '.youtube.com', 'name': 'test', 'value': 'fake-session',
                  'sameSite':'no_restriction', 'expirationDate':4102444800, 'secure':True},
@@ -165,3 +221,4 @@ class CookieAPITests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
