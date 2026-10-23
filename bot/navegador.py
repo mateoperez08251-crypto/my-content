@@ -61,7 +61,7 @@ def _recuperar_login(perfil, ejecutable):
     try:
         import psutil
     except ImportError:
-        raise SinNavegador('Chrome pasó la ventana a otro proceso y falta psutil para seguirla. '
+        raise SinNavegador('Falta psutil para identificar la ventana del perfil. '
                            'Ejecuta preparar_navegador_bot.bat y reinicia la app.') from None
     candidatos = []
     for proc in psutil.process_iter(['exe', 'cmdline']):
@@ -96,40 +96,62 @@ def login_abierto(perfil):
         return os.path.abspath(perfil) in _logins
 
 
-def cerrar_normal(perfil, espera_s=10):
-    """Solo cierra el proceso de login de esta cuenta; nunca una subida."""
-    with _logins_guard:
-        proc = _logins.get(os.path.abspath(perfil))
-        if proc is None or proc.poll() is not None:
-            raise ValueError('No hay una ventana de inicio de sesión abierta para esta cuenta.')
-        if os.name == 'nt':
-            # WM_CLOSE permite que Chromium guarde cookies y cierre sin taskkill.
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.windll.user32
-            callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-            user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-            user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
-            sent = []
-            @callback_type
-            def close_window(hwnd, _):
-                pid = wintypes.DWORD()
-                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                if pid.value == proc.pid:
-                    sent.append(bool(user32.PostMessageW(hwnd, 0x0010, 0, 0)))
-                return True
-            user32.EnumWindows(close_window, 0)
-            if not any(sent):
-                raise ValueError('No pude cerrar la ventana. Ciérrala con la X del navegador.')
-        else:
-            proc.terminate()
-    # No mantener el registro bloqueado mientras el hilo de login termina.
-    # WM_CLOSE es asíncrono: enviarlo no significa que la ventana se cerró.
+def _cerrar_proceso(proc, espera_s):
+    """Cierre normal del PID comprobado; esperar antes de anunciar éxito."""
+    if os.name == 'nt':
+        # WM_CLOSE permite que Chromium guarde cookies y cierre sin taskkill.
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+        sent = []
+        @callback_type
+        def close_window(hwnd, _):
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value == proc.pid:
+                sent.append(bool(user32.PostMessageW(hwnd, 0x0010, 0, 0)))
+            return True
+        user32.EnumWindows(close_window, 0)
+        if not any(sent):
+            raise ValueError('Encontré el proceso del perfil, pero no una ventana que acepte el cierre. '
+                             'Revisa si Chrome muestra un aviso y cierra la ventana de esa cuenta con la X.')
+    else:
+        proc.terminate()
     try:
         proc.wait(timeout=espera_s)
     except subprocess.TimeoutExpired:
         raise ValueError('El navegador todavía no se ha cerrado. Revisa si su ventana muestra un aviso y ciérrala con la X. No se forzó el cierre del perfil.') from None
+
+
+def cerrar_normal(perfil, espera_s=10, *, recuperar=False, navegador="auto"):
+    """Cierra la ventana registrada o recupera el perfil exacto de esta cuenta.
+    Devuelve True si no había hilo de login encargado de comprobar al cerrar."""
+    with _logins_guard:
+        proc = _logins.get(os.path.abspath(perfil))
+    if proc is not None and proc.poll() is None:
+        _cerrar_proceso(proc, espera_s)
+        return False
+    if not recuperar:
+        raise ValueError('No hay una ventana de inicio de sesión abierta para esta cuenta.')
+    lk = _lock(perfil)
+    if not lk.acquire(blocking=False):
+        raise PerfilOcupado('El bot está usando esta cuenta para comprobar o subir. Espera a que termine.')
+    try:
+        _, ruta = _ejecutable_login(navegador)
+        proc = _recuperar_login(perfil, ruta)
+        if proc is None or proc.poll() is not None:
+            raise ValueError('No encontré una ventana normal de esta cuenta para cerrar. '
+                             'Revisa el navegador elegido y cierra cualquier otra copia de My Content. '
+                             'Si no hay ventanas abiertas, pulsa Comprobar sesión.')
+        _cerrar_proceso(proc, espera_s)
+        time.sleep(2)  # Dejar que el perfil termine de guardar sus datos.
+        return True
+    finally:
+        lk.release()
 
 
 ARGS = [
@@ -199,7 +221,7 @@ def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False, naveg
             except Exception as e:
                 if es_perfil_ocupado(e):
                     raise PerfilOcupado('El perfil de esta cuenta sigue abierto en otro proceso. '
-                                        'Pulsa Sesión para recuperar su ventana y luego Cerrar ventana. '
+                                        'Pulsa Cerrar ventana para buscar la ventana de ese perfil. '
                                         'Cierra también cualquier otra copia de My Content.') from None
                 if not ruta and "executable" in str(e).lower():
                     raise SinNavegador("No hay Brave, Chrome ni Edge instalado, y falta el Chromium de "
@@ -229,9 +251,7 @@ def pagina(ctx):
     return page
 
 
-def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int = 30 * 60, al_abrir=None):
-    """Abre el navegador como un programa normal (sin automatización) con el perfil de la cuenta,
-    para iniciar sesión a mano. Espera a que lo cierres. Devuelve el nombre del navegador."""
+def _ejecutable_login(navegador):
     nombre, ruta = buscar_navegador(navegador)
     if not ruta:
         # La automatización también permite Chromium. Su ventana de login debe
@@ -245,6 +265,13 @@ def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int =
         except (ImportError, FileNotFoundError) as e:
             raise SinNavegador("No encontré Brave, Chrome, Edge ni Chromium. Instala Chrome o "
                                "ejecuta python -m playwright install chromium en el entorno de la app.") from e
+    return nombre, ruta
+
+
+def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int = 30 * 60, al_abrir=None):
+    """Abre el navegador como un programa normal (sin automatización) con el perfil de la cuenta,
+    para iniciar sesión a mano. Espera a que lo cierres. Devuelve el nombre del navegador."""
+    nombre, ruta = _ejecutable_login(navegador)
     lk = _lock(perfil)
     if not lk.acquire(blocking=False):
         raise PerfilOcupado("El navegador de esa cuenta ya está abierto.")

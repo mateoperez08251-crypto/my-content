@@ -2270,9 +2270,7 @@ def bot_cuenta_cookies(cid):
 
 @app.route("/api/bot/cuentas/<int:cid>/probar", methods=["POST"])
 def bot_cuenta_probar(cid):
-    def hacer():
-        threading.Thread(target=_bot().probar_sesion, args=(cid,), daemon=True).start()
-    return _bot_respuesta(hacer)
+    return _bot_respuesta(lambda: _bot().solicitar_comprobacion(cid))
 
 
 @app.route("/api/bot/reglas", methods=["POST"])

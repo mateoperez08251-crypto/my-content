@@ -261,6 +261,7 @@ let selLocal = new Set(), archivosLocales = [], enviandoLocales = false;
 const loginPendientes = new Set();
 const cookiesPendientes = new Set();
 const cierresPendientes = new Set();
+const pruebasPendientes = new Set();
 let presetsGuardados = {}, presetBase = {}, presetCargado = false;
 
 const $ = id => document.getElementById(id);
@@ -305,13 +306,13 @@ function pintar() {
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
   $('cuentas').innerHTML = E.cuentas.map(x => `<tr>
     <td>${plat(x.plataforma)} ${esc(x.nombre)} ${x.activa ? '' : '<span class="muted">(pausada)</span>'}</td>
-    <td>${est(x.estado)} ${x.abierta ? '<span class="muted">Navegador abierto</span>' : ''}</td>
+    <td>${x.comprobando || pruebasPendientes.has(x.id) ? '<span class="muted">Comprobando…</span>' : est(x.estado)} ${x.abierta ? '<span class="muted">Navegador abierto</span>' : ''}</td>
     <td>${x.hoy}/${x.limite_dia}</td>
     <td class="acc">
       <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
-      <button class="mini" onclick="cerrarVentana(${x.id})" ${x.login_abierto && !cierresPendientes.has(x.id) ? '' : 'disabled'} title="Cierra la ventana de inicio de sesión y comprueba la cuenta">${cierresPendientes.has(x.id) ? 'Cerrando…' : 'Cerrar ventana'}</button>
+      <button class="mini" onclick="cerrarVentana(${x.id})" ${puedeCerrar(x) ? '' : 'disabled'} title="Busca y cierra la ventana del perfil de esta cuenta, incluso si quedó abierta al reiniciar la app">${cierresPendientes.has(x.id) ? 'Cerrando…' : 'Cerrar ventana'}</button>
       <button class="mini" onclick="importarCookies(${x.id})" ${x.abierta || cookiesPendientes.has(x.id) ? 'disabled' : ''} title="Importa cookies con la ventana de esa cuenta cerrada"><i class="ph ph-file-arrow-up"></i> Cookies</button>
-      <button class="mini" onclick="probar(${x.id})" ${x.abierta ? 'disabled' : ''} title="Cierra la ventana de sesión antes de comprobar; si pasa, la cuenta figura como Listo"><i class="ph ph-check-circle"></i> Comprobar sesión</button>
+      <button class="mini" onclick="probar(${x.id})" ${x.abierta || x.comprobando || pruebasPendientes.has(x.id) || cierresPendientes.has(x.id) ? 'disabled' : ''} title="Cierra la ventana de sesión antes de comprobar; si pasa, la cuenta figura como Listo"><i class="ph ph-check-circle"></i> ${x.comprobando || pruebasPendientes.has(x.id) ? 'Comprobando…' : 'Comprobar sesión'}</button>
       <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
       <button class="mini peligro" onclick="borrarCuenta(${x.id})"><i class="ph ph-trash"></i></button></td></tr>`
   ).join('') || '<tr><td colspan="4" class="muted">Añade tu primera cuenta abajo.</td></tr>';
@@ -472,8 +473,13 @@ async function crearCuenta() {
   $('c-nombre').value = ''; $('c-url').value = '';
   toast('Cuenta creada. Ahora pulsa "Sesión" para iniciar sesión.'); cargar();
 }
+function puedeCerrar(cuenta) {
+  return !cierresPendientes.has(cuenta.id) && !pruebasPendientes.has(cuenta.id) && !cuenta.comprobando &&
+    (!cuenta.abierta || cuenta.login_abierto);
+}
 async function cerrarVentana(id) {
-  if (cierresPendientes.has(id)) return;
+  const cuenta = E?.cuentas?.find(c => c.id === id);
+  if (!cuenta || !puedeCerrar(cuenta)) return;
   cierresPendientes.add(id); if (E) pintar();
   toast('Cerrando la ventana de esa cuenta…');
   try {
@@ -519,7 +525,17 @@ function importarCookies(id) {
   };
   input.click();
 }
-async function probar(id) { await api(`/api/bot/cuentas/${id}/probar`, {}); toast('Comprobando sesión…'); }
+async function probar(id) {
+  const cuenta = E?.cuentas?.find(c => c.id === id);
+  if (!cuenta || cuenta.abierta || cuenta.comprobando || pruebasPendientes.has(id) || cierresPendientes.has(id)) return;
+  pruebasPendientes.add(id); pintar();
+  try {
+    const j = await api(`/api/bot/cuentas/${id}/probar`, {});
+    if (j.en_curso) cuenta.comprobando = true;
+    toast(j.mensaje || 'Comprobando sesión…');
+  } catch (e) { /* api ya muestra el error */ }
+  finally { pruebasPendientes.delete(id); await cargar(); }
+}
 async function pausarCuenta(id, activa) { await api(`/api/bot/cuentas/${id}`, {activa}); cargar(); }
 async function borrarCuenta(id) { if (!confirm('¿Borrar esta cuenta y sus subidas pendientes?')) return;
   await api(`/api/bot/cuentas/${id}`, {}, 'DELETE'); cargar(); }
