@@ -8,6 +8,8 @@ from contextlib import contextmanager
 
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
+_logins = {}
+_logins_guard = threading.Lock()
 
 
 class PerfilOcupado(Exception):
@@ -21,6 +23,41 @@ def _lock(perfil):
 
 def ocupado(perfil) -> bool:
     return _lock(perfil).locked()
+
+
+def login_abierto(perfil):
+    with _logins_guard:
+        return os.path.abspath(perfil) in _logins
+
+
+def cerrar_normal(perfil):
+    """Solo cierra el proceso de login de esta cuenta; nunca una subida."""
+    with _logins_guard:
+        proc = _logins.get(os.path.abspath(perfil))
+        if proc is None or proc.poll() is not None:
+            raise ValueError('No hay una ventana de inicio de sesión abierta para esta cuenta.')
+        if os.name == 'nt':
+            # WM_CLOSE permite que Chromium guarde cookies y cierre sin taskkill.
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+            sent = []
+            @callback_type
+            def close_window(hwnd, _):
+                pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value == proc.pid:
+                    sent.append(bool(user32.PostMessageW(hwnd, 0x0010, 0, 0)))
+                return True
+            user32.EnumWindows(close_window, 0)
+            if not any(sent):
+                raise ValueError('No pude cerrar la ventana. Ciérrala con la X del navegador.')
+        else:
+            proc.terminate()
 
 
 ARGS = [
@@ -145,7 +182,7 @@ def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int =
             inicio.wShowWindow = 1
             opciones["startupinfo"] = inicio
         proc = subprocess.Popen([ruta, f"--user-data-dir={os.path.abspath(perfil)}", "--no-first-run",
-                                 "--no-default-browser-check", "--new-window", url], **opciones)
+                                 "--no-default-browser-check", "--disable-background-mode", "--new-window", url], **opciones)
         # Popen solo confirma que se creó el proceso. No anunciar éxito si el
         # navegador falla enseguida (perfil bloqueado, ejecutable roto, etc.).
         inicio_s = min(0.75, limite_s)
@@ -157,13 +194,19 @@ def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int =
             raise SinNavegador(f"{nombre.capitalize()} terminó al iniciar (código {codigo}). "
                                "Cierra las ventanas del perfil del bot y vuelve a pulsar Sesión. "
                                "Si la app corre en otra PC, la ventana se abre allí.")
+        with _logins_guard:
+            _logins[os.path.abspath(perfil)] = proc
         if al_abrir:
             al_abrir(nombre, ruta)
         try:
             proc.wait(timeout=max(0.1, limite_s - inicio_s))
         except subprocess.TimeoutExpired:
-            proc.terminate()
+            cerrar_normal(perfil)
+            proc.wait(timeout=30)
         time.sleep(2)  # que el navegador termine de guardar las cookies
         return nombre
     finally:
+        with _logins_guard:
+            _logins.pop(os.path.abspath(perfil), None)
         lk.release()
+

@@ -230,6 +230,7 @@ function pintar() {
     <td>${x.hoy}/${x.limite_dia}</td>
     <td class="acc">
       <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
+      <button class="mini" onclick="cerrarVentana(${x.id})" ${x.login_abierto ? '' : 'disabled'} title="Cierra la ventana de inicio de sesión y comprueba la cuenta">Cerrar ventana</button>
       <button class="mini" onclick="importarCookies(${x.id})" title="Importar cookies de tu propia cuenta"><i class="ph ph-file-arrow-up"></i> Cookies</button>
       <button class="mini" onclick="probar(${x.id})" title="Comprueba que la sesión sigue abierta"><i class="ph ph-check-circle"></i></button>
       <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
@@ -314,6 +315,14 @@ async function crearCuenta() {
   $('c-nombre').value = ''; $('c-url').value = '';
   toast('Cuenta creada. Ahora pulsa "Sesión" para iniciar sesión.'); cargar();
 }
+async function cerrarVentana(id) {
+  try {
+    const j = await api(`/api/bot/cuentas/${id}/cerrar`, {});
+    toast(j.mensaje);
+    await cargar();
+  } catch (e) { toast(e.message, true); }
+}
+
 async function login(id) {
   if (loginPendientes.has(id)) return;
   loginPendientes.add(id); if (E) pintar();
@@ -382,3 +391,4 @@ cargarPresets(); cargar(); setInterval(cargar, 4000);
 </script>
 </body>
 </html>
+
