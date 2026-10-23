@@ -4,7 +4,12 @@ import base64
 import html
 import io
 import json
+import hashlib
+import os
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import tempfile
 import time
 from types import SimpleNamespace
@@ -206,22 +211,151 @@ class ColabNotebookTests(unittest.TestCase):
         success.status = 200
         opener = Mock(side_effect=[urllib.error.HTTPError('https://example.test',401,'auth',{},None), success])
         self.namespace['urllib'] = SimpleNamespace(request=SimpleNamespace(
-            Request=urllib.request.Request, urlopen=opener), error=urllib.error)
+            Request=urllib.request.Request, HTTPRedirectHandler=urllib.request.HTTPRedirectHandler,
+            build_opener=Mock(return_value=SimpleNamespace(open=opener))), error=urllib.error)
         self.namespace['check_bot_url']('https://example.test')
         first, second = [c.args[0] for c in opener.call_args_list]
         self.assertIsNone(first.get_header('Authorization'))
         self.assertEqual(base64.b64decode(second.get_header('Authorization')[6:]).decode(),
                          'colab:example-private-value')
         self.assertEqual(second.full_url,'https://example.test/api/health')
+        self.assertIsNone(second.get_header('Ngrok-skip-browser-warning'))
+        handler = self.namespace['urllib'].request.build_opener.call_args.args[0]
+        self.assertIsNone(handler.redirect_request(second, None, 302, 'redirect', {}, 'https://other.test'))
 
     def test_tunnel_refuses_app_without_password(self):
         functions_from('bot-tunnel', self.namespace)
         response=io.BytesIO(b'{"ok":true}')
         response.status=200
         self.namespace['urllib'] = SimpleNamespace(request=SimpleNamespace(
-            Request=urllib.request.Request, urlopen=Mock(return_value=response)), error=urllib.error)
+            Request=urllib.request.Request, HTTPRedirectHandler=urllib.request.HTTPRedirectHandler,
+            build_opener=Mock(return_value=SimpleNamespace(open=Mock(return_value=response)))), error=urllib.error)
         with self.assertRaisesRegex(RuntimeError,'no exige contraseña'):
             self.namespace['check_bot_url']('https://example.test')
+
+
+class ColabCloudflareTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.proc = Mock()
+        self.proc.poll.return_value = None
+        self.namespace = dict(ROOT=self.root, PORT=5001, Path=Path, re=re, os=os, shutil=shutil,
+                              hashlib=hashlib, subprocess=subprocess, urllib=urllib, base64=base64,
+                              json=json, time=time, print=Mock(), bot_tunnel_process=self.proc,
+                              bot_tunnel_url='https://old.trycloudflare.com',
+                              app_env={'CONTENTAPP_CLAVE': 'example-private-value'},
+                              platform=SimpleNamespace(system=lambda: 'Linux', machine=lambda: 'x86_64'))
+        functions_from('bot-tunnel', self.namespace)
+        self.log = self.root / 'cloudflared-bot.log'
+        self.log.write_text('Your quick Tunnel has been created!\n| https://sample-link.trycloudflare.com |\n')
+
+    def clock(self, ticks):
+        self.namespace['time'] = SimpleNamespace(monotonic=Mock(side_effect=ticks), sleep=Mock())
+
+    def test_cloudflare_retries_until_url_reaches_authenticated_app(self):
+        check = self.namespace['check_bot_url'] = Mock(side_effect=[
+            urllib.error.URLError('not ready'),
+            urllib.error.HTTPError('https://sample-link.trycloudflare.com', 502, 'not ready', {}, None),
+            None])
+        self.clock([0, 1, 2, 3])
+        url = self.namespace['wait_for_bot_tunnel'](self.proc, self.log)
+        self.assertEqual(url, 'https://sample-link.trycloudflare.com')
+        self.assertEqual(check.call_count, 3)
+
+    def test_tunnel_timeout_does_not_report_success_or_raw_error(self):
+        self.namespace['check_bot_url'] = Mock(side_effect=urllib.error.URLError('example-private-value'))
+        self.clock([0, 1, 121])
+        with self.assertRaisesRegex(RuntimeError, 'no quedó listo') as error:
+            self.namespace['wait_for_bot_tunnel'](self.proc, self.log)
+        self.assertNotIn('example-private-value', str(error.exception))
+
+    def test_only_cloudflare_host_from_log_is_accepted(self):
+        self.log.write_text('https://evil.test https://good.trycloudflare.com.evil.test https://trycloudflare.com\n')
+        self.namespace['check_bot_url'] = Mock()
+        self.clock([0, 1, 121])
+        with self.assertRaisesRegex(RuntimeError, 'no quedó listo'):
+            self.namespace['wait_for_bot_tunnel'](self.proc, self.log)
+        self.namespace['check_bot_url'].assert_not_called()
+
+    def test_early_process_exit_stops_waiting(self):
+        self.proc.poll.return_value = 1
+        self.clock([0, 1])
+        with self.assertRaisesRegex(RuntimeError, 'cloudflared se cerró'):
+            self.namespace['wait_for_bot_tunnel'](self.proc, self.log)
+
+    def test_stop_waits_for_only_its_own_process(self):
+        self.namespace['stop_bot_tunnel']()
+        self.proc.terminate.assert_called_once()
+        self.proc.kill.assert_not_called()
+        self.proc.wait.assert_called_once_with(timeout=8)
+        self.assertIsNone(self.namespace['bot_tunnel_process'])
+        self.assertIsNone(self.namespace['bot_tunnel_url'])
+        self.namespace['stop_bot_tunnel']()  # Safe to call twice, as cells 6 and 9 do.
+        self.proc.terminate.assert_called_once()
+
+    def test_stop_kills_only_own_process_if_graceful_exit_times_out(self):
+        self.proc.wait.side_effect = [subprocess.TimeoutExpired('cloudflared', 8), None]
+        self.namespace['stop_bot_tunnel']()
+        self.proc.kill.assert_called_once()
+        self.assertIsNone(self.namespace['bot_tunnel_process'])
+
+    def test_start_closes_previous_tunnel_and_opens_cloudflare_on_app_port(self):
+        self.namespace['install_cloudflared'] = Mock(return_value=self.root / 'cloudflared')
+        self.namespace['wait_for_bot_tunnel'] = Mock(return_value='https://new.trycloudflare.com')
+        new_proc = Mock()
+        with patch.object(subprocess, 'Popen', return_value=new_proc) as popen:
+            url = self.namespace['start_bot_tunnel']()
+        self.proc.terminate.assert_called_once()
+        args = popen.call_args.args[0]
+        self.assertEqual(args[-2:], ['--url', 'http://127.0.0.1:5001'])
+        self.assertIn('http2', args)
+        self.assertNotIn('--token', args)
+        self.assertNotIn('example-private-value', str(args))
+        self.assertEqual((self.root / 'cloudflared-bot-empty.yml').read_text(), '{}\n')
+        self.assertEqual(self.namespace['bot_tunnel_process'], new_proc)
+        self.assertEqual(url, 'https://new.trycloudflare.com')
+
+    def test_failed_or_interrupted_start_closes_process_without_success_message(self):
+        for error in (RuntimeError('not ready'), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__):
+                self.namespace['bot_tunnel_process'] = None
+                self.namespace['print'].reset_mock()
+                self.namespace['install_cloudflared'] = Mock(return_value=self.root / 'cloudflared')
+                self.namespace['wait_for_bot_tunnel'] = Mock(side_effect=error)
+                new_proc = Mock()
+                new_proc.poll.return_value = None
+                with patch.object(subprocess, 'Popen', return_value=new_proc):
+                    with self.assertRaises(type(error)):
+                        self.namespace['start_bot_tunnel']()
+                new_proc.terminate.assert_called_once()
+                self.assertIsNone(self.namespace['bot_tunnel_url'])
+                self.assertNotIn('URL para Servidor', str(self.namespace['print'].call_args_list))
+
+    def test_corrupt_cloudflared_download_is_not_installed(self):
+        with patch.object(urllib.request, 'urlopen', return_value=io.BytesIO(b'broken binary')):
+            with self.assertRaisesRegex(RuntimeError, 'incompleta'):
+                self.namespace['install_cloudflared']()
+        self.assertFalse(list(self.root.glob('cloudflared-*-linux-*')))
+        self.assertFalse(list(self.root.glob('*.part')))
+
+    def test_existing_binary_is_reused_only_if_hash_matches(self):
+        binary = self.root / 'cloudflared-2026.10.3-linux-amd64'
+        binary.write_bytes(b'example binary')
+        digest = Mock()
+        digest.hexdigest.return_value = '053b80b0a23031a038fdbf3c073f59f82b8f1f152aa67971d7383ffafc0dbab0'
+        self.namespace['hashlib'] = SimpleNamespace(sha256=lambda: digest)
+        with patch.object(urllib.request, 'urlopen') as download:
+            self.assertEqual(self.namespace['install_cloudflared'](), binary)
+        download.assert_not_called()
+        digest.update.assert_called_once_with(b'example binary')
+
+    def test_app_stop_also_stops_tunnel(self):
+        functions_from('config', self.namespace)
+        self.namespace['app_process'] = None
+        self.namespace['stop_app']()
+        self.proc.terminate.assert_called_once()
 
 
 if __name__ == '__main__':

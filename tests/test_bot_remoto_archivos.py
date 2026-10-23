@@ -7,6 +7,48 @@ from unittest.mock import Mock, patch
 from bot import archivos, remoto
 
 
+class ConexionCloudflareTests(unittest.TestCase):
+    def setUp(self):
+        self.cliente = remoto.Cliente('https://sample.trycloudflare.com', 'clave-de-prueba')
+        self.addCleanup(self.cliente.s.close)
+
+    def test_conexion_cloudflare_usa_clave_de_app(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {'ok': True, 'status': 'idle'}
+        with patch.object(self.cliente.s, 'request', return_value=response) as request:
+            self.assertTrue(self.cliente.probar()['ok'])
+        self.assertEqual(request.call_args.args, ('GET', 'https://sample.trycloudflare.com/api/health'))
+        self.assertEqual(self.cliente.s.auth, ('colab', 'clave-de-prueba'))
+        self.assertNotIn('ngrok-skip-browser-warning', self.cliente.s.headers)
+
+    def test_404_al_probar_indica_que_url_copiar(self):
+        with patch.object(self.cliente.s, 'request', return_value=Mock(status_code=404)):
+            with self.assertRaisesRegex(remoto.ServidorCaido, '6 y 6C'):
+                self.cliente.probar()
+
+    def test_404_html_al_cortar_indica_actualizar_servidor(self):
+        response = Mock(status_code=404)
+        response.json.side_effect = ValueError('HTML')
+        with patch.object(self.cliente.s, 'request', return_value=response):
+            with self.assertRaisesRegex(remoto.ServidorCaido, 'versión vieja'):
+                self.cliente.iniciar('https://example.test/video', {})
+        response.json.assert_not_called()
+
+    def test_errores_del_tunel_no_se_anuncian_como_conectados(self):
+        for status in (429, 502, 521, 522, 524, 530):
+            with self.subTest(status=status), patch.object(self.cliente.s, 'request', return_value=Mock(status_code=status)):
+                with self.assertRaisesRegex(remoto.ServidorCaido, str(status)):
+                    self.cliente.probar()
+
+    def test_json_de_otra_app_no_se_anuncia_como_conectado(self):
+        for data in ({}, {'ok': False}, [], None):
+            response = Mock(status_code=200)
+            response.json.return_value = data
+            with self.subTest(data=data), patch.object(self.cliente.s, 'request', return_value=response):
+                with self.assertRaisesRegex(remoto.ServidorCaido, 'no confirmó'):
+                    self.cliente.probar()
+
+
 class TransferenciaTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()

@@ -34,7 +34,6 @@ class Cliente:
         self.url = (url or "").strip().rstrip("/")
         self.s = requests.Session()
         self.s.auth = ("colab", clave or "")
-        self.s.headers["ngrok-skip-browser-warning"] = "1"
         self.timeout = timeout
 
     def _pedir(self, metodo, ruta, **kw):
@@ -44,8 +43,8 @@ class Cliente:
             raise ServidorCaido(type(e).__name__) from e
         if r.status_code == 401:
             raise ServidorCaido("contraseña incorrecta")
-        if r.status_code in (502, 503, 504) or "ngrok" in r.headers.get("server", "").lower() and r.status_code >= 400:
-            raise ServidorCaido(f"el enlace no responde (HTTP {r.status_code})")
+        if r.status_code >= 500 or r.status_code == 429:
+            raise ServidorCaido(f"el servidor o el túnel no está disponible (HTTP {r.status_code}); revisa Colab y la celda 6C")
         return r
 
     def _json(self, r):
@@ -56,17 +55,22 @@ class Cliente:
 
     def probar(self):
         r = self._pedir("GET", "/api/health")
+        if r.status_code == 404:
+            raise ServidorCaido("HTTP 404: esa URL no llega a My Content. En Colab ejecuta 6 y 6C; copia la URL de Cloudflare sin añadir /bot ni /api")
         if r.status_code != 200:
             raise ServidorCaido(f"HTTP {r.status_code}")
-        return self._json(r)
+        data = self._json(r)
+        if not isinstance(data, dict) or data.get("ok") is not True:
+            raise ServidorCaido("el enlace no confirmó que My Content esté listo; copia la URL de la celda 6C")
+        return data
 
     def iniciar(self, url_video, preset):
         r = self._pedir("POST", "/api/bot/remoto/cortar", json={"source": url_video, "preset": preset})
-        d = self._json(r)
         if r.status_code == 409:
             raise ServidorOcupado()
         if r.status_code == 404:
             raise ServidorCaido("el servidor tiene una versión vieja de la app; actualízalo")
+        d = self._json(r)
         if not d.get("success"):
             raise FalloTrabajo(d.get("error") or f"HTTP {r.status_code}")
         return d["id"]
