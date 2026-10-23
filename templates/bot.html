@@ -52,6 +52,13 @@ font:12px/1.5 ui-monospace,Consolas,monospace;color:#9ae6b4;white-space:pre-wrap
 .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}
 .switch input{width:auto}
 .ajustes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px 12px}
+.metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}
+.metrica{padding:14px;background:#11151d;border:1px solid var(--borde);border-radius:10px}
+.metrica b{display:block;font-size:25px;color:var(--acento)}
+.ayuda{font-size:13px;line-height:1.6;color:var(--suave)}
+.rango label{margin:0;font-size:12px}
+.rango>div{flex:1;min-width:60px}
+#sub-preview{width:130px;max-height:160px;object-fit:cover;border-radius:8px}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1b1f27;border:1px solid var(--borde);
 padding:10px 16px;border-radius:8px;display:none;z-index:9}
 a{color:var(--acento)}
@@ -67,6 +74,45 @@ a{color:var(--acento)}
 </header>
 
 <main>
+  <section class="card ancho" id="preparacion">
+    <h2>1. Editar con Smart Split y guardar en esta PC</h2>
+    <p class="ayuda">Los videos se preparan sin esperar al horario de publicación. Cada trabajo conserva los ajustes que elegiste al añadirlo. Los clips terminados quedan en esta PC y se pueden publicar aunque Colab se apague.</p>
+    <div class="ajustes">
+      <div><label for="modo_cola">Qué debe hacer el bot</label><select id="modo_cola">
+        <option value="preparar_primero">Editar toda la cola y después publicar</option>
+        <option value="solo_preparar">Solo editar y guardar · no publicar</option>
+        <option value="solo_subir">Solo publicar los clips guardados</option>
+        <option value="alternar">Alternar edición y publicación</option>
+      </select></div>
+      <div><label for="preset">Preset de Smart Split</label><select id="preset" onchange="seleccionarPreset()"></select></div>
+      <div><label for="preset-nombre">Guardar estos ajustes con el nombre</label><input id="preset-nombre" value="bot_calidad"></div>
+    </div>
+    <div class="fila" style="margin:12px 0"><button onclick="guardarModo()">Aplicar modo elegido</button><span class="muted" id="modo-activo"></span></div>
+    <div class="ajustes" id="editor-preset">
+      <div><label for="ed-modo">Cómo elegir las partes</label><select id="ed-modo" onchange="modoEdicion()"><option value="sequential">Todo el video en partes consecutivas</option><option value="ai">Elegir mejores momentos con IA</option></select></div>
+      <div><label for="ed-duracion">Segundos por parte</label><input id="ed-duracion" type="number" min="1" max="600" value="60" oninput="modoEdicion()"></div>
+      <div><label for="ed-cantidad">Clips por video · solo en modo IA</label><input id="ed-cantidad" type="number" min="1" max="100" value="3"></div>
+      <div><label for="ed-motor">Motor de edición</label><select id="ed-motor"><option value="pro">Pro · GPT-OSS 120B + Whisper Large V3</option><option value="equilibrado">Equilibrado · GPT-OSS 20B + Whisper Large V3</option><option value="ligero">Rápido · Llama 8B + Whisper Turbo</option></select></div>
+      <div><label for="ed-transcripcion">Transcripción</label><select id="ed-transcripcion"><option value="groq">Groq · modelo del motor elegido</option><option value="local">Whisper local · requiere modelo instalado</option></select></div>
+      <div><label for="ed-whisper">Modelo Whisper local</label><select id="ed-whisper"><option value="large-v3">Large V3 · precisión</option><option value="turbo">Large V3 Turbo · rapidez</option><option value="auto">Automático</option></select></div>
+      <div><label for="ed-formato">Formato</label><select id="ed-formato"><option value="vertical_blur">9:16 · video completo y fondo difuminado</option><option value="vertical">9:16 · seguir al hablante</option><option value="horizontal">16:9 · horizontal</option></select></div>
+      <div><label for="ed-calidad">Exportación</label><select id="ed-calidad"><option value="quality">Calidad · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p</option></select></div>
+      <div><label for="ed-upscale">Mejorar imagen</label><select id="ed-upscale"><option value="off">Sin ampliación adicional</option><option value="sharpen">Nitidez y reducción de ruido</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN · requiere instalación; respaldo HD</option></select></div>
+      <div><label for="ed-subs">Subtítulos</label><select id="ed-subs" onchange="vistaSubtitulos()"><option value="si">Activados</option><option value="no">Desactivados</option></select></div>
+      <div><label for="ed-estilo">Estilo de subtítulos</label><select id="ed-estilo" onchange="vistaSubtitulos()">
+        <option value="karaoke">Karaoke</option><option value="una_palabra">Una palabra</option><option value="pop_art">Pop Art</option><option value="resaltador">Resaltador</option><option value="bubblegum">Bubblegum</option><option value="caja_frase">Frase con fondo</option><option value="neon">Neón</option><option value="terror">Terror</option><option value="cuento">Cuento</option><option value="documental">Documental</option><option value="noticias">Noticias</option><option value="minimal">Minimal</option>
+      </select></div>
+      <div><label for="ed-fuente">Fuente</label><select id="ed-fuente"><option value="">La del estilo</option><option value="montserrat">Montserrat</option><option value="anton">Anton</option><option value="bebas">Bebas Neue</option><option value="poppins">Poppins</option><option value="bangers">Bangers</option><option value="playfair">Playfair Display</option><option value="nunito">Nunito</option></select></div>
+      <div><label for="ed-escala">Tamaño de subtítulos (%)</label><input id="ed-escala" type="number" min="50" max="150" value="100"></div>
+    </div>
+    <div class="fila" style="margin-top:12px"><img id="sub-preview" src="/static/presets/sub_karaoke.webp" alt="Ejemplo del estilo de subtítulos"><p class="ayuda" id="ed-resumen"></p></div>
+    <p class="ayuda">Pro es la opción de calidad disponible en esta app. En partes consecutivas no se usa IA para elegir momentos. Groq requiere tu clave en el equipo que edita; si falla un modelo, Smart Split puede usar uno de respaldo. La ampliación IA no recupera detalle que no tenga el original.</p>
+    <div class="fila"><button class="prim" onclick="guardarPresetBot()">Guardar edición y usarla en el bot</button><button onclick="cargarPresets(true)">Actualizar presets</button><a href="/" target="_blank" rel="noopener">Abrir Smart Split completo para más ajustes</a></div>
+    <p class="muted" id="preset-estado" aria-live="polite"></p>
+    <div class="metricas" id="inventario"></div>
+    <p class="muted" id="carpeta-clips" style="overflow-wrap:anywhere"></p>
+    <p class="ayuda">“Editar toda la cola” espera también los reintentos de edición. Si sigues añadiendo videos, la publicación puede retrasarse. Los lives alternan corte y publicación porque no tienen un final conocido. Para revisar el resultado primero, usa “Solo editar y guardar”. Los trabajos con error se muestran en la cola.</p>
+  </section>
   <section class="card ancho" id="seccion-lives">
     <h2><i class="ph-duotone ph-broadcast"></i> YouTube Live → clips</h2>
     <p class="muted">Pega la URL de un live activo. La captura continúa mientras los segmentos cerrados se procesan y pasan a la cola de subida. Empieza desde la señal disponible ahora, sin recuperar el historial del live.</p>
@@ -90,10 +136,12 @@ a{color:var(--acento)}
     <table><thead><tr><th>Transmisión</th><th>Captura</th><th>Segmentos</th><th></th></tr></thead><tbody id="lives"></tbody></table>
   </section>
   <section class="card">
-    <h2><i class="ph-duotone ph-link"></i> Subir desde enlace</h2>
+    <h2><i class="ph-duotone ph-link"></i> 2. Añadir videos desde enlaces</h2>
     <textarea id="urls" placeholder="Pega uno o varios enlaces (uno por línea)"></textarea>
     <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
     <div class="chips" id="chips-url"></div>
+    <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar regla del canal o preset por defecto</option></select>
+    <p class="muted">Con “Cortar” activado se usa Smart Split. Cada parte se publica una vez en cada cuenta elegida; 10 partes y 2 cuentas son 20 publicaciones.</p>
     <div class="fila" style="margin-top:10px">
       <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
       <input id="texto-url" placeholder="Texto o hashtags fijos (opcional)">
@@ -133,19 +181,24 @@ a{color:var(--acento)}
     </div>
   </section>
 
-  <section class="card">
-    <h2><i class="ph-duotone ph-sliders"></i> Ritmo humano</h2>
+  <section class="card ancho">
+    <h2><i class="ph-duotone ph-sliders"></i> 3. Horario y ritmo de publicación</h2>
+    <p class="ayuda">Una publicación es un clip en una cuenta. Solo se sube uno a la vez. Las pausas empiezan al terminar cada subida; se cumplen tanto la pausa general como la de esa cuenta. El horario usa la hora de la PC.</p>
     <div class="ajustes">
-      <div><label>Entre subidas de una cuenta (min)</label><div class="fila"><input id="gap_min" type="number"><input id="gap_max" type="number"></div></div>
-      <div><label>Descanso entre cualquier subida (min)</label><div class="fila"><input id="pausa_min" type="number"><input id="pausa_max" type="number"></div></div>
+      <div><label>Pausa de la misma cuenta (min)</label><div class="fila rango"><div><label for="gap_min">Mínima</label><input id="gap_min" type="number" min="0" max="1440"></div><div><label for="gap_max">Máxima</label><input id="gap_max" type="number" min="0" max="1440"></div></div></div>
+      <div><label>Pausa entre cualquier publicación (min)</label><div class="fila rango"><div><label for="pausa_min">Mínima</label><input id="pausa_min" type="number" min="0" max="1440"></div><div><label for="pausa_max">Máxima</label><input id="pausa_max" type="number" min="0" max="1440"></div></div></div>
       <div><label>Sube desde</label><input id="hora_inicio" type="time"></div>
       <div><label>Hasta</label><input id="hora_fin" type="time"></div>
-      <div><label>Reintentos por subida</label><input id="max_intentos" type="number" min="1"></div>
-      <div><label>Preset por defecto</label><input id="preset" list="smart-presets"></div>
+      <div><label for="max_intentos">Máximo de intentos por subida</label><input id="max_intentos" type="number" min="1" max="20"></div>
+      <div><label for="estimacion_subida_min">Minutos para subir cada clip (estimación)</label><input id="estimacion_subida_min" type="number" min="0.1" max="180" step="0.5"></div>
       <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
         <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
     </div>
-    <label style="margin-top:12px">Servidor de cortes (Colab con GPU) — opcional. Si se apaga, corta esta PC.</label>
+    <p class="ayuda">Para una frecuencia fija, pon el mismo mínimo y máximo. Ejemplo: pausa de 60 minutos y subida de 3 minutos = unos 63 minutos entre inicios, por cuenta. Inicio y fin iguales permiten publicar las 24 horas.</p>
+    <div id="plan-cola" aria-live="polite"></div>
+    <div class="tabla-scroll"><table><thead><tr><th>Cuenta</th><th>Máximo al día</th><th>Hoy / quedan</th><th>Fin estimado</th></tr></thead><tbody id="plan-cuentas"></tbody></table></div>
+    <p class="ayuda">El cálculo usa los clips ya editados y los ajustes guardados. El rango compara pausas mínimas y máximas; no incluye edición pendiente, cortes de conexión, verificaciones ni reintentos futuros. Los videos sin editar todavía no tienen una cantidad exacta de partes.</p>
+    <label style="margin-top:12px">Servidor de cortes — opcional. Los clips ya guardados no lo necesitan.</label>
     <div class="fila">
       <input id="remoto_url" placeholder="https://xxxx.ngrok-free.app (vacío = cortar en esta PC)">
       <input id="remoto_clave" type="password" placeholder="Contraseña de la app en Colab" style="max-width:220px">
@@ -154,6 +207,7 @@ a{color:var(--acento)}
          target="_blank" rel="noopener"><button><i class="ph ph-arrow-square-out"></i> Abrir Colab</button></a>
     </div>
     <div class="muted" id="remoto-estado" style="margin-top:4px"></div>
+    <p class="ayuda">Colab: ejecuta las celdas 1–6 y la 6C para obtener la URL de conexión del bot. Pega esa URL y la contraseña de la celda 4; pulsa Probar. El enlace del proxy de Google sirve para abrir la interfaz, pero no conecta automáticamente este bot.</p>
     <div class="fila" style="margin-top:12px">
       <label class="switch"><input type="checkbox" id="radar_auto"> Radar de la PC → cola</label>
       <label class="switch"><input type="checkbox" id="firebase_auto"> Radar de la nube → cola</label>
@@ -190,6 +244,7 @@ let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), edi
 const loginPendientes = new Set();
 const cookiesPendientes = new Set();
 const cierresPendientes = new Set();
+let presetsGuardados = {}, presetBase = {}, presetCargado = false;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -222,11 +277,13 @@ function pintar() {
   $('activo').checked = c.activo;
   $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
   if (!editando) {
-    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','preset','remoto_url','remoto_clave','navegador'])
+    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','estimacion_subida_min','modo_cola','remoto_url','remoto_clave','navegador'])
       $(k).value = c[k];
     for (const k of ['radar_auto','firebase_auto','headless']) $(k).checked = c[k];
   }
   $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
+  $('modo-activo').textContent = 'Modo guardado: ' + ({preparar_primero:'editar toda la cola y después publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados',alternar:'alternar edición y publicación'}[c.modo_cola] || c.modo_cola);
+  pintarPlan();
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
   $('cuentas').innerHTML = E.cuentas.map(x => `<tr>
     <td>${plat(x.plataforma)} ${esc(x.nombre)} ${x.activa ? '' : '<span class="muted">(pausada)</span>'}</td>
@@ -249,7 +306,7 @@ function pintar() {
   ).join('') || '<tr><td colspan="4" class="muted">Sin reglas: lo del radar no tendrá destino. Crea al menos la regla *.</td></tr>';
   $('subidas').innerHTML = E.subidas.map(s => `<tr>
     <td class="muted">${s.id}</td><td>${plat(s.plataforma)} ${esc(s.cuenta_nombre || '¿borrada?')}</td>
-    <td title="${esc(s.texto)}">${base(s.archivo)}</td><td>${est(s.estado)}</td>
+    <td title="${esc(s.texto)}"><a href="/api/bot/clip/${s.id}" target="_blank" rel="noopener">${base(s.archivo)}</a></td><td>${est(s.estado)}</td>
     <td>${s.url_publicada ? `<a href="${esc(s.url_publicada)}" target="_blank">ver</a>` : ''}
       ${s.error ? `<div class="err">${esc(s.error)} ${s.captura ? `· <a href="/api/bot/captura/${s.id}" target="_blank">captura</a>` : ''}</div>` : ''}
       ${s.estado === 'pendiente' && s.intentos ? `<span class="muted">intento ${s.intentos}</span>` : ''}</td>
@@ -259,7 +316,7 @@ function pintar() {
   $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
     <td><a href="${esc(t.url)}" target="_blank">${esc(t.titulo || t.url)}</a><div class="muted">${esc(t.canal)}</div>
       ${t.error && t.estado !== 'omitido' ? `<div class="err">${esc(t.error)}</div>` : ''}</td>
-    <td class="muted">${esc(t.origen)}</td><td>${est(t.estado)}</td>
+    <td class="muted">${esc(t.origen)}<br>Preset: ${esc(t.preset)}</td><td>${est(t.estado)}</td>
     <td class="acc">${['error','sin_destino','omitido'].includes(t.estado) ? `<button class="mini" onclick="accion('trabajos',${t.id},'reintentar')"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
       <button class="mini peligro" onclick="accion('trabajos',${t.id},'borrar')"><i class="ph ph-trash"></i></button></td></tr>`
   ).join('') || '<tr><td colspan="4" class="muted">La cola está vacía.</td></tr>';
@@ -273,7 +330,7 @@ function pintar() {
   chips('chips-url', selUrl); chips('chips-regla', selRegla); chips('chips-live', selLive);
 }
 
-async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); await cargarLives(); } catch (e) {} }
+async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); if (!presetCargado && Object.keys(presetsGuardados).length) iniciarPreset(); await cargarLives(); } catch (e) {} }
 function modoLive() {
   const ai = $('live-mode').value === 'ai';
   $('live-window-group').hidden = !ai;
@@ -310,7 +367,7 @@ async function cfg(cambios) { await api('/api/bot/config', cambios); cargar(); }
 
 async function encolar() {
   await api('/api/bot/encolar', {url: $('urls').value, cuentas: [...selUrl], cortar: $('cortar').checked,
-    texto_fijo: $('texto-url').value});
+    texto_fijo: $('texto-url').value, preset: $('url-preset').value});
   $('urls').value = ''; toast('Añadido a la cola'); cargar();
 }
 async function crearCuenta() {
@@ -389,19 +446,117 @@ async function probarRemoto() {
 }
 async function guardarAjustes() {
   const d = {};
-  for (const k of ['gap_min','gap_max','pausa_min','pausa_max','max_intentos']) d[k] = +$(k).value;
-  for (const k of ['hora_inicio','hora_fin','preset','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
+  for (const k of ['gap_min','gap_max','pausa_min','pausa_max','max_intentos','estimacion_subida_min']) d[k] = +$(k).value;
+  for (const k of ['hora_inicio','hora_fin','preset','modo_cola','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
   for (const k of ['radar_auto','firebase_auto','headless']) d[k] = $(k).checked;
-  editando = false; await cfg(d); toast('Ajustes guardados');
+  await api('/api/bot/config', d); editando = false; await cargar(); toast('Horario y modo guardados');
 }
 document.querySelectorAll('.ajustes input, .ajustes select, #remoto_url, #remoto_clave').forEach(i => i.addEventListener('focus', () => editando = true));
-async function cargarPresets() {
+async function cargarPresets(recargar = false) {
   try {
     const result = await api('/api/smart_presets');
+    presetsGuardados = result.presets || {};
     $('smart-presets').replaceChildren(...Object.keys(result.presets || {}).map(name => {
       const option = document.createElement('option'); option.value = name; return option;
     }));
+    for (const id of ['preset', 'url-preset']) {
+      const anterior = $(id).value;
+      $(id).replaceChildren();
+      if (id === 'url-preset') $(id).add(new Option('Usar regla o preset por defecto', ''));
+      for (const name of Object.keys(presetsGuardados)) $(id).add(new Option(name, name));
+      if ([...$(id).options].some(o => o.value === anterior)) $(id).value = anterior;
+    }
+    if (E && (!presetCargado || recargar)) iniciarPreset();
   } catch (e) {}
+}
+
+function iniciarPreset() {
+  const name = E.config.preset;
+  if (!presetsGuardados[name]) {
+    presetsGuardados[name] = name === 'default' ? (presetsGuardados.bot_calidad || {}) : {};
+    $('preset').add(new Option(name === 'default' ? 'default (calidad)' : `${name} (falta guardar)`, name));
+  }
+  $('preset').value = name; seleccionarPreset(); presetCargado = true;
+}
+function seleccionarPreset() {
+  presetBase = {...(presetsGuardados[$('preset').value] || {})};
+  $('preset-nombre').value = $('preset').value;
+  const mapping = {'ed-modo':['clip_selection','ai'], 'ed-duracion':['clip_duration',60],
+    'ed-cantidad':['num_clips',1], 'ed-motor':['motor_ia','pro'], 'ed-transcripcion':['transcripcion','groq'],
+    'ed-whisper':['whisper_local','large-v3'], 'ed-formato':['video_format','vertical'],
+    'ed-calidad':['export_profile','balanced'], 'ed-upscale':['upscale','off'],
+    'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100]};
+  for (const [id,[key,def]] of Object.entries(mapping)) {
+    const value = String(presetBase[key] ?? def), element = $(id);
+    if (element.options && ![...element.options].some(o => o.value === value)) element.add(new Option(value, value));
+    element.value = value;
+  }
+  $('ed-subs').value = presetBase.show_subtitles === false ? 'no' : 'si';
+  modoEdicion(); vistaSubtitulos();
+  $('preset-estado').textContent = 'Los cambios se aplican a los videos que añadas después de guardar. La cola existente conserva su edición.';
+}
+function modoEdicion() {
+  const partes = $('ed-modo').value === 'sequential';
+  $('ed-cantidad').disabled = partes;
+  const seconds = Number($('ed-duracion').value);
+  $('ed-resumen').textContent = partes ?
+    `Se conserva todo el video, dividido en partes de ${seconds || '…'} s. La última puede ser más corta. Ejemplo: 10 minutos darían ${seconds > 0 ? Math.ceil(600/seconds) : '…'} partes.` :
+    'La IA busca la cantidad de momentos indicada. La duración es mínima y puede alargarse para terminar la idea; el resultado puede tener menos clips.';
+}
+function vistaSubtitulos() {
+  $('sub-preview').hidden = $('ed-subs').value === 'no';
+  const estilo = $('ed-estilo').value;
+  $('sub-preview').src = /^[a-z_]+$/.test(estilo) ? `/static/presets/sub_${estilo}.webp` : '';
+  $('sub-preview').alt = `Ejemplo de ${$('ed-estilo').selectedOptions[0]?.textContent || estilo}`;
+}
+function ajustesEdicion() {
+  const c = {...presetBase, clip_selection:$('ed-modo').value, clip_duration:Number($('ed-duracion').value),
+    num_clips:Number($('ed-cantidad').value), motor_ia:$('ed-motor').value, transcripcion:$('ed-transcripcion').value,
+    whisper_local:$('ed-whisper').value, video_format:$('ed-formato').value, export_profile:$('ed-calidad').value,
+    upscale:$('ed-upscale').value, show_subtitles:$('ed-subs').value === 'si', style:$('ed-estilo').value,
+    sub_fuente:$('ed-fuente').value, subtitle_scale:Number($('ed-escala').value)};
+  if (c.video_format !== presetBase.video_format) c.encuadre = c.video_format === 'vertical' ? 'caras' : 'difuminado';
+  for (const key of ['source','start_time','end_time','cast_id','voice_cast','custom_output_dir','output_path',
+    'python_motor','script_local','subir_tiktok','subir_youtube','subir_facebook']) delete c[key];
+  return c;
+}
+async function guardarPresetBot() {
+  try {
+    const name = $('preset-nombre').value.trim(), config = ajustesEdicion();
+    if (!name) throw new Error('Escribe un nombre para guardar la edición.');
+    await api('/api/bot/preset', {name, config});
+    await cargarPresets();
+    $('preset').value = name;
+    await api('/api/bot/config', {preset:name, modo_cola:$('modo_cola').value});
+    $('url-preset').value = name;
+    seleccionarPreset(); await cargar();
+    toast('Edición guardada: se usará para los nuevos videos.');
+  } catch (e) { $('preset-estado').textContent = e.message; toast(e.message, true); }
+}
+async function guardarModo() {
+  try { await api('/api/bot/config',{modo_cola:$('modo_cola').value}); await cargar(); toast('Modo guardado. Se aplica al terminar la tarea en curso.'); }
+  catch(e) { toast(e.message,true); }
+}
+const fechaPlan = t => t ? new Date(t * 1000).toLocaleString('es', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+function pintarPlan() {
+  const p = E.plan; if (!p) return;
+  $('inventario').innerHTML = [[p.por_preparar,'videos por editar'],[p.clips_en_pc,'clips guardados en esta PC'],
+    [p.pendientes,'publicaciones pendientes'],[p.bloqueadas.length,'publicaciones bloqueadas']].map(([n,t])=>`<div class="metrica"><b>${n}</b>${t}</div>`).join('');
+  $('carpeta-clips').textContent = `Clips nuevos: ${p.carpeta_clips}${p.clips_ausentes ? ` · Atención: faltan ${p.clips_ausentes} archivos de trabajos anteriores.` : ''}`;
+  const a = p.escenarios?.min, b = p.escenarios?.max;
+  let mensaje = p.limitada ? 'Más de 1000 publicaciones: se muestran los totales sin fecha estimada.' :
+    a?.fin ? `Fin estimado de las ${p.programables} publicaciones habilitadas: ${fechaPlan(a.fin)} – ${fechaPlan(b.fin)}.` : 'Todavía no hay publicaciones habilitadas para calcular una fecha.';
+  if (p.retenida) mensaje = 'Publicación en espera por el modo elegido o porque el bot está apagado. Cálculo orientativo si se liberaran los clips ahora: ' + mensaje;
+  $('plan-cola').innerHTML = `<p>${esc(mensaje)}</p><p class="muted">Hora de la PC del bot: ${esc(p.hora_pc)}. Fechas estimadas mostradas en la zona horaria de este navegador.</p>` +
+    (p.bloqueadas.length ? `<p class="err">${esc([...new Set(p.bloqueadas.map(s=>s.motivo))].join(' · '))}. Esas publicaciones no se incluyen en el fin estimado.</p>` : '');
+  if (!document.activeElement?.closest('#plan-cuentas')) $('plan-cuentas').innerHTML = E.cuentas.map(c => `<tr><td>${esc(c.nombre)}<div class="muted">${esc(c.plataforma)}</div></td>
+    <td><input id="limite-${c.id}" aria-label="Máximo diario de ${esc(c.nombre)}" type="number" min="1" max="1000" value="${c.limite_dia}" style="width:80px" onfocus="this.dataset.editando='1'" onchange="guardarLimite(${c.id},this.value)"></td>
+    <td>${c.hoy} hoy · ${Math.max(0,c.limite_dia-c.hoy)} disponibles<br><span class="muted">${p.por_cuenta?.[c.id] || 0} por publicar</span></td>
+    <td>${c.activa && c.estado === 'ok' ? `${fechaPlan(a?.por_cuenta?.[c.id])} – ${fechaPlan(b?.por_cuenta?.[c.id])}` : 'Pausada o sin sesión'}</td></tr>`).join('');
+}
+async function guardarLimite(id, valor) {
+  try { await api(`/api/bot/cuentas/${id}`, {limite_dia:Number(valor)}); await cargar(); }
+  catch(e) { toast(e.message,true); }
 }
 cargarPresets(); cargar(); setInterval(cargar, 4000);
 </script>

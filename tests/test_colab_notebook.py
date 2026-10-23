@@ -117,6 +117,29 @@ class ColabNotebookTests(unittest.TestCase):
         self.assertNotIn('example-hf-private', result)
         self.assertEqual(result.count('[OCULTO]'), 2)
 
+    def test_tunnel_checks_password_before_reporting_ready(self):
+        functions_from('bot-tunnel', self.namespace)
+        success = io.BytesIO(b'{"ok":true}')
+        success.status = 200
+        opener = Mock(side_effect=[urllib.error.HTTPError('https://example.test',401,'auth',{},None), success])
+        self.namespace['urllib'] = SimpleNamespace(request=SimpleNamespace(
+            Request=urllib.request.Request, urlopen=opener), error=urllib.error)
+        self.namespace['check_bot_url']('https://example.test')
+        first, second = [c.args[0] for c in opener.call_args_list]
+        self.assertIsNone(first.get_header('Authorization'))
+        self.assertEqual(base64.b64decode(second.get_header('Authorization')[6:]).decode(),
+                         'colab:example-private-value')
+        self.assertEqual(second.full_url,'https://example.test/api/health')
+
+    def test_tunnel_refuses_app_without_password(self):
+        functions_from('bot-tunnel', self.namespace)
+        response=io.BytesIO(b'{"ok":true}')
+        response.status=200
+        self.namespace['urllib'] = SimpleNamespace(request=SimpleNamespace(
+            Request=urllib.request.Request, urlopen=Mock(return_value=response)), error=urllib.error)
+        with self.assertRaisesRegex(RuntimeError,'no exige contraseña'):
+            self.namespace['check_bot_url']('https://example.test')
+
 
 if __name__ == '__main__':
     unittest.main()

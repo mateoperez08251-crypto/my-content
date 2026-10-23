@@ -14,7 +14,9 @@ import time
 import traceback
 from datetime import datetime
 
-from . import navegador, remoto
+from . import archivos, navegador, remoto
+from .planificacion import estimar
+from .presets import NOMBRE_CALIDAD, snapshot
 from .db import DB
 from .humano import Humano
 from .plataformas import POR_NOMBRE
@@ -31,7 +33,10 @@ CONFIG_DEFECTO = {
     "hora_inicio": "08:00",  # solo sube dentro de este horario (hora de la PC)
     "hora_fin": "23:30",
     "max_intentos": 3,
-    "preset": "default",     # preset de Smart Split si la regla no dice otro
+    "preset": NOMBRE_CALIDAD,  # preset de Smart Split si la regla no dice otro
+    "modo_cola": "preparar_primero",
+    "estimacion_subida_min": 3.0,  # estimación del tiempo de transferencia/publicación
+    "proxima_global": 0.0,    # conserva la pausa general si se reinicia la app
     "headless": False,       # False = ves el navegador trabajando
     "navegador": "auto",     # auto (Brave > Chrome > Edge), brave, chrome, edge
     "velocidad": 1.0,        # 1 = ritmo humano normal
@@ -80,6 +85,7 @@ class Motor:
         os.makedirs(self.almacenamiento, exist_ok=True)
         self.db = DB(os.path.join(self.almacenamiento, "bot.db"))
         self._cfg_ruta = os.path.join(self.almacenamiento, "bot_config.json")
+        self._cfg_lock = threading.RLock()
         self.cfg = self._leer_cfg()
         self.smart_split = smart_split      # data -> (rutas, meta)
         self.descargar = descargar          # url -> ruta
@@ -95,7 +101,7 @@ class Motor:
         self._despertar = threading.Event()
         self._hilo = None
         self._ultimo_firebase = 0.0
-        self._libre_global = 0.0
+        self._libre_global = self.cfg['proxima_global']
         self._remoto_caido_hasta = 0.0
         self._remoto_estado = ""
         self._remoto_avisado = False   # ya se avisó por WhatsApp de que Colab se cayó
@@ -113,31 +119,48 @@ class Motor:
             return dict(CONFIG_DEFECTO)
 
     def guardar_cfg(self, cambios: dict):
+        with self._cfg_lock:
+            self._guardar_cfg(cambios)
+
+    def _guardar_cfg(self, cambios):
+        nueva = dict(self.cfg)
         for k, v in (cambios or {}).items():
             if k not in CONFIG_DEFECTO or (k == "remoto_clave" and v == OCULTA):
                 continue
             tipo = type(CONFIG_DEFECTO[k])
             try:
                 if tipo is bool:
-                    self.cfg[k] = v if isinstance(v, bool) else str(v).lower() in ("1", "true", "on", "si", "sí")
+                    nueva[k] = v if isinstance(v, bool) else str(v).lower() in ("1", "true", "on", "si", "sí")
                 else:
-                    self.cfg[k] = tipo(v)
+                    nueva[k] = tipo(v)
             except (ValueError, TypeError):
                 raise ValueError(f"Valor no válido para {k}: {v}")
-        self.cfg["remoto_url"] = self.cfg["remoto_url"].strip().rstrip("/")
+        import math
+        for k in ('gap_min', 'gap_max', 'pausa_min', 'pausa_max'):
+            if not 0 <= nueva[k] <= 1440:
+                raise ValueError('Las pausas deben estar entre 0 y 1440 minutos.')
+        if not math.isfinite(nueva['estimacion_subida_min']) or not 0.1 <= nueva['estimacion_subida_min'] <= 180:
+            raise ValueError('Estima entre 0.1 y 180 minutos por subida.')
+        if not 1 <= nueva['max_intentos'] <= 20:
+            raise ValueError('Elige entre 1 y 20 intentos.')
+        if nueva['modo_cola'] not in ('preparar_primero', 'solo_preparar', 'solo_subir', 'alternar'):
+            raise ValueError('Modo de cola no válido.')
+        for k in ('hora_inicio', 'hora_fin'):
+            if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', nueva[k]):
+                raise ValueError('Usa una hora válida: HH:MM.')
+        nueva["remoto_url"] = nueva["remoto_url"].strip().rstrip("/")
         if "remoto_url" in (cambios or {}) or "remoto_clave" in (cambios or {}):
             self._remoto_caido_hasta = 0
             self._ultimo_vigilar = 0
-        if self.cfg["gap_max"] < self.cfg["gap_min"]:
-            self.cfg["gap_max"] = self.cfg["gap_min"]
-        if self.cfg["pausa_max"] < self.cfg["pausa_min"]:
-            self.cfg["pausa_max"] = self.cfg["pausa_min"]
-        if (self.cfg["radar_auto"] or self.cfg["firebase_auto"]) and not self.cfg["radar_desde"]:
-            self.cfg["radar_desde"] = time.time()
+        nueva['gap_max'] = max(nueva['gap_min'], nueva['gap_max'])
+        nueva['pausa_max'] = max(nueva['pausa_min'], nueva['pausa_max'])
+        if (nueva["radar_auto"] or nueva["firebase_auto"]) and not nueva["radar_desde"]:
+            nueva["radar_desde"] = time.time()
         tmp = self._cfg_ruta + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.cfg, f, ensure_ascii=False, indent=2)
+            json.dump(nueva, f, ensure_ascii=False, indent=2)
         os.replace(tmp, self._cfg_ruta)
+        self.cfg = nueva
         self._despertar.set()
 
     def log(self, msg):
@@ -183,7 +206,7 @@ class Motor:
                 if self.cfg["firebase_auto"] and time.time() - self._ultimo_firebase > 120:
                     self._ultimo_firebase = time.time()
                     self.revisar_firebase()
-                if self.cfg["remoto_url"] and time.time() - self._ultimo_vigilar > 300:
+                if self.cfg['modo_cola'] != 'solo_subir' and self.cfg["remoto_url"] and time.time() - self._ultimo_vigilar > 300:
                     self._ultimo_vigilar = time.time()
                     self._vigilar_remoto()
                 if self.cfg["activo"]:
@@ -199,12 +222,24 @@ class Motor:
             self._despertar.clear()
 
     def _paso(self) -> bool:
-        """Hace UNA cosa: primero subir lo que ya está listo, si no, preparar el siguiente video."""
+        """Preparar no depende del horario de publicación ni de las sesiones sociales."""
+        modo = self.cfg['modo_cola']
+        if modo in ('solo_preparar', 'preparar_primero'):
+            # Un live no tiene un final conocido: no retiene indefinidamente las publicaciones.
+            excluir_live = modo == 'preparar_primero'
+            trabajo = self.db.siguiente_trabajo(excluir_live=excluir_live)
+            if trabajo:
+                self._procesar_trabajo(trabajo)
+                return True
+            if modo == 'solo_preparar' or self.db.por_preparar(excluir_live=excluir_live):
+                self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live)
+                                  else 'Preparando primero: esperando el reintento de un video.')
+                return False
         sub = self._siguiente_subida()
         if sub:
             self._procesar_subida(sub)
             return True
-        trabajo = self.db.siguiente_trabajo()
+        trabajo = self.db.siguiente_trabajo() if modo != 'solo_subir' else None
         if trabajo:
             self._procesar_trabajo(trabajo)
             return True
@@ -244,7 +279,8 @@ class Motor:
         if not clave:
             clave = f"{origen}:{url}:{time.time()}"  # lo manual se puede repetir a propósito
         tid = self.db.encolar_trabajo(url, origen, clave=clave, canal=canal, titulo=titulo, cuentas=cuentas, preset=preset,
-                                      texto_fijo=texto_fijo, cortar=cortar)
+                                      texto_fijo=texto_fijo, cortar=cortar,
+                                      opciones=snapshot(self.cargar_preset(preset) or {}) if cortar else {})
         if tid is None:
             return None
         if not cuentas:
@@ -320,6 +356,10 @@ class Motor:
 
     # -- preparar (descargar + cortar) ----------------------------------
     def _procesar_trabajo(self, t):
+        guardados = archivos.leer_preparados(self.carpeta_clips(t))
+        if guardados:
+            self._finalizar_clips(t, guardados)
+            return
         if t["cortar"] and not t.get('archivo_local') and self._remoto_disponible():
             try:
                 return self._preparar_remoto(t)
@@ -347,7 +387,7 @@ class Motor:
                     local = os.path.realpath(local)
                     if os.path.commonpath([root, local]) != root or not os.path.isfile(local):
                         raise RuntimeError('No se encuentra el segmento local del live.')
-                opciones = json.loads(t.get('opciones') or '{}') if local else (self.cargar_preset(t['preset']) or {})
+                opciones = json.loads(t.get('opciones') or '{}') or (self.cargar_preset(t['preset']) or {})
                 datos = {**opciones, "source": local or t["url"],
                          "download_quality": "best", "subir_tiktok": False, "subir_youtube": False,
                          "subir_facebook": False, "_lanzar_error": True}
@@ -370,6 +410,7 @@ class Motor:
                 if not ruta or not os.path.isfile(ruta):
                     raise RuntimeError("La descarga no dejó ningún archivo.")
                 clips = [(ruta, "")]
+            clips = archivos.conservar(self.carpeta_clips(t), clips)
         except Exception as e:
             if liberar_al_fallar:
                 self.liberar()
@@ -384,15 +425,21 @@ class Motor:
             self.log(f"Falló preparar {nombre}: {e}")
             return
 
+        self._finalizar_clips(t, clips)
+
+    def carpeta_clips(self, t):
+        return os.path.join(self.carpeta, 'bot_clips', f"trabajo_{t['id']}")
+
+    def _finalizar_clips(self, t, clips):
         subidas = []
         for i, (ruta, publicacion) in enumerate(clips):
-            if t.get('archivo_local') and datos.get('clip_selection') == 'sequential':
+            if t.get('archivo_local') and json.loads(t.get('opciones') or '{}').get('clip_selection') == 'sequential':
                 publicacion = t['titulo']
             texto = self._texto(publicacion, t, i, len(clips))
             for cid in t["cuentas"]:
                 subidas.append((cid, ruta, texto))
         self.db.finalizar_trabajo(t['id'], subidas)
-        self.log(f"Listo {nombre}: {len(clips)} clip(s) × {len(t['cuentas'])} cuenta(s) en cola de subida.")
+        self.log(f"Guardado en esta PC: {len(clips)} clip(s) × {len(t['cuentas'])} cuenta(s). Ya no necesita Colab para subir.")
 
     # -- servidor de cortes remoto (Colab) --------------------------------
     def _remoto_disponible(self):
@@ -445,35 +492,43 @@ class Motor:
         cli = self._cliente_remoto()
         self.db.marcar_trabajo(t["id"], "cortando")
         self._actividad(f"Cortando en el servidor remoto: {nombre}")
-        datos = dict(self.cargar_preset(t["preset"]) or {})
-        jid = cli.iniciar(t["url"], datos)
-        carpeta = os.path.join(self.carpeta, "videos_procesados", "remoto", f"trabajo_{t['id']}")
+        datos = json.loads(t.get('opciones') or '{}') or dict(self.cargar_preset(t['preset']) or {})
+        carpeta = self.carpeta_clips(t)
+        jid = t.get('remoto_id') if t.get('remoto_url') == self.cfg['remoto_url'] else None
 
         def progreso(texto):
             self.actividad = f"Cortando en el servidor remoto: {nombre} · {texto}"
             self._remoto_estado = "Trabajando ✅"
 
         try:
+            if not jid:
+                jid = cli.iniciar(t['url'], datos)
+                self.db.marcar_trabajo(t['id'], 'cortando', remoto_id=jid, remoto_url=self.cfg['remoto_url'])
             clips = cli.esperar_y_bajar(jid, carpeta, progreso, cancelar=self._stop.is_set)
-        except remoto.FalloTrabajo as e:
+        except (remoto.FalloTrabajo, OSError, ValueError) as e:
             intentos = t["intentos"] + 1
+            extra = {'remoto_id':'', 'remoto_url':''} if isinstance(e, remoto.FalloCorte) else {}
             if intentos >= self.cfg["max_intentos"]:
-                self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
+                self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos, **extra)
                 self.notificar(f"❌ Bot: no pude preparar {nombre}: {e}")
             else:
                 espera = ESPERA_TRABAJO_MIN[min(intentos - 1, len(ESPERA_TRABAJO_MIN) - 1)]
                 self.db.marcar_trabajo(t["id"], "pendiente", str(e), intentos=intentos,
-                                       proximo_intento=time.time() + espera * 60)
+                                       proximo_intento=time.time() + espera * 60, **extra)
             self.log(f"El servidor remoto falló con {nombre}: {e}")
             return
+        except remoto.TrabajoPerdido:
+            self.db.marcar_trabajo(t['id'], 'pendiente', 'Colab perdió el trabajo; se volverá a preparar.',
+                                   remoto_id='', remoto_url='')
+            raise
         except remoto.ServidorCaido:
             self.db.marcar_trabajo(t["id"], "pendiente", "Se perdió la conexión con el servidor de cortes.")
             raise
-        for i, (ruta, publicacion) in enumerate(clips):
-            texto = self._texto(publicacion, t, i, len(clips))
-            for cid in t["cuentas"]:
-                self.db.crear_subida(t["id"], cid, ruta, texto)
-        self.db.marcar_trabajo(t["id"], "listo")
+        self._finalizar_clips(t, clips)
+        try:
+            cli.limpiar(jid)
+        except remoto.ServidorCaido:
+            self.log('Clips guardados en esta PC; no se pudo limpiar la copia remota.')
         self.log(f"Listo (remoto) {nombre}: {len(clips)} clip(s) × {len(t['cuentas'])} cuenta(s).")
 
     @staticmethod
@@ -576,10 +631,12 @@ class Motor:
         ahora = time.time()
         if corto:
             self._libre_global = ahora + random.uniform(1, 3) * 60
+            self.guardar_cfg({'proxima_global': self._libre_global})
             return
         gap = random.uniform(self.cfg["gap_min"], self.cfg["gap_max"]) * 60
         self.db.editar_cuenta(cuenta["id"], proxima_libre=ahora + gap)
         self._libre_global = ahora + random.uniform(self.cfg["pausa_min"], self.cfg["pausa_max"]) * 60
+        self.guardar_cfg({'proxima_global': self._libre_global})
 
     def _captura(self, page, sid):
         try:
@@ -701,9 +758,21 @@ class Motor:
             c["abierta"] = navegador.ocupado(self.perfil(c))
             c["login_abierto"] = navegador.login_abierto(self.perfil(c))
             cuentas.append(c)
+        pendientes = self.db.subidas_pendientes()
+        for s in pendientes:
+            s['archivo_existe'] = os.path.isfile(s['archivo'])
+        plan = estimar(pendientes, cuentas, self.cfg, time.time(), self._libre_global)
+        plan['por_preparar'] = self.db.por_preparar()
+        plan['retenida'] = (not self.cfg['activo'] or self.cfg['modo_cola'] == 'solo_preparar' or
+                            (self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True) > 0))
+        guardados = self.db.archivos_preparados()
+        plan['clips_en_pc'] = sum(os.path.isfile(r['archivo']) for r in guardados)
+        plan['clips_ausentes'] = len(guardados) - plan['clips_en_pc']
+        plan['carpeta_clips'] = os.path.join(self.carpeta, 'bot_clips')
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
             "remoto": self._remoto_estado,
+            "plan": plan,
             "carpeta_datos": self.almacenamiento,
             "actividad": self.actividad,
             "en_horario": _en_horario(self.cfg["hora_inicio"], self.cfg["hora_fin"]),

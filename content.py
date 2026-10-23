@@ -1839,6 +1839,7 @@ def get_smart_split_progress():
 
 
 # ---- Smart Split: presets guardables -----------------------------------
+_presets_lock = threading.RLock()
 def _presets_path():
     try:
         p = paths.data_path("smart_presets.json")
@@ -1850,29 +1851,41 @@ def _presets_path():
 
 @app.route("/api/smart_presets", methods=["GET"])
 def list_smart_presets():
+    from bot.presets import CALIDAD, NOMBRE_CALIDAD
     try:
         with open(_presets_path(), "r", encoding="utf-8") as f:
-            return jsonify({"success": True, "presets": json.load(f)})
+            presets = json.load(f)
     except (OSError, ValueError):
-        return jsonify({"success": True, "presets": {}})
+        presets = {}
+    return jsonify({"success": True, "presets": {NOMBRE_CALIDAD: CALIDAD, **presets}})
 
 
 @app.route("/api/smart_presets", methods=["POST"])
+@app.route("/api/bot/preset", methods=["POST"])
 def save_smart_preset():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     cfg = data.get("config") or {}
     if not name or not isinstance(cfg, dict):
         return jsonify({"success": False, "error": "Nombre o config inválidos"}), 400
-    try:
+    if request.path == '/api/bot/preset':
+        from bot.presets import snapshot
         try:
-            with open(_presets_path(), "r", encoding="utf-8") as f:
-                presets = json.load(f)
-        except (OSError, ValueError):
-            presets = {}
-        presets[name] = cfg
-        with open(_presets_path(), "w", encoding="utf-8") as f:
-            json.dump(presets, f, ensure_ascii=False, indent=2)
+            cfg = snapshot(cfg)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+    try:
+        with _presets_lock:
+            try:
+                with open(_presets_path(), "r", encoding="utf-8") as f:
+                    presets = json.load(f)
+            except (OSError, ValueError):
+                presets = {}
+            presets[name] = cfg
+            tmp = _presets_path() + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(presets, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, _presets_path())
         return jsonify({"success": True})
     except OSError as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -2090,12 +2103,13 @@ def _bot_notificar(texto):
 
 
 def _bot_preset(nombre):
+    from bot.presets import resolver
     try:
         with open(_presets_path(), "r", encoding="utf-8") as f:
             presets = json.load(f)
     except (OSError, ValueError):
-        return {}
-    return presets.get(nombre) or presets.get("default") or {}
+        presets = {}
+    return resolver(presets, nombre)
 
 
 def _bot_descargar(url):
@@ -2151,6 +2165,15 @@ def bot_config():
     return _bot_respuesta(lambda: _bot().guardar_cfg(data))
 
 
+@app.route('/api/bot/clip/<int:sid>')
+def bot_clip_guardado(sid):
+    subida = _bot().db.subida(sid)
+    if not subida or not os.path.isfile(subida['archivo']):
+        return jsonify({'success': False, 'error': 'El clip no está en esta PC.'}), 404
+    ruta = os.path.abspath(subida['archivo'])
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta))
+
+
 @app.route('/api/bot/lives', methods=['GET', 'POST'])
 def bot_lives():
     def hacer():
@@ -2175,7 +2198,8 @@ def bot_encolar():
         if not urls:
             raise ValueError("Pega al menos un enlace.")
         ids = [_bot().encolar(u, origen="manual", cuentas=data.get("cuentas") or None,
-                              cortar=data.get("cortar", True), texto_fijo=data.get("texto_fijo", ""))
+                              cortar=data.get("cortar", True), texto_fijo=data.get("texto_fijo", ""),
+                              preset=data.get('preset', ''))
                for u in urls]
         return {"ids": ids}
     return _bot_respuesta(hacer)
@@ -2330,7 +2354,7 @@ def remoto_estado(jid):
     except OSError:
         pass
     por_archivo = {m.get("archivo"): m for m in t["meta"]}
-    clips = [{"n": i, "nombre": os.path.basename(r),
+    clips = [{"n": i, "nombre": os.path.basename(r), "bytes": os.path.getsize(r) if os.path.isfile(r) else 0,
               "publicacion": (por_archivo.get(r) or {}).get("publicacion") or ""}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
