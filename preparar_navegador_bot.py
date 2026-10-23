@@ -11,9 +11,10 @@ from bot import navegador
 
 
 def preparar(preferido='auto'):
-    if importlib.util.find_spec('playwright') is None:
-        print('Instalando Playwright en el Python de la app...', flush=True)
-        subprocess.run([sys.executable, '-m', 'pip', 'install', 'playwright'], check=True)
+    faltan = [mod for mod in ('playwright', 'psutil') if importlib.util.find_spec(mod) is None]
+    if faltan:
+        print('Instalando dependencias del navegador en el Python de la app: ' + ', '.join(faltan), flush=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', *faltan], check=True)
     nombre, ruta = navegador.buscar_navegador(preferido)
     if ruta:
         print(f'Se usara {nombre.capitalize()} instalado; no hace falta descargar Chromium.')

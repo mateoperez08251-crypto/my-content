@@ -15,12 +15,19 @@ class BrowserSetupTests(unittest.TestCase):
             self.assertEqual(setup.preparar('auto'), 'brave')
         run.assert_not_called()
 
-    def test_installs_playwright_with_same_python(self):
+    def test_installs_browser_dependencies_with_same_python(self):
         with patch.object(setup.importlib.util, 'find_spec', return_value=None), \
              patch.object(setup.navegador, 'buscar_navegador', return_value=('brave', '/brave')), \
              patch.object(setup.subprocess, 'run') as run:
             setup.preparar('auto')
-        run.assert_called_once_with([sys.executable, '-m', 'pip', 'install', 'playwright'], check=True)
+        run.assert_called_once_with([sys.executable, '-m', 'pip', 'install', 'playwright', 'psutil'], check=True)
+
+    def test_installs_only_psutil_when_playwright_is_ready(self):
+        with patch.object(setup.importlib.util, 'find_spec', side_effect=lambda name: None if name == 'psutil' else object()), \
+             patch.object(setup.navegador, 'buscar_navegador', return_value=('chrome', '/chrome')), \
+             patch.object(setup.subprocess, 'run') as run:
+            setup.preparar('chrome')
+        run.assert_called_once_with([sys.executable, '-m', 'pip', 'install', 'psutil'], check=True)
 
     def test_failed_install_does_not_claim_success(self):
         with patch.object(setup.importlib.util, 'find_spec', return_value=None), \

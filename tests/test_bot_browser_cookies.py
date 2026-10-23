@@ -95,6 +95,7 @@ class CookieTests(unittest.TestCase):
             (PermissionError(secret), 'COOKIES_PERMISOS'),
             (ModuleNotFoundError(secret, name='playwright'), 'COOKIES_DEPENDENCIA'),
             (RuntimeError('ProcessSingleton ' + secret), 'COOKIES_PERFIL_OCUPADO'),
+            (RuntimeError('process did exit: exitCode=21, signal=null ' + secret), 'COOKIES_PERFIL_OCUPADO'),
             (RuntimeError("Executable doesn't exist " + secret), 'COOKIES_NAVEGADOR_FALTA'),
             (RuntimeError(secret), 'COOKIES_ABRIR'),
         ]

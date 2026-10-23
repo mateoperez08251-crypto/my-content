@@ -4,6 +4,7 @@ import errno
 import math
 import time
 from urllib.parse import urlsplit
+from .navegador import es_perfil_ocupado
 
 MAX_BYTES = 2 * 1024 * 1024
 DOMINIOS = {'tiktok': ('tiktok.com',), 'youtube': ('youtube.com', 'google.com'),
@@ -26,8 +27,7 @@ def error_importacion(error, etapa):
             return '[COOKIES_DEPENDENCIA] Falta Playwright en el Python de la app. Ejecuta preparar_navegador_bot.bat y reinicia la app.'
         if isinstance(error, ModuleNotFoundError):
             return '[COOKIES_DEPENDENCIA] Falta una dependencia para abrir el navegador. Repara la instalación de Playwright en el Python que ejecuta la app.'
-        if any(t in detalle for t in ('processsingleton', 'singletonlock', 'profile in use',
-                                      'user data directory is already in use', 'profile is already in use')):
+        if es_perfil_ocupado(error):
             return '[COOKIES_PERFIL_OCUPADO] El perfil sigue abierto en otro proceso. Cierra la ventana de esa cuenta y espera a que termine la comprobación de sesión.'
         if any(t in detalle for t in ("executable doesn't exist", 'executable does not exist', 'playwright install')):
             return '[COOKIES_NAVEGADOR_FALTA] No está instalado el navegador de automatización. Ejecuta preparar_navegador_bot.bat o selecciona el navegador instalado que usas con esta cuenta.'
