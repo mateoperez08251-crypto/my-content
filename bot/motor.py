@@ -9,12 +9,13 @@ import json
 import os
 import random
 import re
+import shutil
 import threading
 import time
 import traceback
 from datetime import datetime
 
-from . import archivos, navegador, remoto
+from . import archivos, locales, navegador, remoto
 from .planificacion import estimar
 from .presets import NOMBRE_CALIDAD, snapshot
 from .db import DB
@@ -308,6 +309,30 @@ class Motor:
                 self.db.marcar_trabajo(tid, "omitido", "Video anterior: solo se sube lo nuevo.")
             return None
         return self.encolar(url, origen="radar", clave=clave, canal=canal, titulo=item.get("title", ""))
+
+    def encolar_archivo(self, stream, nombre, clave, cuentas, plataforma, texto=''):
+        nombre, extension, clave, cuentas, texto = locales.validar(nombre, clave, cuentas, plataforma, texto)
+        anterior = self.db.trabajo_por_clave(clave)
+        if anterior:
+            return {'id': anterior['id'], 'publicaciones': len(anterior['cuentas']), 'repetido': True}
+        for cid in cuentas:
+            cuenta = self.db.cuenta(cid)
+            if not cuenta or cuenta['plataforma'] != plataforma:
+                raise ValueError('Elige cuentas de la plataforma seleccionada.')
+        texto = texto or os.path.splitext(nombre)[0]
+        carpeta, ruta = locales.guardar(self.carpeta, stream, nombre, extension)
+        conservar = False
+        try:
+            tid, nuevo = self.db.encolar_local(clave, nombre, ruta, cuentas, plataforma, texto)
+            conservar = nuevo
+        finally:
+            if not conservar:
+                shutil.rmtree(carpeta, ignore_errors=True)
+        if nuevo:
+            self.log(f'Archivo local guardado: {nombre} → {len(cuentas)} cuenta(s). En cola de publicación.')
+        self._despertar.set()
+        guardado = self.db.trabajo(tid)
+        return {'id': tid, 'publicaciones': len(guardado['cuentas']), 'repetido': not nuevo}
 
     def _es_viejo(self, item):
         pub = item.get("published") or ""

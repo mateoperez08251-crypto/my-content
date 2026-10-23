@@ -2212,6 +2212,25 @@ def bot_cuenta_crear():
         d.get("nombre"), d.get("plataforma"), d.get("limite_dia", 6), d.get("url_subida", ""))})
 
 
+@app.route('/api/bot/archivos', methods=['POST'])
+def bot_archivo_local():
+    from bot.locales import MAX_BYTES
+    def hacer():
+        if request.content_length and request.content_length > MAX_BYTES + 1024 * 1024:
+            raise ValueError('El video supera el límite de 4 GiB por archivo.')
+        archivo = request.files.get('archivo')
+        if archivo is None or not archivo.filename:
+            raise ValueError('Elige un video de tu PC.')
+        try:
+            cuentas = json.loads(request.form.get('cuentas', '[]'))
+        except ValueError:
+            raise ValueError('La selección de cuentas no es válida.') from None
+        return _bot().encolar_archivo(archivo.stream, archivo.filename,
+            request.form.get('clave', ''), cuentas, request.form.get('plataforma', ''),
+            request.form.get('texto', ''))
+    return _bot_respuesta(hacer)
+
+
 @app.route("/api/bot/cuentas/<int:cid>", methods=["POST", "DELETE"])
 def bot_cuenta_editar(cid):
     d = request.get_json(silent=True) or {}
