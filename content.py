@@ -2107,8 +2107,9 @@ def _bot_descargar(url):
 
 def _iniciar_bot():
     from bot import motor as bot_motor
+    from bot.storage import preparar
     motor = bot_motor.configurar(
-        carpeta=paths.DATA_DIR, smart_split=run_smart_split_thread, descargar=_bot_descargar,
+        carpeta=paths.DATA_DIR, almacenamiento=preparar(paths.DATA_DIR), smart_split=run_smart_split_thread, descargar=_bot_descargar,
         ocupar=_intentar_iniciar_trabajo, liberar=_terminar_trabajo, log=log,
         notificar=_bot_notificar, firebase=lambda: firebase_db, cargar_preset=_bot_preset)
     motor.lives()  # Recuperar segmentos cerrados; nunca reinicia una captura sin petición.
@@ -2194,6 +2195,11 @@ def bot_cuenta_editar(cid):
         return _bot_respuesta(lambda: _bot().db.borrar_cuenta(cid))
     return _bot_respuesta(lambda: _bot().db.editar_cuenta(cid, **{
         k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida")}))
+
+
+@app.route("/api/bot/cuentas/<int:cid>/cerrar", methods=["POST"])
+def bot_cuenta_cerrar(cid):
+    return _bot_respuesta(lambda: _bot().cerrar_login(cid))
 
 
 @app.route("/api/bot/cuentas/<int:cid>/login", methods=["POST"])
@@ -2715,3 +2721,4 @@ if __name__ == "__main__":
                 time.sleep(1)
         except KeyboardInterrupt:
             _salir_limpio()
+

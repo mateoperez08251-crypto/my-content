@@ -73,11 +73,13 @@ def _en_horario(inicio: str, fin: str, ahora=None) -> bool:
 
 class Motor:
     def __init__(self, carpeta, smart_split=None, descargar=None, ocupar=None, liberar=None,
-                 log=print, notificar=None, firebase=None, cargar_preset=None):
+                 log=print, notificar=None, firebase=None, cargar_preset=None, almacenamiento=None):
         self.carpeta = carpeta
         os.makedirs(carpeta, exist_ok=True)
-        self.db = DB(os.path.join(carpeta, "bot.db"))
-        self._cfg_ruta = os.path.join(carpeta, "bot_config.json")
+        self.almacenamiento = os.path.abspath(almacenamiento or carpeta)
+        os.makedirs(self.almacenamiento, exist_ok=True)
+        self.db = DB(os.path.join(self.almacenamiento, "bot.db"))
+        self._cfg_ruta = os.path.join(self.almacenamiento, "bot_config.json")
         self.cfg = self._leer_cfg()
         self.smart_split = smart_split      # data -> (rutas, meta)
         self.descargar = descargar          # url -> ruta
@@ -488,7 +490,7 @@ class Motor:
 
     # -- subir ----------------------------------------------------------
     def perfil(self, cuenta) -> str:
-        return os.path.join(self.carpeta, "bot_perfiles", f"cuenta_{int(cuenta['id'])}")
+        return os.path.join(self.almacenamiento, "bot_perfiles", f"cuenta_{int(cuenta['id'])}")
 
     def _siguiente_subida(self):
         ahora = time.time()
@@ -608,6 +610,13 @@ class Motor:
         self.log(f"Cookies importadas para {cuenta['nombre']}. Falta comprobar la sesión.")
         return {'importadas': len(cookies)}
 
+    def cerrar_login(self, cid):
+        cuenta = self.db.cuenta(cid)
+        if not cuenta:
+            raise ValueError("Cuenta no encontrada.")
+        navegador.cerrar_normal(self.perfil(cuenta))
+        return {"mensaje": "Cierre solicitado. Al cerrar, se comprobará la sesión."}
+
     def abrir_login(self, cid, espera_s=45):
         """Abre el navegador de la cuenta en la página de inicio de sesión. Al cerrarlo, se comprueba.
         Espera a que el proceso arranque sin fallar de inmediato; los errores llegan al panel."""
@@ -682,6 +691,7 @@ class Motor:
             c = dict(c)
             c["hoy"] = self.db.subidas_ok_hoy(c["id"])
             c["abierta"] = navegador.ocupado(self.perfil(c))
+            c["login_abierto"] = navegador.login_abierto(self.perfil(c))
             cuentas.append(c)
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
@@ -702,13 +712,15 @@ class Motor:
 
 # ---- instancia única -----------------------------------------------------
 _motor: Motor | None = None
+_motor_guard = threading.Lock()
 
 
 def configurar(**deps) -> Motor:
     global _motor
-    if _motor is None:
-        _motor = Motor(**deps)
-        _motor.iniciar()
+    with _motor_guard:
+        if _motor is None:
+            _motor = Motor(**deps)
+            _motor.iniciar()
     return _motor
 
 
@@ -724,3 +736,4 @@ def desde_radar(item: dict):
         except Exception as e:
             _motor.log(f"No pude encolar lo del radar: {e}")
     return None
+
