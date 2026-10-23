@@ -92,6 +92,9 @@ class CancelarCola(unittest.TestCase):
         publicar.assert_not_called()
         self.assertIsNone(self.m.db.subida(self.sid))
         self.assertTrue(self.video.exists())
+        eventos = self.m.db._todos('SELECT * FROM bot_avisos')
+        self.assertFalse(any(e['categoria'] == 'publicados' for e in eventos))
+        self.assertTrue(any('cancelada' in e['texto'] for e in eventos))
 
     def test_cancelar_en_espera_de_carga_no_toma_captura_ni_reintenta(self):
         page = Mock()

@@ -191,6 +191,14 @@ class Cola(unittest.TestCase):
         textos = [t for _, t in PlataformaFalsa.llamadas]
         self.assertEqual(textos, ["Clip IA #a\nSígueme", "Video nuevo (Parte 2) #viral #fyp\nSígueme"])
         self.assertEqual({s["estado"] for s in self.m.db.subidas_recientes()}, {"ok"})
+        eventos = self.m.db._todos('SELECT * FROM bot_avisos')
+        self.assertEqual(sum(e['categoria'] == 'publicados' for e in eventos), 2)
+        self.assertTrue(any('guardados en la PC' in e['texto'] for e in eventos))
+        # La entrega externa no participa en el hilo de publicación.
+        self.assertEqual(self.avisos, [])
+        self.m._avisos.enviar = mock.Mock(side_effect=RuntimeError('sin red'))
+        self.m._avisos.procesar()
+        self.assertEqual({s['estado'] for s in self.m.db.subidas_recientes()}, {'ok'})
 
     def test_publica_titulo_de_cada_momento_y_no_el_del_video_original(self):
         self.m.smart_split = lambda datos: (self.clips, [
@@ -227,6 +235,7 @@ class Cola(unittest.TestCase):
     def test_sin_destino_avisa(self):
         self.m.encolar("https://youtu.be/x", canal="@nadie")
         self.assertEqual(self.m.db.trabajos_recientes()[0]["estado"], "sin_destino")
+        self.m._avisos.procesar()
         self.assertTrue(self.avisos)
 
     def test_url_manual_sin_cortar(self):
@@ -280,6 +289,9 @@ class Cola(unittest.TestCase):
         self._vaciar()
         self.assertEqual(self.m.db.subidas_recientes()[0]["estado"], "revisar")
         self.assertEqual(len(PlataformaFalsa.llamadas), 1)
+        eventos = self.m.db._todos('SELECT * FROM bot_avisos')
+        self.assertFalse(any(e['categoria'] == 'publicados' for e in eventos))
+        self.assertTrue(any('No se confirmó' in e['texto'] for e in eventos))
 
     def test_cierre_falla_tras_confirmar_no_repite(self):
         @contextmanager
@@ -468,10 +480,12 @@ class ServidorDeCortes(unittest.TestCase):
         m.guardar_cfg({"remoto_url": "http://127.0.0.1:9", "remoto_clave": "x"})
         self.assertFalse(m._vigilar_remoto())
         self.assertFalse(m._vigilar_remoto())
+        m._avisos.procesar()
         self.assertEqual(len(avisos), 1)
         self.assertIn("desconectó", avisos[0])
         m.guardar_cfg({"remoto_url": f"http://127.0.0.1:{self.puerto}"})  # pegó el enlace nuevo
         self.assertTrue(m._vigilar_remoto())
+        m._avisos.procesar(ahora=time.time() + 61)
         self.assertEqual(len(avisos), 2)
         self.assertIn("volvió", avisos[1])
         self.assertTrue(m._remoto_disponible())

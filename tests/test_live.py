@@ -147,6 +147,18 @@ class Queue(unittest.TestCase):
         self.assertTrue(Path(folder, 'abcdef12_000001.mp4').exists())
         self.manager.reconcile()
         self.assertEqual(len(self.motor.db.trabajos_recientes()), 1)
+        avisos = self.motor.db._todos("SELECT * FROM bot_avisos WHERE categoria='cola'")
+        self.assertEqual(len(avisos), 1)
+        self.assertIn('Segmento del live guardado', avisos[0]['texto'])
+
+    def test_avisos_del_live_sin_urls_privadas_ni_duplicados(self):
+        jid, _ = self.seed()
+        for state in ('capturando', 'capturando', 'reconectando', 'error', 'detenido'):
+            self.manager._update(jid, state, 'https://private.test/?token=SECRETO')
+        avisos = self.motor.db._todos("SELECT * FROM bot_avisos WHERE categoria='lives'")
+        self.assertEqual(len(avisos), 4)
+        self.assertEqual(sum(r['urgente'] for r in avisos), 1)
+        self.assertNotIn('SECRETO', str(avisos))
 
     def test_motor_uses_local_snapshot_and_never_remote_or_downloader(self):
         self.seed()

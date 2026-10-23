@@ -247,8 +247,19 @@ class LiveManager:
             threading.Thread(target=self._reconcile_loop, daemon=True, name='live-cola').start()
 
     def _update(self, jid, state, detail=''):
+        anterior = self.db._uno('SELECT estado,titulo FROM live_sesiones WHERE id=?', (jid,))
         self.db._q('UPDATE live_sesiones SET estado=?,detalle=?,actualizado=? WHERE id=?',
                    (state, detail[:500], time.time(), jid))
+        if anterior and anterior['estado'] != state:
+            from .avisos import breve
+            textos = {'capturando': 'Se encontró la señal; iniciando captura y esperando segmentos cerrados.',
+                      'reconectando': 'Se perdió o no se pudo abrir la señal; reintentando.',
+                      'error': 'Falló la captura. Revisa el detalle en YouTube Live → clips.',
+                      'detenido': 'Captura detenida. Los clips en cola se conservan.',
+                      'finalizado': 'La transmisión terminó. Los clips en cola se conservan.'}
+            if state in textos:
+                self.motor.avisar('lives', f'live:{jid}:{state}',
+                                  f"Live · {breve(anterior['titulo']) or jid}: {textos[state]}", state == 'error')
 
     def start(self, data):
         if not isinstance(data, dict):
@@ -418,6 +429,7 @@ class LiveManager:
                 tid = self.db.encolar_archivo_live(segment['url'], key, segment['archivo'], opts,
                     f"{segment['titulo'] or 'YouTube Live'} · parte {part}",
                     cfg['accounts'], cfg['preset'], cfg['text'])
+                self.motor._aviso_trabajo(self.db.trabajo(tid), 'cola', 'Segmento del live guardado; en cola para preparar.', 'cola')
                 self.db._q("UPDATE live_segmentos SET estado='encolado',trabajo_id=? WHERE sesion=? AND nombre=?",
                            (tid,segment['sesion'],segment['nombre']))
                 self.motor.despertar()
