@@ -696,6 +696,7 @@ class Motor:
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
             "remoto": self._remoto_estado,
+            "carpeta_datos": self.almacenamiento,
             "actividad": self.actividad,
             "en_horario": _en_horario(self.cfg["hora_inicio"], self.cfg["hora_fin"]),
             "cuentas": cuentas,

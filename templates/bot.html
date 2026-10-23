@@ -103,6 +103,7 @@ a{color:var(--acento)}
 
   <section class="card">
     <h2><i class="ph-duotone ph-user-circle"></i> Cuentas <small>Inicia sesión una vez por cuenta</small></h2>
+    <p class="muted" id="carpeta-datos" style="overflow-wrap:anywhere"></p>
     <p class="muted">Sesión abre una ventana propia en la PC donde ejecutas la app, aunque tengas «Navegador oculto» activado. El bot usa su propio perfil por cuenta y actúa dentro del navegador sin mover tu cursor del escritorio. Inicia sesión y cierra esa ventana para guardar la sesión.</p>
     <p class="muted">También puedes importar cookies JSON o Netscape de tu propia cuenta y pulsar Comprobar sesión. Las cookies se guardan en el perfil de esa cuenta; no garantizan evitar verificaciones o bloqueos.</p>
     <table><thead><tr><th>Cuenta</th><th>Sesión</th><th>Hoy</th><th></th></tr></thead><tbody id="cuentas"></tbody></table>
@@ -215,6 +216,7 @@ function chips(id, sel) {
 
 function pintar() {
   const c = E.config;
+  $('carpeta-datos').textContent = E.carpeta_datos ? `Cuentas y perfiles guardados en: ${E.carpeta_datos}` : '';
   $('activo').checked = c.activo;
   $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
   if (!editando) {
