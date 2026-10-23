@@ -36,6 +36,9 @@ const ultimo = () => enviados.at(-1);
 const archivo = () => { el.archivo.files = [{name:'cookies.json', size:250}]; };
 
 async function main() {
+  const lives = html.slice(html.indexOf('id="seccion-lives"'), html.indexOf('2. Añadir videos desde enlaces'));
+  assert.match(lives, /onclick="abrirCookiesDescarga\(\)"/);
+  assert.match(lives, /cookies en «Esta PC»/);
   respuestas.push(ok(false));
   await ctx.abrirCookiesDescarga();
   assert(el.modal.open);

@@ -1,6 +1,6 @@
 # moviepy 2.x obligatorio: editor.py y smart_editor.py usan la API nueva (subclipped/with_*).
 moviepy>=2.0,<3
-yt-dlp
+yt-dlp[default,deno]
 playwright
 psutil>=5.9
 requests
