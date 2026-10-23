@@ -178,6 +178,26 @@ class LimitePublicacion(unittest.TestCase):
             self.subir()
         self.boton.click.assert_not_called()
 
+    def test_repara_descripcion_una_vez_si_tiktok_la_reemplaza(self):
+        llamadas = []
+        def escribir(editor, texto):
+            llamadas.append(texto)
+            editor.inner_text.return_value = 'nombre_del_archivo' if len(llamadas) == 1 else texto
+        self.h.escribir.side_effect = escribir
+        self.assertEqual(self.subir(), '')
+        self.assertEqual(llamadas, [self.texto, self.texto])
+        self.assertEqual(self.boton.click.call_count, 2)  # prueba y una publicación
+        self.page.keyboard.press.assert_not_called()
+        self.assertEqual(self.editor.press.call_count, 2)
+
+    def test_si_no_se_conserva_la_descripcion_no_insiste_ni_publica(self):
+        self.h.escribir.side_effect = None
+        self.editor.inner_text.return_value = 'texto que no coincide'
+        with self.assertRaises(Rechazado):
+            self.subir()
+        self.assertEqual(self.h.escribir.call_count, 2)
+        self.boton.click.assert_not_called()
+
     def test_texto_demasiado_largo_no_se_recorta(self):
         self.texto = "a" * (tiktok.MAX_TEXTO + 1)
         with self.assertRaises(Rechazado):

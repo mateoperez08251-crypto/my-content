@@ -42,7 +42,7 @@ td{padding:7px 8px;border-bottom:1px solid #181b22;vertical-align:top}
 td.acc{white-space:nowrap;text-align:right}
 .est{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
 .e-ok,.e-listo{color:var(--ok)} .e-error,.e-sin_login,.e-sin_destino{color:var(--mal)}
-.e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#555} .e-revisar,.e-sin_comprobar{color:var(--aviso)}
+.e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#555} .e-revisar,.e-sin_comprobar,.e-cancelando{color:var(--aviso)}
 .plat{display:inline-flex;align-items:center;gap:4px}
 .muted{color:var(--suave);font-size:12px}
 .err{color:var(--mal);font-size:12px;max-width:380px;word-break:break-word}
@@ -284,7 +284,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 <script>
 const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
 const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',sin_comprobar:'Sin comprobar',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
-  cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
+  cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar',cancelando:'Cancelando…'};
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
 let selLocal = new Set(), archivosLocales = [], enviandoLocales = false;
 let cookiesDescargaOcupado = false, cookiesDescargaDestino = null;
@@ -359,8 +359,8 @@ function pintar() {
     <td>${s.url_publicada ? `<a href="${esc(s.url_publicada)}" target="_blank">ver</a>` : ''}
       ${s.error ? `<div class="err">${esc(s.error)} ${s.captura ? `· <a href="/api/bot/captura/${s.id}" target="_blank">captura</a>` : ''}</div>` : ''}
       ${s.estado === 'pendiente' && s.intentos ? `<span class="muted">intento ${s.intentos}</span>` : ''}</td>
-    <td class="acc">${s.estado === 'revisar' ? `<button class="mini" onclick="accion('subidas',${s.id},'ok')" title="Sí se publicó"><i class="ph ph-check"></i></button>` : ''}${s.estado !== 'ok' ? `<button class="mini" onclick="accion('subidas',${s.id},'reintentar')" title="Reintentar ya"><i class="ph ph-arrow-clockwise"></i></button>
-      <button class="mini peligro" onclick="accion('subidas',${s.id},'borrar')"><i class="ph ph-trash"></i></button>` : ''}</td></tr>`
+    <td class="acc">${s.estado === 'revisar' ? `<button class="mini" onclick="accion('subidas',${s.id},'ok')" title="Sí se publicó"><i class="ph ph-check"></i></button>` : ''}${!['ok','subiendo','cancelando'].includes(s.estado) ? `<button class="mini" onclick="accion('subidas',${s.id},'reintentar')" title="Reintentar ya"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
+      ${s.estado !== 'ok' ? `<button class="mini peligro" onclick="accion('subidas',${s.id},'borrar')" ${s.estado === 'cancelando' ? 'disabled' : ''} title="${s.estado === 'subiendo' ? 'Cancelar subida y retirar de la cola' : 'Eliminar de la cola'}"><i class="ph ph-trash"></i></button>` : ''}</td></tr>`
   ).join('') || '<tr><td colspan="6" class="muted">Aún no hay subidas.</td></tr>';
   $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
     <td>${t.origen === 'local' ? esc(t.titulo) : `<a href="${esc(t.url)}" target="_blank">${esc(t.titulo || t.url)}</a>`}<div class="muted">${esc(t.canal)}</div>
@@ -643,7 +643,11 @@ async function guardarRegla() {
   toast('Regla guardada'); cargar();
 }
 async function borrarRegla(id) { await api(`/api/bot/reglas/${id}`, undefined, 'DELETE'); cargar(); }
-async function accion(tipo, id, a) { await api(`/api/bot/${tipo}/${id}/${a}`, {}); cargar(); }
+async function accion(tipo, id, a) {
+  const resultado = await api(`/api/bot/${tipo}/${id}/${a}`, {});
+  if (resultado.mensaje) toast(resultado.mensaje);
+  await cargar();
+}
 async function probarRemoto() {
   await guardarAjustes();
   try { const j = await api('/api/bot/remoto_probar', {}); toast(j.mensaje); } catch (e) {}

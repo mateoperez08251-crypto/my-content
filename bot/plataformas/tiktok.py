@@ -3,6 +3,7 @@
 import re
 import time
 import unicodedata
+from ..cancelacion import SubidaCancelada, comprobar_cancelacion, iniciar_publicacion
 
 from .base import (ErrorSubida, Rechazado, SesionCerrada, SinConfirmar,
                    esperar_habilitado, hay_texto, primero)
@@ -34,6 +35,7 @@ def sesion_abierta(page) -> bool:
 
 
 def _revisar(page):
+    comprobar_cancelacion(page)
     if not sesion_abierta(page):
         raise SesionCerrada("TikTok pide iniciar sesión.")
     for p in _RECHAZO:
@@ -106,6 +108,7 @@ def _esperar_publicacion(page, anteriores, timeout=180):
             if boton is not None and boton.is_enabled():
                 # Solo el aviso, una vez. Nunca repetir el botón principal Publicar.
                 confirmado_dialogo = True
+                comprobar_cancelacion(page)
                 boton.click(timeout=15000)
         if time.monotonic() >= fin:
             raise SinConfirmar("TikTok no mostró un aviso nuevo de publicación completada.")
@@ -123,6 +126,7 @@ def subir(page, h, video, texto, url_subida=""):
     h.informar("Cargando el archivo en TikTok")
     entrada = primero(page, ['input[type="file"][accept*="video"]', 'input[type="file"]'],
                       timeout=60, visible=False)
+    comprobar_cancelacion(page)
     entrada.set_input_files(video)
     editor = _buscar(page, _EDITOR, "el editor de la descripción", timeout=180)
     publicar = _buscar(page, _PUBLICAR, "el botón Publicar", timeout=180,
@@ -130,10 +134,19 @@ def subir(page, h, video, texto, url_subida=""):
     esperar_habilitado(publicar, timeout=900, page=page, revisar=lambda: _revisar(page))
 
     h.informar("Escribiendo y comprobando la descripción")
-    h.escribir(editor, texto)
-    page.keyboard.press("Escape")
-    h.pausa(1.5, 3)
-    _comprobar_texto(editor, texto)
+    for intento in range(2):
+        h.escribir(editor, texto)
+        comprobar_cancelacion(page)
+        editor.press('Escape', timeout=5000)
+        h.pausa(1.5, 3)
+        try:
+            _comprobar_texto(editor, texto)
+            break
+        except Rechazado:
+            if intento:
+                raise
+            h.informar('TikTok cambió la descripción; vuelvo a escribirla antes de publicar')
+            editor = _buscar(page, _EDITOR, 'el editor de la descripción', timeout=30)
     publicar = _buscar(page, _PUBLICAR, "el botón Publicar", timeout=30,
                        boton=_NOMBRE_PUBLICAR)
     esperar_habilitado(publicar, timeout=120, page=page, revisar=lambda: _revisar(page))
@@ -144,12 +157,13 @@ def subir(page, h, video, texto, url_subida=""):
     anteriores = _confirmaciones(page)
 
     h.informar("Publicando y esperando la confirmación de TikTok")
+    iniciar_publicacion(page)
     try:
         # Desde aquí cualquier fallo puede ocurrir después de enviar la publicación.
         # Usar el clic del locator evita pulsar coordenadas que ya hayan cambiado.
         publicar.click(timeout=15000)
         _esperar_publicacion(page, anteriores)
-    except SinConfirmar:
+    except (SinConfirmar, SubidaCancelada):
         raise
     except Exception as exc:
         raise SinConfirmar("Se intentó publicar, pero se perdió la confirmación de TikTok "

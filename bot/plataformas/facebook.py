@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Facebook Reels por navegador. Para una página concreta, pon en la cuenta su enlace de
 creación de Reels (p. ej. el de Meta Business Suite) como 'URL de subida'."""
+from ..cancelacion import comprobar_cancelacion, iniciar_publicacion, esperar_cancelable
 from .base import (ErrorSubida, Rechazado, SesionCerrada, SinConfirmar, boton_texto, esperar_texto, hay_texto,
                    primero)
 
@@ -25,6 +26,7 @@ def sesion_abierta(page) -> bool:
 
 
 def _revisar(page):
+    comprobar_cancelacion(page)
     if not sesion_abierta(page):
         raise SesionCerrada("Facebook pide iniciar sesión.")
     for p in _RECHAZO:
@@ -33,13 +35,15 @@ def _revisar(page):
 
 
 def subir(page, h, video, texto, url_subida=""):
+    comprobar_cancelacion(page)
     page.goto(url_subida or URL_SUBIDA, wait_until="domcontentloaded")
-    page.wait_for_timeout(4000)
+    esperar_cancelable(page, 4000)
     _revisar(page)
     h.mirar()
 
     entrada = primero(page, ['input[type="file"][accept*="video"]', 'input[type="file"]'],
                       timeout=60, visible=False)
+    comprobar_cancelacion(page)
     entrada.set_input_files(video)
     h.pausa(4, 7)
 
@@ -61,6 +65,7 @@ def subir(page, h, video, texto, url_subida=""):
     h.pausa(1.5, 3)
 
     publicar = boton_texto(page, r"^(publicar|publish|compartir|share)$", timeout=600)
+    iniciar_publicacion(page)
     h.clic(publicar)
 
     ok = esperar_texto(page, [r"reel (est[aá] )?publicado|se public[oó]|tu reel ya|reel is (now )?live",
@@ -70,3 +75,4 @@ def subir(page, h, video, texto, url_subida=""):
         raise SinConfirmar("Facebook no confirmó la publicación.")
     h.pausa(8, 15)  # deja terminar lo que la página envía antes de cerrar
     return ""
+

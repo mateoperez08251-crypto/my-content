@@ -2304,7 +2304,7 @@ def bot_subida_accion(sid, accion):
             _bot().db.reintentar_subida(sid)
             _bot().despertar()
         elif accion == "borrar":
-            _bot().db.borrar_subida(sid)
+            return _bot().borrar_subida(sid)
         elif accion == "ok":  # lo revisaste y sí se publicó
             _bot().db.marcar_subida(sid, "ok", error="")
         else:
@@ -2319,7 +2319,7 @@ def bot_trabajo_accion(tid, accion):
             _bot().db.marcar_trabajo(tid, "pendiente", intentos=0, proximo_intento=0)
             _bot().despertar()
         elif accion == "borrar":
-            _bot().db.borrar_trabajo(tid)
+            return _bot().borrar_trabajo(tid)
         else:
             raise ValueError("Acción no válida.")
     return _bot_respuesta(hacer)

@@ -20,6 +20,7 @@ from . import archivos, locales, navegador, remoto
 from .planificacion import estimar
 from .presets import NOMBRE_CALIDAD, snapshot
 from .db import DB
+from .cancelacion import ControlSubida, SubidaCancelada
 from .humano import Humano
 from .plataformas import POR_NOMBRE
 from .plataformas.base import Rechazado, SesionCerrada, SinConfirmar
@@ -101,6 +102,8 @@ class Motor:
         self.actividad = "En espera"
         self._stop = threading.Event()
         self._despertar = threading.Event()
+        self._cola_lock = threading.RLock()
+        self._subida_actual = None
         self._sesiones_guard = threading.Lock()
         self._comprobando = set()
         self._hilo = None
@@ -572,6 +575,30 @@ class Motor:
         return texto
 
     # -- subir ----------------------------------------------------------
+    def borrar_subida(self, sid):
+        sid = int(sid)
+        with self._cola_lock:
+            actual = self._subida_actual
+            if actual is not None and actual[0]['id'] == sid:
+                actual[1].cancelar()
+                self.db.marcar_subida(sid, 'cancelando', error='Cancelación solicitada desde la cola.')
+                self.actividad = 'Cancelando la subida; cerrando su navegador…'
+                return {'estado': 'cancelando', 'mensaje':
+                        'Cancelación solicitada. Espera a que se cierre el navegador de esta subida.'}
+            self.db.borrar_subida(sid)
+        self._despertar.set()
+        return {'estado': 'borrado', 'mensaje': 'Subida eliminada de la cola.'}
+
+    def borrar_trabajo(self, tid):
+        with self._cola_lock:
+            actual = self._subida_actual
+            resultado = None
+            if actual is not None and actual[0]['trabajo_id'] == int(tid):
+                resultado = self.borrar_subida(actual[0]['id'])
+            self.db.borrar_trabajo(tid)
+        self._despertar.set()
+        return resultado or {'mensaje': 'Video y subidas pendientes eliminados de la cola.'}
+
     def perfil(self, cuenta) -> str:
         return os.path.join(self.almacenamiento, "bot_perfiles", f"cuenta_{int(cuenta['id'])}")
 
@@ -602,47 +629,93 @@ class Motor:
         return f"{len(pendientes)} subida(s) esperando su turno (límite diario o tiempo entre subidas)"
 
     def _procesar_subida(self, s):
+        # La selección y el clic en Borrar pueden cruzarse: releer bajo el mismo bloqueo.
+        with self._cola_lock:
+            s = self.db.subida(s['id'])
+            if s is None or s['estado'] != 'pendiente':
+                return
+            control = ControlSubida()
+            self._subida_actual = (s, control)
+            self.db.marcar_subida(s['id'], 'subiendo', intentos=s['intentos'] + 1)
+        try:
+            self._ejecutar_subida(s, control)
+        except SubidaCancelada:
+            pass
+        finally:
+            # Después del cierre de navegador.abrir, en el propio hilo del bot.
+            with self._cola_lock:
+                if control.evento.is_set():
+                    if control.confirmada:
+                        self.db.marcar_subida(s['id'], 'ok', error='', url_publicada=control.url)
+                        mensaje = 'La subida ya se había publicado al pedir cancelar. No se repetirá.'
+                    elif control.publicando:
+                        mensaje = ('Se canceló después de iniciar Publicar. Revisa la cuenta: puede estar '
+                                   'publicada. No se reintentará automáticamente.')
+                        self.db.marcar_subida(s['id'], 'revisar', error=mensaje)
+                    else:
+                        self.db.borrar_subida(s['id'])
+                        mensaje = 'Subida cancelada y retirada de la cola.'
+                    self._actividad(mensaje)
+                self._subida_actual = None
+
+    def _ejecutar_subida(self, s, control):
+        control.comprobar()
         cuenta = self.db.cuenta(s["cuenta_id"])
+        if cuenta is None:
+            self.db.borrar_subida(s['id'])
+            return
         mod = POR_NOMBRE[cuenta["plataforma"]]
         nombre = f"{mod.NOMBRE} · {cuenta['nombre']}"
         if not os.path.isfile(s["archivo"]):
             self.db.marcar_subida(s["id"], "error", error="El clip ya no existe en la PC.")
             return
-        self.db.marcar_subida(s["id"], "subiendo", intentos=s["intentos"] + 1)
         self._actividad(f"Subiendo a {nombre}: {os.path.basename(s['archivo'])}")
         captura = ""
         confirmada = False
         fallo_subida = None
         try:
             try:
+                control.comprobar()
                 with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"], navegador=self.cfg["navegador"]) as ctx:
+                    control.comprobar()
                     page = navegador.pagina(ctx)
+                    page._bot_control_subida = control
                     h = Humano(page, velocidad=self.cfg["velocidad"],
                                progreso=lambda paso: self._actividad(f"{nombre}: {paso}"))
                     try:
                         url = mod.subir(page, h, s["archivo"], s["texto"], cuenta["url_subida"])
                         confirmada = True
+                        control.confirmada, control.url = True, url or ''
                     except Exception as exc:
                         fallo_subida = exc
+                        if isinstance(exc, SinConfirmar):
+                            control.publicando = True
+                        control.comprobar()  # cancelar no toma capturas ni programa reintentos
                         captura = self._captura(page, s["id"])
                         raise
             except Exception:
+                control.comprobar()  # un fallo de cierre no oculta la cancelación
                 if not confirmada:
                     # Un fallo al cerrar Playwright no debe ocultar una publicación incierta.
                     if isinstance(fallo_subida, SinConfirmar):
                         raise fallo_subida
                     raise
                 self.log(f"{nombre}: publicación confirmada; falló el cierre del navegador. No se repite.")
+        except SubidaCancelada:
+            return
         except SesionCerrada as e:
+            control.comprobar()
             self.db.marcar_subida(s["id"], "pendiente", intentos=s["intentos"], error=str(e), captura=captura)
             self.db.editar_cuenta(cuenta["id"], estado="sin_login")
             self.log(f"{nombre}: sesión cerrada. Pausada hasta que inicies sesión.")
             self.notificar(f"🔐 Bot: {nombre} pide iniciar sesión. Ábrela desde el panel del bot.")
             return
         except navegador.PerfilOcupado:
+            control.comprobar()
             self.db.marcar_subida(s["id"], "pendiente", intentos=s["intentos"])
             return
         except SinConfirmar as e:
+            control.comprobar()
             self.db.marcar_subida(s["id"], "revisar", error=f"{e} Puede que sí se haya publicado: "
                                   "mira la cuenta y pulsa ✔ o reintentar.", captura=captura)
             self.notificar(f"👀 Bot: revisa {nombre}, no vi la confirmación de la publicación.")
@@ -651,6 +724,7 @@ class Motor:
             return
         except Exception as e:
             intentos = s["intentos"] + 1
+            control.comprobar()
             definitivo = isinstance(e, Rechazado) or intentos >= self.cfg["max_intentos"]
             if definitivo:
                 self.db.marcar_subida(s["id"], "error", error=str(e), captura=captura)
@@ -663,6 +737,7 @@ class Motor:
             self._descanso(cuenta, corto=True)
             return
 
+        control.comprobar()
         self.db.marcar_subida(s["id"], "ok", error="", url_publicada=url or "")
         self.db.editar_cuenta(cuenta["id"], estado="ok")
         self.log(f"✅ Subido a {nombre}" + (f": {url}" if url else ""))

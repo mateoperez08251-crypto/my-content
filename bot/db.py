@@ -108,7 +108,7 @@ class DB:
         self._q("UPDATE trabajos SET estado='pendiente', actualizado=? "
                 "WHERE estado IN ('descargando','cortando')", (ahora,))
         self._q("UPDATE subidas SET estado='revisar', error='Reinicio durante la subida. Comprueba si ya se publicó antes de reintentar.', "
-                "actualizado=? WHERE estado='subiendo'", (ahora,))
+                "actualizado=? WHERE estado IN ('subiendo','cancelando')", (ahora,))
 
     # -- cuentas --------------------------------------------------------
     def cuentas(self):
@@ -264,8 +264,9 @@ class DB:
         return self._todos("SELECT * FROM trabajos ORDER BY id DESC LIMIT ?", (int(limite),))
 
     def borrar_trabajo(self, tid):
-        self._q("DELETE FROM subidas WHERE trabajo_id=? AND estado!='ok'", (int(tid),))
-        self._q("DELETE FROM trabajos WHERE id=?", (int(tid),))
+        with self._lock, self._con:
+            self._con.execute("DELETE FROM subidas WHERE trabajo_id=? AND estado NOT IN ('ok','cancelando','revisar')", (int(tid),))
+            self._con.execute("DELETE FROM trabajos WHERE id=?", (int(tid),))
 
     # -- subidas --------------------------------------------------------
     def crear_subida(self, trabajo_id, cuenta_id, archivo, texto):
@@ -299,7 +300,7 @@ class DB:
 
     def reintentar_subida(self, sid):
         self._q("UPDATE subidas SET estado='pendiente', intentos=0, proximo_intento=0, error='', "
-                "actualizado=? WHERE id=? AND estado!='ok'", (time.time(), int(sid)))
+                "actualizado=? WHERE id=? AND estado NOT IN ('ok','subiendo','cancelando')", (time.time(), int(sid)))
 
     def borrar_subida(self, sid):
         self._q("DELETE FROM subidas WHERE id=?", (int(sid),))
