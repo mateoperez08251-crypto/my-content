@@ -2,6 +2,7 @@
 """YouTube Studio por navegador (los videos verticales de hasta 3 min salen como Shorts)."""
 import re
 import time
+from ..cancelacion import comprobar_cancelacion, iniciar_publicacion, esperar_cancelable
 
 from .base import (ErrorSubida, Rechazado, SesionCerrada, SinConfirmar, esperar_habilitado, esperar_texto,
                    hay_texto, primero, titulo_corto)
@@ -31,6 +32,7 @@ def sesion_abierta(page) -> bool:
 
 
 def _revisar(page):
+    comprobar_cancelacion(page)
     if not sesion_abierta(page):
         raise SesionCerrada("YouTube pide iniciar sesión.")
     for p in _RECHAZO:
@@ -66,18 +68,20 @@ def _esperar_fin_subida(page, timeout=1800):
             texto = ""
         if not _SUBIENDO.search(texto or ""):
             return
-        page.wait_for_timeout(3000)
+        esperar_cancelable(page, 3000)
     raise ErrorSubida("El archivo tardó más de 30 min en subir a YouTube.")
 
 
 def subir(page, h, video, texto, url_subida=""):
+    comprobar_cancelacion(page)
     page.goto(url_subida or URL_SUBIDA, wait_until="domcontentloaded")
-    page.wait_for_timeout(4000)
+    esperar_cancelable(page, 4000)
     _revisar(page)
     h.mirar()
 
     entrada = primero(page, ['input[type="file"][name="Filedata"]', 'input[type="file"]'],
                       timeout=60, visible=False)
+    comprobar_cancelacion(page)
     entrada.set_input_files(video)
     h.pausa(3, 5)
 
@@ -104,6 +108,7 @@ def subir(page, h, video, texto, url_subida=""):
     # YouTube deja pulsar Publicar con el archivo a medio subir: si se cierra Chrome antes, se pierde
     _esperar_fin_subida(page)
     h.pausa(1, 2)
+    iniciar_publicacion(page)
     h.clic(listo)
 
     ok = esperar_texto(page, [r"video publicado|se public[oó]|video published|shorts? publicad",
@@ -120,3 +125,4 @@ def subir(page, h, video, texto, url_subida=""):
         pass
     h.pausa(8, 15)  # deja terminar lo que la página envía antes de cerrar
     return enlace
+

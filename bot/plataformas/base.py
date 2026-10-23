@@ -2,6 +2,7 @@
 """Ayudas comunes: buscar el primer selector visible, esperar textos, errores con nombre."""
 import re
 import time
+from ..cancelacion import comprobar_cancelacion
 
 
 class SesionCerrada(Exception):
@@ -25,6 +26,7 @@ def primero(page, selectores, timeout=30, visible=True):
     """Devuelve el primer locator que aparece entre varios selectores alternativos."""
     fin = time.time() + timeout
     while True:
+        comprobar_cancelacion(page)
         for sel in selectores:
             loc = page.locator(sel).first
             try:
@@ -42,6 +44,7 @@ def boton_texto(page, patron, timeout=30, roles=("button",), habilitado=True):
     rx = re.compile(patron, re.I)
     fin = time.time() + timeout
     while True:
+        comprobar_cancelacion(page)
         for rol in roles:
             loc = page.get_by_role(rol, name=rx)
             try:
@@ -73,6 +76,7 @@ def esperar_habilitado(loc, timeout=600, page=None, revisar=None):
     """Espera a que un botón se active (p. ej. cuando termina de cargar el video)."""
     fin = time.time() + timeout
     while time.time() < fin:
+        comprobar_cancelacion(page)
         if revisar:
             revisar()
         if _habilitado(loc):
@@ -82,6 +86,7 @@ def esperar_habilitado(loc, timeout=600, page=None, revisar=None):
 
 
 def hay_texto(page, patron) -> bool:
+    comprobar_cancelacion(page)
     try:
         return page.get_by_text(re.compile(patron, re.I)).first.is_visible()
     except Exception:
@@ -91,6 +96,7 @@ def hay_texto(page, patron) -> bool:
 def esperar_texto(page, patrones, timeout=120, revisar=None):
     fin = time.time() + timeout
     while time.time() < fin:
+        comprobar_cancelacion(page)
         if revisar:
             revisar()
         for p in patrones:
@@ -108,3 +114,4 @@ def titulo_corto(texto: str, maximo=100) -> str:
     if len(sin_tags) > maximo:
         sin_tags = sin_tags[:maximo - 1].rsplit(" ", 1)[0] + "…"
     return sin_tags or "Video"
+
