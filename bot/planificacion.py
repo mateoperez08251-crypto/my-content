@@ -64,6 +64,7 @@ def estimar(subidas, cuentas, cfg, ahora, libre_global=0):
     for s in subidas:
         c = por_id.get(s['cuenta_id'])
         motivo = ('Cuenta borrada' if not c else 'Cuenta pausada' if not c['activa'] else
+                  'Falta comprobar la sesión' if c['estado'] == 'sin_comprobar' else
                   'Falta iniciar sesión' if c['estado'] != 'ok' else
                   'Cierra la ventana de sesión' if c.get('login_abierto') else
                   'Archivo ausente en esta PC' if not s.get('archivo_existe', True) else '')

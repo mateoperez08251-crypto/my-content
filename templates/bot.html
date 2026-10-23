@@ -42,7 +42,7 @@ td{padding:7px 8px;border-bottom:1px solid #181b22;vertical-align:top}
 td.acc{white-space:nowrap;text-align:right}
 .est{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
 .e-ok,.e-listo{color:var(--ok)} .e-error,.e-sin_login,.e-sin_destino{color:var(--mal)}
-.e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#555} .e-revisar{color:var(--aviso)}
+.e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#555} .e-revisar,.e-sin_comprobar{color:var(--aviso)}
 .plat{display:inline-flex;align-items:center;gap:4px}
 .muted{color:var(--suave);font-size:12px}
 .err{color:var(--mal);font-size:12px;max-width:380px;word-break:break-word}
@@ -238,7 +238,7 @@ a{color:var(--acento)}
 
 <script>
 const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
-const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
+const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',sin_comprobar:'Sin comprobar',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
   cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
 const loginPendientes = new Set();
@@ -293,7 +293,7 @@ function pintar() {
       <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
       <button class="mini" onclick="cerrarVentana(${x.id})" ${x.login_abierto && !cierresPendientes.has(x.id) ? '' : 'disabled'} title="Cierra la ventana de inicio de sesión y comprueba la cuenta">${cierresPendientes.has(x.id) ? 'Cerrando…' : 'Cerrar ventana'}</button>
       <button class="mini" onclick="importarCookies(${x.id})" ${x.abierta || cookiesPendientes.has(x.id) ? 'disabled' : ''} title="Importa cookies con la ventana de esa cuenta cerrada"><i class="ph ph-file-arrow-up"></i> Cookies</button>
-      <button class="mini" onclick="probar(${x.id})" title="Comprueba que la sesión sigue abierta"><i class="ph ph-check-circle"></i></button>
+      <button class="mini" onclick="probar(${x.id})" ${x.abierta ? 'disabled' : ''} title="Cierra la ventana de sesión antes de comprobar; si pasa, la cuenta figura como Listo"><i class="ph ph-check-circle"></i> Comprobar sesión</button>
       <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
       <button class="mini peligro" onclick="borrarCuenta(${x.id})"><i class="ph ph-trash"></i></button></td></tr>`
   ).join('') || '<tr><td colspan="4" class="muted">Añade tu primera cuenta abajo.</td></tr>';

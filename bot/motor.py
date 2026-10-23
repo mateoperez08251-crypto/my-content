@@ -725,25 +725,37 @@ class Motor:
 
     def probar_sesion(self, cid) -> bool:
         cuenta = self.db.cuenta(cid)
+        if not cuenta:
+            raise ValueError('Cuenta no encontrada.')
         mod = POR_NOMBRE[cuenta["plataforma"]]
         ok = False
+        etapa = 'abrir'
         # Verificar nunca debe abrir otra ventana después de cerrar el login.
         try:
             with navegador.abrir(self.perfil(cuenta), headless=True, navegador=self.cfg["navegador"]) as ctx:
+                etapa = 'cargar'
                 page = navegador.pagina(ctx)
                 page.goto(cuenta["url_subida"] or mod.URL_SUBIDA, wait_until="domcontentloaded")
                 page.wait_for_timeout(6000)
                 ok = mod.sesion_abierta(page)
                 if ok:
-                    try:
-                        page.locator('input[type="file"]').first.wait_for(state="attached", timeout=30000)
-                    except Exception:
-                        ok = False
-        except navegador.PerfilOcupado:
-            self.log("No pude comprobar la sesión: ese Chrome está en uso.")
-            return cuenta["estado"] == "ok"
+                    etapa = 'confirmar'
+                    page.locator('input[type="file"]').first.wait_for(state="attached", timeout=30000)
         except Exception as e:
-            self.log(f"No pude comprobar la sesión de {cuenta['nombre']}: {e}")
+            # Un fallo al abrir/cargar no prueba que se haya perdido la sesión.
+            # Mantener bloqueada la publicación hasta lograr una comprobación.
+            if navegador.es_perfil_ocupado(e):
+                motivo = ('El perfil sigue abierto. Pulsa Sesión y luego Cerrar ventana; '
+                          'la comprobación se hará al cerrarse. Cierra cualquier otra copia de My Content.')
+            elif etapa == 'abrir':
+                motivo = 'No se pudo abrir el navegador. Ejecuta preparar_navegador_bot.bat y revisa el navegador elegido.'
+            elif etapa == 'confirmar':
+                motivo = 'No apareció el formulario de subida. Abre Sesión, revisa si la web pide algún paso y cierra la ventana para comprobar de nuevo.'
+            else:
+                motivo = 'No se pudo cargar la página de subida. Revisa la conexión y vuelve a pulsar Comprobar sesión.'
+            self.db.editar_cuenta(cid, estado='sin_comprobar')
+            self.log(f"{mod.NOMBRE} · {cuenta['nombre']}: sin comprobar. {motivo}")
+            return False
         self.db.editar_cuenta(cid, estado="ok" if ok else "sin_login")
         self.log(f"{mod.NOMBRE} · {cuenta['nombre']}: " + ("sesión lista ✅" if ok else "sin sesión ❌"))
         self._despertar.set()

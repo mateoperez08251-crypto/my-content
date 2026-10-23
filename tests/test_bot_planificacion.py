@@ -53,6 +53,12 @@ class PlanificacionTests(unittest.TestCase):
         self.assertEqual(plan['agenda'][0]['cuenta_id'],2)
         self.assertEqual(plan['fin'],ts('24T08:03:00'))
 
+    def test_error_al_comprobar_no_se_presenta_como_sesion_cerrada(self):
+        self.cuentas[0]['estado'] = 'sin_comprobar'
+        plan = self.plan()
+        self.assertEqual(plan['programables'], 0)
+        self.assertEqual(plan['bloqueadas'][0]['motivo'], 'Falta comprobar la sesión')
+
     def test_cola_grande_no_se_cuenta_con_limite_del_panel(self):
         plan=self.plan(n=120)
         self.assertEqual(plan['pendientes'],120)
