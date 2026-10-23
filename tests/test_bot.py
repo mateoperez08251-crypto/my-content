@@ -57,6 +57,24 @@ class FlujosNavegador(unittest.TestCase):
     def test_tiktok(self):
         tiktok.subir(self.page, self.h, self.video.name, TEXTO, (MOCKS / "tiktok.html").as_uri())
         self.assertEqual(self.page.evaluate("window.CAPTION").strip(), TEXTO)
+        self.assertEqual(self.page.evaluate("window.PUBLICACIONES"), 1)
+
+    def test_tiktok_no_confunde_carga_con_publicacion(self):
+        from bot.plataformas.base import SinConfirmar
+        esperar = tiktok._esperar_publicacion
+        with mock.patch.object(tiktok, "_esperar_publicacion",
+                               side_effect=lambda p, a: esperar(p, a, timeout=0)):
+            with self.assertRaises(SinConfirmar):
+                tiktok.subir(self.page, self.h, self.video.name, TEXTO,
+                             (MOCKS / "tiktok.html").as_uri() + "?resultado=generico")
+        self.assertEqual(self.page.evaluate("window.PUBLICACIONES"), 1)
+
+    def test_tiktok_no_publica_si_editor_cambia_texto(self):
+        from bot.plataformas.base import Rechazado
+        with self.assertRaises(Rechazado):
+            tiktok.subir(self.page, self.h, self.video.name, TEXTO,
+                         (MOCKS / "tiktok.html").as_uri() + "?resultado=texto_alterado")
+        self.assertEqual(self.page.evaluate("window.PUBLICACIONES"), 0)
 
     def test_youtube(self):
         url = youtube.subir(self.page, self.h, self.video.name, TEXTO, (MOCKS / "youtube.html").as_uri())
@@ -174,6 +192,19 @@ class Cola(unittest.TestCase):
         self.assertEqual(textos, ["Clip IA #a\nSígueme", "Video nuevo (Parte 2) #viral #fyp\nSígueme"])
         self.assertEqual({s["estado"] for s in self.m.db.subidas_recientes()}, {"ok"})
 
+    def test_publica_titulo_de_cada_momento_y_no_el_del_video_original(self):
+        self.m.smart_split = lambda datos: (self.clips, [
+            {"archivo": self.clips[0], "titulo": "NO_PODÍA_CREERLO 😱",
+             "descripcion": "Así reaccionó.", "hashtags": ["#mi_video"]},
+            {"archivo": self.clips[1], "titulo": "EL_GIRO_FINAL",
+             "publicacion": "Nadie lo esperaba. #final"}])
+        self.m.encolar("https://youtu.be/x", cuentas=[self.tk], cortar=True,
+                       titulo="nombre_del_video_original", texto_fijo="@mi_cuenta")
+        self._vaciar()
+        textos = [t for _, t in PlataformaFalsa.llamadas]
+        self.assertEqual(textos, ["NO PODÍA CREERLO 😱\nAsí reaccionó. #mi_video\n@mi_cuenta",
+                                 "EL GIRO FINAL\nNadie lo esperaba. #final\n@mi_cuenta"])
+
     def test_no_repite_el_mismo_video(self):
         self.m.db.guardar_regla("*", [self.tk])
         item = {"id": "v1", "platform": "youtube", "link": "https://youtu.be/v1", "channel": "@c"}
@@ -247,6 +278,37 @@ class Cola(unittest.TestCase):
         PlataformaFalsa.fallar = [SinConfirmar("no vi el aviso")]
         self.m.encolar("https://youtu.be/x", cuentas=[self.tk], cortar=False)
         self._vaciar()
+        self.assertEqual(self.m.db.subidas_recientes()[0]["estado"], "revisar")
+        self.assertEqual(len(PlataformaFalsa.llamadas), 1)
+
+    def test_cierre_falla_tras_confirmar_no_repite(self):
+        @contextmanager
+        def cerrar_con_error(*args, **kwargs):
+            yield _Ctx()
+            raise RuntimeError("se desconectó Playwright al cerrar")
+
+        self.m.encolar("https://youtu.be/x", cuentas=[self.tk], cortar=False)
+        with mock.patch.object(navegador, "abrir", cerrar_con_error):
+            self._vaciar()
+        subida = self.m.db.subidas_recientes()[0]
+        self.assertEqual(subida["estado"], "ok")
+        self.assertEqual(subida["url_publicada"], "https://ejemplo/video")
+        self.assertEqual(len(PlataformaFalsa.llamadas), 1)
+
+    def test_cierre_no_oculta_publicacion_incierta(self):
+        from bot.plataformas.base import SinConfirmar
+
+        @contextmanager
+        def cerrar_con_error(*args, **kwargs):
+            try:
+                yield _Ctx()
+            finally:
+                raise RuntimeError("falló también el cierre")
+
+        PlataformaFalsa.fallar = [SinConfirmar("se perdió la conexión tras publicar")]
+        self.m.encolar("https://youtu.be/x", cuentas=[self.tk], cortar=False)
+        with mock.patch.object(navegador, "abrir", cerrar_con_error):
+            self._vaciar()
         self.assertEqual(self.m.db.subidas_recientes()[0]["estado"], "revisar")
         self.assertEqual(len(PlataformaFalsa.llamadas), 1)
 

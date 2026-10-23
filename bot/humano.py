@@ -8,10 +8,15 @@ import time
 class Humano:
     """Envuelve una página de Playwright. velocidad<1 = más rápido (solo para pruebas)."""
 
-    def __init__(self, page, velocidad: float = 1.0):
+    def __init__(self, page, velocidad: float = 1.0, progreso=None):
         self.page = page
         self.v = max(0.0, float(velocidad))
+        self._progreso = progreso
         self._x, self._y = random.randint(200, 600), random.randint(150, 400)
+
+    def informar(self, texto):
+        if self._progreso:
+            self._progreso(texto)
 
     def pausa(self, minimo=0.6, maximo=1.8):
         if self.v:
@@ -117,3 +122,4 @@ def _termina_hashtag(previo: str) -> bool:
 
 def _trozos(texto, n):
     return [texto[i:i + n] for i in range(0, len(texto), n)]
+

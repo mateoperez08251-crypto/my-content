@@ -8,5 +8,12 @@
 <div id="ok"></div>
 <script>
 f.onchange=()=>{zona.style.display='block';setTimeout(()=>post.disabled=false,800)};
-post.onclick=()=>{window.CAPTION=cap.innerText;ok.textContent='Tu video se ha publicado'};
+const resultado=new URLSearchParams(location.search).get('resultado');
+window.PUBLICACIONES=0;
+if(resultado==='texto_alterado') cap.oninput=()=>{cap.innerText='texto incompleto'};
+post.onclick=()=>{
+  window.PUBLICACIONES++;
+  window.CAPTION=cap.innerText;
+  ok.textContent=resultado==='generico'?'Subido. Administrar publicaciones':'Tu video se ha publicado';
+};
 </script>

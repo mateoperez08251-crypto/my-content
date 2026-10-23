@@ -140,6 +140,12 @@ class LocalFilesTests(unittest.TestCase):
         self.assertEqual(Path(row['archivo']).name, 'video_CON.mov')
         self.assertTrue(Path(row['archivo']).is_relative_to(Path(self.tmp.name, 'bot_clips')))
 
+    def test_default_title_uses_spaces_but_explicit_text_is_preserved(self):
+        self.upload(nombre='EL_MEJOR_MOMENTO.mp4', texto='')
+        row = self.m.db.subidas_pendientes()[0]
+        self.assertEqual(row['texto'], 'EL MEJOR MOMENTO')
+        self.assertEqual(Path(row['archivo']).name, 'video_EL_MEJOR_MOMENTO.mp4')
+
     def test_only_prepare_mode_and_unverified_accounts_do_not_publish(self):
         self.upload()
         self.m.guardar_cfg({'modo_cola':'solo_preparar'})
