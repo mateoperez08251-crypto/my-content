@@ -1,8 +1,10 @@
 import os
+import errno
+import json
+import shutil
 import sqlite3
 import tempfile
 import unittest
-from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -11,103 +13,65 @@ from bot.db import DB
 
 
 class PersistenceTests(unittest.TestCase):
-    def test_migration_survives_changed_install_folder_and_preserves_original(self):
+    def test_accounts_config_and_profiles_survive_restart_in_app_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            old = root / 'installation'
-            old.mkdir()
-            db = DB(str(old / 'bot.db'))
-            cid = db.crear_cuenta('Mi canal', 'youtube')
-            profile = old / 'bot_perfiles' / f'cuenta_{cid}'
-            profile.mkdir(parents=True)
-            (profile / 'Cookies').write_bytes(b'saved-session')
-            (old / 'bot_config.json').write_text('{"activo": false}')
-            with patch.dict(os.environ, {'LOCALAPPDATA': str(root / 'local')}, clear=True):
-                saved = Path(storage.preparar(str(old)))
-                self.assertEqual(storage.preparar(str(root / 'new-install')), str(saved))
-            with closing(sqlite3.connect(saved / 'bot.db')) as con:
-                self.assertEqual(con.execute('select nombre from cuentas').fetchone()[0], 'Mi canal')
-            self.assertEqual((saved / 'bot_perfiles' / f'cuenta_{cid}' / 'Cookies').read_bytes(), b'saved-session')
-            self.assertTrue((profile / 'Cookies').exists())
-            self.assertEqual((saved / 'bot_config.json').read_text(), '{"activo": false}')
-            db._con.close()
+            app = Path(tmp) / 'app'
+            with patch.dict(os.environ, {'LOCALAPPDATA': str(Path(tmp) / 'other')}, clear=True):
+                saved = Path(storage.preparar(str(app)))
+                self.assertEqual(saved, app)
+                db = DB(str(saved / 'bot.db'))
+                cid = db.crear_cuenta('Mi canal', 'youtube')
+                db._con.close()
+                profile = saved / 'bot_perfiles' / f'cuenta_{cid}'
+                profile.mkdir(parents=True)
+                (profile / 'Cookies').write_bytes(b'saved-session')
+                (saved / 'bot_config.json').write_text('{"activo": false}')
+                reopened = Path(storage.preparar(str(app)))
+                db = DB(str(reopened / 'bot.db'))
+                self.assertEqual(db.cuenta(cid)['nombre'], 'Mi canal')
+                db._con.close()
+                self.assertEqual((profile / 'Cookies').read_bytes(), b'saved-session')
+                self.assertEqual((reopened / 'bot_config.json').read_text(), '{"activo": false}')
+                self.assertFalse((Path(tmp) / 'other').exists())
 
-    def test_windows_locks_released_before_publish_or_cleanup(self):
-        # Linux permite renombrar/borrar archivos abiertos. Simular el bloqueo
-        # de Windows para que la regresión falle también en Linux.
-        for fail_backup in (False, True):
-            with self.subTest(fail_backup=fail_backup), tempfile.TemporaryDirectory() as tmp:
-                old = Path(tmp) / 'old'
-                old.mkdir()
-                with closing(sqlite3.connect(old / 'bot.db')) as con:
-                    con.execute('create table saved (name text)')
-                    con.execute("insert into saved values ('cuenta')")
-                    con.commit()
-                opened = []
-
-                class TrackedConnection(sqlite3.Connection):
-                    closed = False
-
-                    def close(self):
-                        super().close()
-                        self.closed = True
-
-                    def backup(self, target):
-                        if fail_backup:
-                            raise RuntimeError('backup failed')
-                        return super().backup(target)
-
-                connect = sqlite3.connect
-                rename = os.rename
-                rmtree = storage.shutil.rmtree
-
-                def track(*args, **kwargs):
-                    connection = connect(*args, **kwargs, factory=TrackedConnection)
-                    opened.append(connection)
-                    return connection
-
-                def ensure_closed(fn, *args, **kwargs):
-                    if any(not c.closed for c in opened):
-                        raise PermissionError('WinError 32: bot.db abierto')
-                    return fn(*args, **kwargs)
-
-                try:
-                    with patch.dict(os.environ, {'LOCALAPPDATA': tmp}, clear=True), \
-                         patch.object(storage.sqlite3, 'connect', side_effect=track), \
-                         patch.object(storage.os, 'rename', side_effect=lambda *a: ensure_closed(rename, *a)), \
-                         patch.object(storage.shutil, 'rmtree', side_effect=lambda *a, **kw: ensure_closed(rmtree, *a, **kw)):
-                        if fail_backup:
-                            with self.assertRaisesRegex(RuntimeError, 'backup failed'):
-                                storage.preparar(str(old))
-                            self.assertFalse((Path(tmp) / 'ContentApp' / 'bot').exists())
-                        else:
-                            saved = storage.preparar(str(old))
-                            with closing(connect(Path(saved) / 'bot.db')) as con:
-                                self.assertEqual(con.execute('select name from saved').fetchone()[0], 'cuenta')
-                    self.assertTrue(all(c.closed for c in opened))
-                    self.assertEqual(list((Path(tmp) / 'ContentApp').glob('bot-migration-*')), [])
-                finally:
-                    for c in opened:
-                        c.close()
-
-    def test_explicit_data_directory_is_respected(self):
+    def test_no_copy_or_temporary_database_when_other_disk_full(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict(os.environ, {'CONTENTAPP_DATA_DIR': tmp}):
-                self.assertEqual(storage.preparar('/unused'), tmp)
+            app = Path(tmp) / 'app'
+            app.mkdir()
+            (app / 'bot.db').write_bytes(b'original')
+            with patch.dict(os.environ, {'LOCALAPPDATA': str(Path(tmp) / 'full')}, clear=True), \
+                 patch.object(shutil, 'copytree', side_effect=OSError(errno.ENOSPC, 'full')), \
+                 patch.object(sqlite3, 'connect', side_effect=AssertionError('No abrir una copia')):
+                self.assertEqual(storage.preparar(str(app)), str(app))
+            self.assertEqual((app / 'bot.db').read_bytes(), b'original')
+            self.assertFalse((Path(tmp) / 'full').exists())
 
-    def test_failed_migration_does_not_publish_partial_data(self):
+    def test_old_registry_and_migrated_data_do_not_redirect_active_app(self):
         with tempfile.TemporaryDirectory() as tmp:
-            old = Path(tmp) / 'old'
-            old.mkdir()
-            db = DB(str(old / 'bot.db'))
-            (old / 'bot_perfiles').mkdir()
-            with patch.dict(os.environ, {'LOCALAPPDATA': tmp}, clear=True), \
-                 patch.object(storage.shutil, 'copytree', side_effect=OSError('locked')):
-                with self.assertRaises(OSError):
-                    storage.preparar(str(old))
-            self.assertFalse((Path(tmp) / 'ContentApp' / 'bot').exists())
-            self.assertTrue((old / 'bot.db').exists())
-            db._con.close()
+            root = Path(tmp) / 'ContentApp'
+            target = root / 'bot'
+            target.mkdir(parents=True)
+            (target / 'bot.db').write_bytes(b'old')
+            (root / 'bot-location.json').write_text(json.dumps({'path': str(target)}))
+            app = Path(tmp) / 'active-app'
+            with patch.dict(os.environ, {'LOCALAPPDATA': tmp}, clear=True):
+                self.assertEqual(storage.preparar(str(app)), str(app))
+            self.assertEqual((target / 'bot.db').read_bytes(), b'old')
+            self.assertFalse((app / 'bot.db').exists())
+
+    def test_storage_uses_already_resolved_app_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {'CONTENTAPP_DATA_DIR': '/different'}):
+                self.assertEqual(storage.preparar(tmp), tmp)
+
+    def test_empty_path_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'Falta la carpeta'):
+            storage.preparar('')
+
+    def test_unavailable_app_folder_has_short_error(self):
+        with patch.object(storage.os, 'makedirs', side_effect=OSError(errno.ENOSPC, 'full')):
+            with self.assertRaisesRegex(ValueError, 'espacio y permisos'):
+                storage.preparar('app')
 
 
 class CloseTests(unittest.TestCase):

@@ -1,45 +1,15 @@
-"""Ubicación estable del bot y migración sin borrar los datos anteriores."""
+"""El bot usa la misma carpeta de datos que la instalación activa de la app."""
 import os
-import shutil
-import sqlite3
-import tempfile
-import threading
-from contextlib import closing
-
-_guard = threading.Lock()
 
 
-def preparar(legacy):
-    override = os.environ.get('CONTENTAPP_DATA_DIR')
-    if override:
-        return os.path.abspath(os.path.expanduser(override))
-    base = os.environ.get('LOCALAPPDATA') or os.path.join(os.path.expanduser('~'), '.local', 'share')
-    root = os.path.join(base, 'ContentApp')
-    target = os.path.join(root, 'bot')
-    with _guard:
-        if os.path.isdir(target):
-            return target
-        os.makedirs(root, exist_ok=True)
-        stage = tempfile.mkdtemp(prefix='bot-migration-', dir=root)
-        try:
-            # Cuentas, configuración y perfiles siempre proceden del mismo origen.
-            source = next((p for p in (legacy, root)
-                           if os.path.isfile(os.path.join(p, 'bot.db'))), None)
-            if source:
-                # Connection.__exit__ gestiona la transacción, pero NO cierra
-                # el archivo. Windows exige liberar ambos antes de moverlo.
-                with closing(sqlite3.connect(os.path.join(source, 'bot.db'))) as old:
-                    with closing(sqlite3.connect(os.path.join(stage, 'bot.db'))) as new:
-                        old.backup(new)  # Incluye las transacciones del archivo WAL.
-                config = os.path.join(source, 'bot_config.json')
-                if os.path.isfile(config):
-                    shutil.copy2(config, stage)
-                profiles = os.path.join(source, 'bot_perfiles')
-                if os.path.isdir(profiles):
-                    shutil.copytree(profiles, os.path.join(stage, 'bot_perfiles'),
-                                    ignore=shutil.ignore_patterns('Singleton*'))
-            os.rename(stage, target)
-        finally:
-            if os.path.isdir(stage):
-                shutil.rmtree(stage)
-    return target
+def preparar(carpeta):
+    # paths.DATA_DIR ya resuelve la carpeta de la app y cualquier configuración
+    # explícita. No buscar otras instalaciones ni copiar perfiles entre discos.
+    if not carpeta:
+        raise ValueError('Falta la carpeta de datos de la aplicación.')
+    destino = os.path.abspath(os.path.expanduser(os.fspath(carpeta)))
+    try:
+        os.makedirs(destino, exist_ok=True)
+    except OSError as error:
+        raise ValueError('No pude abrir la carpeta de datos de la app. Revisa su espacio y permisos.') from error
+    return destino
