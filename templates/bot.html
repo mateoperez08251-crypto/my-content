@@ -200,14 +200,14 @@ a{color:var(--acento)}
     <p class="ayuda">El cálculo usa los clips ya editados y los ajustes guardados. El rango compara pausas mínimas y máximas; no incluye edición pendiente, cortes de conexión, verificaciones ni reintentos futuros. Los videos sin editar todavía no tienen una cantidad exacta de partes.</p>
     <label style="margin-top:12px">Servidor de cortes — opcional. Los clips ya guardados no lo necesitan.</label>
     <div class="fila">
-      <input id="remoto_url" placeholder="https://xxxx.ngrok-free.app (vacío = cortar en esta PC)">
+      <input id="remoto_url" placeholder="https://xxxx.trycloudflare.com (vacío = cortar en esta PC)">
       <input id="remoto_clave" type="password" placeholder="Contraseña de la app en Colab" style="max-width:220px">
       <button onclick="probarRemoto()"><i class="ph ph-plugs-connected"></i> Probar</button>
       <a href="https://colab.research.google.com/github/mateoperez08251-crypto/my-content/blob/main/colab/My_Content_Colab.ipynb"
          target="_blank" rel="noopener"><button><i class="ph ph-arrow-square-out"></i> Abrir Colab</button></a>
     </div>
     <div class="muted" id="remoto-estado" style="margin-top:4px"></div>
-    <p class="ayuda">Colab: ejecuta las celdas 1–6 y la 6C para obtener la URL de conexión del bot. Pega esa URL y la contraseña de la celda 4; pulsa Probar. El enlace del proxy de Google sirve para abrir la interfaz, pero no conecta automáticamente este bot.</p>
+    <p class="ayuda">Colab: ejecuta las celdas 1–6 y la 6C para obtener la URL de Cloudflare, sin cuenta ni token. Pega la dirección https://….trycloudflare.com y la contraseña de la celda 4; pulsa Probar. Al reiniciar la celda 6, repite 6C y copia la URL nueva. El enlace del proxy de Google sirve para abrir la interfaz.</p>
     <div class="fila" style="margin-top:12px">
       <label class="switch"><input type="checkbox" id="radar_auto"> Radar de la PC → cola</label>
       <label class="switch"><input type="checkbox" id="firebase_auto"> Radar de la nube → cola</label>
