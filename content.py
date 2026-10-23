@@ -2066,10 +2066,11 @@ def get_inbox():
 
 
 # ---- Bot de subida (radar/URL -> descarga -> clips -> Chrome) ------------
-def _bot_notificar(texto):
+def _bot_notificar(texto, omitidos=()):
     """Avisa por el mismo correo/WhatsApp del radar y con una notificación de Windows."""
     try:
-        show_notification("Bot de subida", texto[:200])
+        if '_escritorio' not in omitidos:
+            show_notification("Bot de subida", texto[:200])
     except Exception:
         pass
     try:
@@ -2077,14 +2078,24 @@ def _bot_notificar(texto):
             cfg = json.load(f)
     except (OSError, ValueError):
         cfg = {}
+    resultados = {'_escritorio': True}
     try:
         from firebase_radar.local_radar import send_email, send_whatsapp  # pyrefly: ignore [missing-import]
-        if cfg.get("radar_whatsapp_phone") and cfg.get("radar_whatsapp_apikey"):
-            send_whatsapp(cfg["radar_whatsapp_phone"], cfg["radar_whatsapp_apikey"], texto)
-        if cfg.get("radar_email") and cfg.get("radar_password"):
-            send_email(cfg, "[Bot] Aviso del bot de subida", texto)
-    except Exception as e:
-        log(f"[bot] no se pudo enviar el aviso: {e}")
+    except Exception:
+        log('[bot] No se pudo enviar el aviso por los canales del Radar.')
+        return False
+    canales = {}
+    if 'whatsapp' not in omitidos and cfg.get("radar_whatsapp_phone") and cfg.get("radar_whatsapp_apikey"):
+        canales['whatsapp'] = lambda: send_whatsapp(cfg["radar_whatsapp_phone"], cfg["radar_whatsapp_apikey"], texto)
+    if 'correo' not in omitidos and cfg.get("radar_email") and cfg.get("radar_password"):
+        canales['correo'] = lambda: send_email(cfg, "[Bot] Aviso del bot de subida", texto)
+    for canal, enviar in canales.items():
+        try:
+            resultados[canal] = bool(enviar())
+        except Exception:
+            resultados[canal] = False
+            log('[bot] No se pudo enviar un aviso. Revisa los canales del Radar.')
+    return resultados
 
 
 def _bot_preset(nombre):
@@ -2307,6 +2318,7 @@ def bot_subida_accion(sid, accion):
             return _bot().borrar_subida(sid)
         elif accion == "ok":  # lo revisaste y sí se publicó
             _bot().db.marcar_subida(sid, "ok", error="")
+            _bot()._aviso_subida(_bot().db.subida(sid), 'ok', 'Marcada como publicada por ti desde el panel.', 'publicados', True)
         else:
             raise ValueError("Acción no válida.")
     return _bot_respuesta(hacer)

@@ -170,13 +170,13 @@ def send_whatsapp(phone: str, apikey: str, text: str) -> bool:
     try:
         r = requests.get("https://api.callmebot.com/whatsapp.php",
                          params={"phone": phone.strip(), "text": text, "apikey": apikey.strip()},
-                         timeout=20)
-        ok = r.status_code == 200 and ("APIKey" not in r.text or "Message queued" in r.text or "Message Sent" in r.text)
+                         timeout=20, allow_redirects=False)
+        ok = r.status_code == 200 and any(marker in r.text.lower() for marker in ('message queued', 'message sent'))
         if not ok:
-            _log(f"WhatsApp CallMeBot respuesta: {r.status_code} {r.text[:120]}")
+            _log(f"WhatsApp CallMeBot no confirmó el envío (HTTP {r.status_code}).")
         return ok
-    except Exception as exc:
-        _log(f"WhatsApp falló: {exc}")
+    except Exception:
+        _log('WhatsApp falló. Revisa la conexión y la API configurada en Radar.')
         return False
 
 
@@ -364,3 +364,4 @@ ensure_background()
 
 if __name__ == "__main__":
     radar_monitor()
+

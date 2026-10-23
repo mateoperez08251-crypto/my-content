@@ -252,6 +252,24 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <tbody id="subidas"></tbody></table></div>
   </section>
 
+  <section class="card ancho" id="avisos-bot">
+    <h2>Avisos del bot por WhatsApp y correo</h2>
+    <p class="ayuda">Usa el número, la API y el correo que ya guardaste en Radar. Las publicaciones confirmadas y los fallos tienen prioridad. Los demás eventos se agrupan; cada resumen muestra cantidades y los últimos ejemplos. Los envíos se separan al menos un minuto.</p>
+    <div class="ajustes">
+      <label><input type="checkbox" id="avisos_activos"> Activar avisos del bot</label>
+      <label><input type="checkbox" id="avisos_cola"> Videos y clips en cola, guardados y retirados</label>
+      <label><input type="checkbox" id="avisos_progreso"> Preparación e inicio de subida</label>
+      <label><input type="checkbox" id="avisos_publicados"> Publicación confirmada</label>
+      <label><input type="checkbox" id="avisos_errores"> Fallos, reintentos y sesión pendiente</label>
+      <label><input type="checkbox" id="avisos_lives"> Inicio, reconexión y fin del live</label>
+      <label><input type="checkbox" id="avisos_sistema"> Encendido, pausa y conexión de Colab</label>
+      <div><label for="avisos_intervalo_min">Agrupar avisos normales cada (min)</label><input id="avisos_intervalo_min" type="number" min="1" max="60" value="5"></div>
+    </div>
+    <button class="prim" onclick="guardarAvisos()">Guardar avisos</button>
+    <p id="avisos-estado" class="muted" aria-live="polite"></p>
+    <p class="muted">Requiere My Content abierto. Un aviso enviado significa que el proveedor lo aceptó, no que lo hayas leído. Si la app se cerró durante un envío, ese aviso queda para revisar y no se repite automáticamente.</p>
+  </section>
+
   <section class="card">
     <h2><i class="ph-duotone ph-film-reel"></i> Videos en cola <small id="res-trabajos"></small></h2>
     <div class="tabla-scroll"><table><thead><tr><th>Video</th><th>Origen</th><th>Estado</th><th></th></tr></thead>
@@ -333,7 +351,11 @@ function pintar() {
     for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','estimacion_subida_min','modo_cola','remoto_url','remoto_clave','navegador'])
       $(k).value = c[k];
     for (const k of ['radar_auto','firebase_auto','headless']) $(k).checked = c[k];
+    for (const k of ['avisos_activos','avisos_cola','avisos_progreso','avisos_publicados','avisos_errores','avisos_lives','avisos_sistema']) $(k).checked = c[k] !== false;
+    $('avisos_intervalo_min').value = c.avisos_intervalo_min ?? 5;
   }
+  const avisos = E.avisos || {};
+  $('avisos-estado').textContent = `${avisos.pendiente || 0} eventos pendientes · ${avisos.enviado || 0} eventos enviados · ${avisos.fallido || 0} fallidos · ${avisos.revisar || 0} por revisar tras reinicio. Si fallan, revisa la API y el número en Radar.`;
   $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
   $('modo-activo').textContent = 'Modo guardado: ' + ({preparar_primero:'editar toda la cola y después publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados',alternar:'alternar edición y publicación'}[c.modo_cola] || c.modo_cola);
   pintarPlan();
@@ -663,6 +685,14 @@ async function guardarAjustes() {
   for (const k of ['hora_inicio','hora_fin','preset','modo_cola','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
   for (const k of ['radar_auto','firebase_auto','headless']) d[k] = $(k).checked;
   await api('/api/bot/config', d); editando = false; await cargar(); toast('Horario y modo guardados');
+}
+async function guardarAvisos() {
+  const datos = {avisos_intervalo_min:Number($('avisos_intervalo_min').value)};
+  for (const k of ['avisos_activos','avisos_cola','avisos_progreso','avisos_publicados','avisos_errores','avisos_lives','avisos_sistema']) datos[k] = $(k).checked;
+  await api('/api/bot/config', datos);
+  editando = false;
+  await cargar();
+  toast('Avisos guardados');
 }
 document.querySelectorAll('.ajustes input, .ajustes select, #remoto_url, #remoto_clave').forEach(i => i.addEventListener('focus', () => editando = true));
 async function cargarPresets(recargar = false) {

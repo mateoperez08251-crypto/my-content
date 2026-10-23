@@ -22,6 +22,7 @@ from .presets import NOMBRE_CALIDAD, snapshot
 from .db import DB
 from .cancelacion import ControlSubida, SubidaCancelada
 from .humano import Humano
+from .avisos import Avisos, breve
 from .plataformas import POR_NOMBRE
 from .plataformas.base import Rechazado, SesionCerrada, SinConfirmar
 
@@ -46,6 +47,14 @@ CONFIG_DEFECTO = {
     "radar_desde": 0,        # la bandeja de Firebase solo cuenta lo detectado después de esto
     "remoto_url": "",        # servidor de cortes (Colab con GPU); vacío = cortar en esta PC
     "remoto_clave": "",
+    "avisos_activos": True,
+    "avisos_cola": True,
+    "avisos_progreso": True,
+    "avisos_publicados": True,
+    "avisos_errores": True,
+    "avisos_lives": True,
+    "avisos_sistema": True,
+    "avisos_intervalo_min": 5,
 }
 OCULTA = "••••••"
 
@@ -116,6 +125,7 @@ class Motor:
         self._lives_lock = threading.Lock()
         self._ultimo_vigilar = 0.0
         self.db.reparar_al_arrancar()
+        self._avisos = Avisos(self.db, self.notificar, lambda: self.cfg, self.log)
 
     # -- config / log ---------------------------------------------------
     def _leer_cfg(self):
@@ -150,6 +160,8 @@ class Motor:
             raise ValueError('Estima entre 0.1 y 180 minutos por subida.')
         if not 1 <= nueva['max_intentos'] <= 20:
             raise ValueError('Elige entre 1 y 20 intentos.')
+        if not 1 <= nueva['avisos_intervalo_min'] <= 60:
+            raise ValueError('Agrupa los avisos entre 1 y 60 minutos.')
         if nueva['modo_cola'] not in ('preparar_primero', 'solo_preparar', 'solo_subir', 'alternar'):
             raise ValueError('Modo de cola no válido.')
         for k in ('hora_inicio', 'hora_fin'):
@@ -167,8 +179,17 @@ class Motor:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(nueva, f, ensure_ascii=False, indent=2)
         os.replace(tmp, self._cfg_ruta)
+        previo = self.cfg
         self.cfg = nueva
         self._despertar.set()
+        if hasattr(self, '_avisos'):
+            self._avisos.wake.set()
+            if previo['activo'] != nueva['activo'] or previo['modo_cola'] != nueva['modo_cola']:
+                modos = {'solo_preparar': 'solo editar y guardar', 'preparar_primero': 'editar primero y luego publicar',
+                         'solo_subir': 'solo publicar clips guardados', 'alternar': 'alternar edición y publicación'}
+                self.avisar('sistema', f'config:{time.time_ns()}',
+                            ('Bot encendido. Modo: ' + modos[nueva['modo_cola']] if nueva['activo']
+                             else 'Bot en pausa. La tarea en curso puede terminar.'))
 
     def log(self, msg):
         linea = f"{datetime.now().strftime('%d/%m %H:%M:%S')}  {msg}"
@@ -182,6 +203,23 @@ class Motor:
         self.actividad = texto
         self.log(texto)
 
+    def avisar(self, categoria, clave, texto, urgente=False):
+        self._avisos.agregar(categoria, clave, texto, urgente)
+
+    def _aviso_trabajo(self, t, estado, detalle, categoria='progreso', urgente=False):
+        if not t:
+            return
+        self.avisar(categoria, f"trabajo:{t['id']}:{estado}",
+                    f"Video #{t['id']} · {breve(t.get('titulo')) or 'Video desde enlace'}: {detalle}", urgente)
+
+    def _aviso_subida(self, s, estado, detalle, categoria='progreso', urgente=False):
+        if not s:
+            return
+        c = self.db.cuenta(s['cuenta_id']) or {}
+        titulo = breve((s.get('texto') or '').split('\n')[0]) or 'Clip'
+        self.avisar(categoria, f"subida:{s['id']}:{estado}",
+                    f"Clip #{s['id']} · {titulo}\n{breve(c.get('plataforma'))} · {breve(c.get('nombre'))}\n{detalle}", urgente)
+
     # -- arranque -------------------------------------------------------
     def iniciar(self):
         if self._hilo and self._hilo.is_alive():
@@ -189,15 +227,18 @@ class Motor:
         if not self.cfg["radar_desde"]:
             self.guardar_cfg({})
         self._stop.clear()
+        self._avisos.iniciar()
         self._hilo = threading.Thread(target=self._bucle, daemon=True, name="bot-motor")
         self._hilo.start()
         self.log("Bot encendido.")
+        self.avisar('sistema', f'inicio:{time.time_ns()}', 'My Content inició el bot.')
 
     def detener(self):
         self._stop.set()
         self._despertar.set()
         if self._lives:
             self._lives.close()
+        self._avisos.cerrar()
 
     def lives(self):
         with self._lives_lock:
@@ -251,6 +292,13 @@ class Motor:
             self._procesar_trabajo(trabajo)
             return True
         self.actividad = self._motivo_espera()
+        if self.actividad.startswith('Fuera de horario') and self.db.subidas_pendientes():
+            self.avisar('sistema', f"horario:{datetime.now():%Y-%m-%d}:{self.cfg['hora_inicio']}:{self.cfg['hora_fin']}",
+                        'Hay clips pendientes. ' + self.actividad + '; se retomarán cuando abra el horario.')
+        for c in self.db.cuentas():
+            if c['activa'] and self.db.subidas_ok_hoy(c['id']) >= c['limite_dia']:
+                self.avisar('sistema', f"limite:{c['id']}:{datetime.now():%Y-%m-%d}:{c['limite_dia']}",
+                            f"{breve(c['nombre'])}: alcanzó el máximo de {c['limite_dia']} publicaciones de hoy.")
         return False
 
     # -- entrada a la cola ----------------------------------------------
@@ -294,9 +342,10 @@ class Motor:
             self.db.marcar_trabajo(tid, "sin_destino",
                                    "No hay cuentas para este canal. Crea una regla o elige cuentas.")
             self.log(f"Sin destino: {titulo or url}")
-            self.notificar(f"⚠️ Bot: no sé dónde subir {titulo or url}. Crea una regla en el panel.")
+            self._aviso_trabajo(self.db.trabajo(tid), 'sin_destino', 'Sin cuentas de destino. Revisa las reglas.', 'errores', True)
         else:
             self.log(f"En cola ({origen}): {titulo or url} → {len(cuentas)} cuenta(s)")
+            self._aviso_trabajo(self.db.trabajo(tid), 'cola', f'En cola para preparar; {len(cuentas)} cuenta(s).', 'cola')
         self._despertar.set()
         return tid
 
@@ -336,6 +385,7 @@ class Motor:
                 shutil.rmtree(carpeta, ignore_errors=True)
         if nuevo:
             self.log(f'Archivo local guardado: {nombre} → {len(cuentas)} cuenta(s). En cola de publicación.')
+            self._aviso_trabajo(self.db.trabajo(tid), 'listo', f'Archivo guardado en la PC; {len(cuentas)} publicación(es) en cola.', 'cola')
         self._despertar.set()
         guardado = self.db.trabajo(tid)
         return {'id': tid, 'publicaciones': len(guardado['cuentas']), 'repetido': not nuevo}
@@ -408,6 +458,7 @@ class Motor:
             return
         nombre = t["titulo"] or t["url"]
         liberar_al_fallar = True
+        self._aviso_trabajo(t, f"preparando:{t['intentos']}", 'Preparando en esta PC.')
         try:
             if t["cortar"]:
                 self.db.marcar_trabajo(t["id"], "cortando")
@@ -448,11 +499,12 @@ class Motor:
             intentos = t["intentos"] + 1
             if intentos >= self.cfg["max_intentos"]:
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
-                self.notificar(f"❌ Bot: no pude preparar {nombre}: {e}")
+                self._aviso_trabajo(t, f'error:{intentos}', 'Falló la preparación. Revisa el detalle en la cola.', 'errores', True)
             else:
                 espera = ESPERA_TRABAJO_MIN[min(intentos - 1, len(ESPERA_TRABAJO_MIN) - 1)]
                 self.db.marcar_trabajo(t["id"], "pendiente", str(e), intentos=intentos,
                                        proximo_intento=time.time() + espera * 60)
+                self._aviso_trabajo(t, f'reintento:{intentos}', f'Falló la preparación; reintento en {espera} minutos.', 'errores', True)
             self.log(f"Falló preparar {nombre}: {e}")
             return
 
@@ -470,6 +522,9 @@ class Motor:
             for cid in t["cuentas"]:
                 subidas.append((cid, ruta, texto))
         self.db.finalizar_trabajo(t['id'], subidas)
+        actual = self.db.trabajo(t['id'])
+        if actual and actual['estado'] == 'listo':
+            self._aviso_trabajo(t, 'listo', f'{len(clips)} clip(s) guardados en la PC; {len(subidas)} publicación(es) en cola. Se respetan horario, pausas y modo elegido.', 'cola')
         self.log(f"Guardado en esta PC: {len(clips)} clip(s) × {len(t['cuentas'])} cuenta(s). Ya no necesita Colab para subir.")
 
     # -- servidor de cortes remoto (Colab) --------------------------------
@@ -485,14 +540,13 @@ class Motor:
         self.log(f"Servidor de cortes no responde: {e}. Corto en esta PC.")
         if not self._remoto_avisado:
             self._remoto_avisado = True
-            self.notificar("⚠️ Bot: Colab se desconectó. Sigo cortando en tu PC. Cuando puedas, ábrelo "
-                           "y pega el enlace nuevo en el panel del bot.")
+            self.avisar('sistema', f'colab:caido:{time.time_ns()}', 'Colab se desconectó. El bot intentará preparar en esta PC. Revisa Colab y su URL.', True)
 
     def _remoto_volvio(self):
         self._remoto_caido_hasta = 0
         if self._remoto_avisado:
             self._remoto_avisado = False
-            self.notificar("✅ Bot: Colab volvió a conectar. Los próximos videos se cortan ahí.")
+            self.avisar('sistema', f'colab:conectado:{time.time_ns()}', 'Colab volvió a conectar. Los próximos videos compatibles se cortan ahí.', True)
             self.log("Servidor de cortes conectado de nuevo.")
 
     def _vigilar_remoto(self):
@@ -523,6 +577,7 @@ class Motor:
         cli = self._cliente_remoto()
         self.db.marcar_trabajo(t["id"], "cortando")
         self._actividad(f"Cortando en el servidor remoto: {nombre}")
+        self._aviso_trabajo(t, f"remoto:{t['intentos']}", 'Preparando con el servidor de cortes.')
         datos = json.loads(t.get('opciones') or '{}') or dict(self.cargar_preset(t['preset']) or {})
         carpeta = self.carpeta_clips(t)
         jid = t.get('remoto_id') if t.get('remoto_url') == self.cfg['remoto_url'] else None
@@ -541,11 +596,12 @@ class Motor:
             extra = {'remoto_id':'', 'remoto_url':''} if isinstance(e, remoto.FalloCorte) else {}
             if intentos >= self.cfg["max_intentos"]:
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos, **extra)
-                self.notificar(f"❌ Bot: no pude preparar {nombre}: {e}")
+                self._aviso_trabajo(t, f'error:{intentos}', 'Falló la preparación remota. Revisa el detalle en la cola.', 'errores', True)
             else:
                 espera = ESPERA_TRABAJO_MIN[min(intentos - 1, len(ESPERA_TRABAJO_MIN) - 1)]
                 self.db.marcar_trabajo(t["id"], "pendiente", str(e), intentos=intentos,
                                        proximo_intento=time.time() + espera * 60, **extra)
+                self._aviso_trabajo(t, f'reintento:{intentos}', f'Falló la preparación remota; reintento en {espera} minutos.', 'errores', True)
             self.log(f"El servidor remoto falló con {nombre}: {e}")
             return
         except remoto.TrabajoPerdido:
@@ -585,7 +641,10 @@ class Motor:
                 self.actividad = 'Cancelando la subida; cerrando su navegador…'
                 return {'estado': 'cancelando', 'mensaje':
                         'Cancelación solicitada. Espera a que se cierre el navegador de esta subida.'}
+            anterior = self.db.subida(sid)
             self.db.borrar_subida(sid)
+            if anterior:
+                self._aviso_subida(anterior, 'borrado', 'Retirado de la cola.', 'cola')
         self._despertar.set()
         return {'estado': 'borrado', 'mensaje': 'Subida eliminada de la cola.'}
 
@@ -595,7 +654,10 @@ class Motor:
             resultado = None
             if actual is not None and actual[0]['trabajo_id'] == int(tid):
                 resultado = self.borrar_subida(actual[0]['id'])
+            anterior = self.db.trabajo(tid)
             self.db.borrar_trabajo(tid)
+            if anterior:
+                self._aviso_trabajo(anterior, 'borrado', 'Video retirado de la cola.', 'cola')
         self._despertar.set()
         return resultado or {'mensaje': 'Video y subidas pendientes eliminados de la cola.'}
 
@@ -656,6 +718,8 @@ class Motor:
                         self.db.borrar_subida(s['id'])
                         mensaje = 'Subida cancelada y retirada de la cola.'
                     self._actividad(mensaje)
+                    self._aviso_subida(s, 'ok' if control.confirmada else 'cancelado', mensaje,
+                                       'publicados' if control.confirmada else 'errores' if control.publicando else 'cola', True)
                 self._subida_actual = None
 
     def _ejecutar_subida(self, s, control):
@@ -668,6 +732,7 @@ class Motor:
         nombre = f"{mod.NOMBRE} · {cuenta['nombre']}"
         if not os.path.isfile(s["archivo"]):
             self.db.marcar_subida(s["id"], "error", error="El clip ya no existe en la PC.")
+            self._aviso_subida(s, 'archivo_ausente', 'El archivo del clip ya no existe en la PC.', 'errores', True)
             return
         self._actividad(f"Subiendo a {nombre}: {os.path.basename(s['archivo'])}")
         captura = ""
@@ -678,6 +743,7 @@ class Motor:
                 control.comprobar()
                 with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"], navegador=self.cfg["navegador"]) as ctx:
                     control.comprobar()
+                    self._aviso_subida(s, f"inicio:{s['intentos']}", 'Iniciando la subida; aún no está publicado.')
                     page = navegador.pagina(ctx)
                     page._bot_control_subida = control
                     h = Humano(page, velocidad=self.cfg["velocidad"],
@@ -708,7 +774,7 @@ class Motor:
             self.db.marcar_subida(s["id"], "pendiente", intentos=s["intentos"], error=str(e), captura=captura)
             self.db.editar_cuenta(cuenta["id"], estado="sin_login")
             self.log(f"{nombre}: sesión cerrada. Pausada hasta que inicies sesión.")
-            self.notificar(f"🔐 Bot: {nombre} pide iniciar sesión. Ábrela desde el panel del bot.")
+            self._aviso_subida(s, 'sesion', 'Falta iniciar sesión. Abre la cuenta desde el panel.', 'errores', True)
             return
         except navegador.PerfilOcupado:
             control.comprobar()
@@ -718,7 +784,7 @@ class Motor:
             control.comprobar()
             self.db.marcar_subida(s["id"], "revisar", error=f"{e} Puede que sí se haya publicado: "
                                   "mira la cuenta y pulsa ✔ o reintentar.", captura=captura)
-            self.notificar(f"👀 Bot: revisa {nombre}, no vi la confirmación de la publicación.")
+            self._aviso_subida(s, f"revisar:{s['intentos']}", 'No se confirmó la publicación. Puede estar publicada; revisa la cuenta. No se repite automáticamente.', 'errores', True)
             self.log(f"{nombre}: sin confirmación, queda para revisar (no se reintenta solo).")
             self._descanso(cuenta)
             return
@@ -728,11 +794,12 @@ class Motor:
             definitivo = isinstance(e, Rechazado) or intentos >= self.cfg["max_intentos"]
             if definitivo:
                 self.db.marcar_subida(s["id"], "error", error=str(e), captura=captura)
-                self.notificar(f"❌ Bot: falló la subida a {nombre}: {e}")
+                self._aviso_subida(s, f'error:{intentos}', 'Falló la subida. Revisa el detalle en el panel.', 'errores', True)
             else:
                 espera = ESPERA_REINTENTO_MIN[min(intentos - 1, len(ESPERA_REINTENTO_MIN) - 1)]
                 self.db.marcar_subida(s["id"], "pendiente", error=str(e), captura=captura,
                                       proximo_intento=time.time() + espera * 60)
+                self._aviso_subida(s, f'reintento:{intentos}', f'Falló la subida; reintento en {espera} minutos.', 'errores', True)
             self.log(f"Falló subida a {nombre} (intento {intentos}): {e}")
             self._descanso(cuenta, corto=True)
             return
@@ -741,6 +808,7 @@ class Motor:
         self.db.marcar_subida(s["id"], "ok", error="", url_publicada=url or "")
         self.db.editar_cuenta(cuenta["id"], estado="ok")
         self.log(f"✅ Subido a {nombre}" + (f": {url}" if url else ""))
+        self._aviso_subida(s, 'ok', 'Publicación confirmada.', 'publicados', True)
         self._descanso(cuenta)
 
     def _descanso(self, cuenta, corto=False):
@@ -946,6 +1014,7 @@ class Motor:
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
             "remoto": self._remoto_estado,
+            "avisos": self._avisos.resumen(),
             "plan": plan,
             "carpeta_datos": self.almacenamiento,
             "actividad": self.actividad,
