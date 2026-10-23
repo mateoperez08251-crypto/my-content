@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS live_segmentos (
 
 
 class LiveError(ValueError):
-    pass
+    def __init__(self, message, *, retryable=True):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class NotLive(LiveError):
@@ -64,24 +66,86 @@ def number(value, minimum, maximum, label):
     return int(value)
 
 
+def _error_kind(message):
+    """Solo códigos conocidos; nunca conservar mensajes con cookies o URL firmadas."""
+    text = str(message).lower().replace('’', "'")
+    if any(x in text for x in ('netscape format', 'failed to load cookies', 'could not load cookies')):
+        return 'cookie_file'
+    if any(x in text for x in ('not a bot', 'sign in', 'login required', 'cookies are no longer valid',
+                               'confirm your age', 'age-restricted')):
+        return 'login'
+    if any(x in text for x in ('private video', 'members-only', 'join this channel', 'not available in your country')):
+        return 'restricted'
+    if '429' in text or 'too many requests' in text:
+        return 'rate'
+    if '403' in text or 'forbidden' in text:
+        return 'forbidden'
+    if any(x in text for x in ('timed out', 'timeout', 'getaddrinfo', 'connection',
+                               'unable to download', 'name resolution', 'network is unreachable')):
+        return 'network'
+    if any(x in text for x in ('javascript runtime', 'challenge solving failed',
+                               'error solving', 'yt-dlp-ejs', 'challenge solver')):
+        return 'javascript'
+    if any(x in text for x in ('requested format', 'no video formats', 'only images are available')):
+        return 'format'
+    if any(x in text for x in ('video unavailable', 'has been removed', 'video is unavailable')):
+        return 'unavailable'
+    return 'unknown'
+
+
 class QuietLogger:
-    # yt-dlp puede incluir cookies o URL firmadas en los errores. No se registran.
+    def __init__(self):
+        self.issues = set()
+
     def debug(self, message): pass
-    def warning(self, message): pass
-    def error(self, message): pass
+
+    def warning(self, message):
+        self.issues.add(_error_kind(message))
+
+    def error(self, message):
+        self.warning(message)
+
+
+def _access_error(error, logger, has_cookies):
+    kind = _error_kind(error)
+    if kind in ('format', 'unknown'):
+        for hint in ('login', 'cookie_file', 'javascript'):
+            if hint in logger.issues:
+                kind = hint
+                break
+    update = 'Actualiza el soporte de YouTube (en Windows: actualizar_youtube.bat) y reinicia la app.'
+    cookies = ('Hay cookies cargadas en esta PC, pero YouTube pide iniciar sesión o verificar el acceso. '
+               'Abre el live con tu cuenta y vuelve a exportarlas.' if has_cookies else
+               'YouTube pide iniciar sesión o verificar el acceso. Abre el live con tu cuenta y carga '
+               'sus cookies en «Cookies de YouTube» → «Esta PC».')
+    messages = {
+        'cookie_file': 'No se pudo leer el archivo de cookies. Vuelve a guardarlo desde «Cookies de YouTube» → «Esta PC».',
+        'login': cookies,
+        'restricted': 'YouTube indica que el live es privado, para miembros o no está disponible en tu región. Comprueba que tu cuenta tenga acceso.',
+        'rate': 'YouTube está limitando las peticiones (HTTP 429). Espera antes de iniciar otra captura.',
+        'forbidden': 'YouTube denegó el acceso a la señal (HTTP 403). Comprueba el live en tu navegador. ' + update,
+        'network': 'No se pudo conectar con YouTube. Revisa la conexión de esta PC.',
+        'javascript': 'No se pudo resolver la señal con el soporte JavaScript de YouTube. ' + update,
+        'format': 'YouTube no ofreció el formato de video y audio que necesita esta captura. ' + update,
+        'unavailable': 'YouTube indica que el video no está disponible o fue retirado. Comprueba el enlace.',
+        'unknown': 'No se pudo obtener la señal del live. Comprueba el enlace en tu navegador. ' + update,
+    }
+    return LiveError(messages[kind], retryable=kind in ('network', 'unknown'))
 
 
 def resolve_live(url):
+    url = youtube_url(url)
     import yt_dlp
     import yt_downloader
+    logger = QuietLogger()
     opts = dict(yt_downloader.opciones_base(), quiet=True, noplaylist=True,
-                socket_timeout=15, retries=1, extractor_retries=1, logger=QuietLogger(),
+                socket_timeout=15, retries=1, extractor_retries=1, logger=logger, no_warnings=False,
                 format='best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]')
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(youtube_url(url), download=False)
-    except Exception:
-        raise LiveError('No pude acceder al live. Revisa la URL, conexión o las cookies de YouTube.') from None
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        raise _access_error(exc, logger, bool(opts.get('cookiefile'))) from None
     status = info.get('live_status')
     if status == 'is_upcoming':
         raise NotLive('El live está programado y todavía no empieza. Inícialo cuando esté transmitiendo.')
@@ -257,6 +321,7 @@ class LiveManager:
         folder.mkdir(exist_ok=True)
         try:
             ready_info = None
+            received_signal = False
             for attempt in range(4):
                 if event.is_set() or self.stop_all.is_set():
                     break
@@ -265,19 +330,20 @@ class LiveManager:
                     info = ready_info or self.resolver(url)
                     ready_info = None
                 except NotLive:
-                    if attempt:
+                    if received_signal:
                         self._update(jid, 'finalizado', 'La transmisión ya no está en vivo. Los segmentos cerrados siguen en cola.')
                         return
                     raise
-                except LiveError:
-                    if attempt == 3:
+                except LiveError as exc:
+                    if attempt == 3 or not exc.retryable:
                         raise
-                    self._update(jid, 'reconectando', 'No pude resolver la señal. Reintentando; puedes detener la captura.')
+                    self._update(jid, 'reconectando', f'{exc} Reintento {attempt + 2}/4; puedes detener la captura.')
                     if event.wait(5 * (attempt + 1)):
                         break
                     continue
                 if event.is_set() or self.stop_all.is_set():
                     break
+                received_signal = True
                 self.db._q('UPDATE live_sesiones SET titulo=? WHERE id=?', (info['title'],jid))
                 prefix = uuid.uuid4().hex[:8]
                 manifest = folder / (prefix + '.csv')
@@ -393,3 +459,4 @@ class LiveManager:
             self.reconcile()
         except Exception:
             pass  # Los manifiestos se recuperan al volver a abrir la app.
+

@@ -231,6 +231,36 @@ class Queue(unittest.TestCase):
         self.assertEqual(self.manager.state()['lives'][0]['estado'], 'finalizado')
         self.assertNotIn('private-', json.dumps(self.manager.state()))
 
+    def test_access_error_stops_without_repeating_requests(self):
+        jid, _ = self.seed()
+        cfg = json.loads(self.motor.db._uno('SELECT config FROM live_sesiones WHERE id=?', (jid,))['config'])
+        self.manager.resolver = Mock(side_effect=live.LiveError('YouTube pide iniciar sesión.', retryable=False))
+        with patch.object(live.subprocess, 'Popen') as launch:
+            self.manager._capture(jid, URL, cfg, threading.Event())
+        self.manager.resolver.assert_called_once_with(URL)
+        launch.assert_not_called()
+        state = self.manager.state()['lives'][0]
+        self.assertEqual(state['estado'], 'error')
+        self.assertEqual(state['detalle'], 'YouTube pide iniciar sesión.')
+
+    def test_retry_keeps_reason_and_does_not_mark_unstarted_live_finished(self):
+        jid, _ = self.seed()
+        cfg = json.loads(self.motor.db._uno('SELECT config FROM live_sesiones WHERE id=?', (jid,))['config'])
+        event = Mock()
+        event.is_set.return_value = False
+        def wait(seconds):
+            state = self.manager.state()['lives'][0]
+            self.assertEqual(state['estado'], 'reconectando')
+            self.assertIn('conexión', state['detalle'])
+            self.assertIn('2/4', state['detalle'])
+            return False
+        event.wait.side_effect = wait
+        self.manager.resolver = Mock(side_effect=[live.LiveError('Revisa la conexión.'),
+                                                 live.NotLive('El live todavía no empieza.')])
+        self.manager._capture(jid, URL, cfg, event)
+        self.assertEqual(self.manager.state()['lives'][0]['estado'], 'error')
+        self.assertIn('todavía no empieza', self.manager.state()['lives'][0]['detalle'])
+
     def test_real_ffmpeg_enqueues_before_source_ends_and_flushes_tail(self):
         import imageio_ffmpeg
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
@@ -330,3 +360,4 @@ class Routes(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

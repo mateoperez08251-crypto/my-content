@@ -122,6 +122,10 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <h2><i class="ph-duotone ph-broadcast"></i> YouTube Live → clips</h2>
     <p class="muted">Pega la URL de un live activo. La captura continúa mientras los segmentos cerrados se procesan y pasan a la cola de subida. Empieza desde la señal disponible ahora, sin recuperar el historial del live.</p>
     <input id="live-url" type="url" placeholder="https://www.youtube.com/watch?v=..." aria-label="URL de YouTube Live">
+    <div class="fila" style="margin-top:8px">
+      <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies de YouTube</button>
+      <span class="muted">Para lives, guarda las cookies en «Esta PC», aunque tengas Colab conectado. Se comparten con Smart Split y los enlaces.</span>
+    </div>
     <div class="ajustes">
       <div><label for="live-mode">Cómo cortar</label><select id="live-mode" onchange="modoLive()">
         <option value="sequential">Partes consecutivas · sin selección IA</option>
@@ -276,7 +280,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <button id="cookies-descarga-guardar" class="prim" onclick="peticionCookiesDescarga('POST')">Guardar cookies</button>
     <button id="cookies-descarga-quitar" class="peligro" onclick="peticionCookiesDescarga('DELETE')">Quitar cookies</button>
   </div>
-  <p class="muted">Elige Colab si usas el servidor de cortes. El archivo se enviará solo al destino elegido. Las cookies pueden caducar; guardarlas no confirma que YouTube permita la descarga.</p>
+  <p class="muted">Para lives, elige Esta PC. Para videos que se descargan en el servidor de cortes, elige Colab. El archivo se enviará solo al destino elegido. Las cookies pueden caducar; guardarlas no confirma que YouTube permita la descarga.</p>
 </dialog>
 <div id="toast"></div>
 <datalist id="smart-presets"></datalist>
