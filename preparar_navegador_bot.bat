@@ -3,6 +3,7 @@ setlocal
 chcp 65001 >nul
 title Preparar navegador del bot
 cd /d "%~dp0"
+echo Carpeta de la app: "%~dp0"
 
 if not exist "preparar_navegador_bot.py" (
     echo [ERROR] Ejecuta este BAT dentro de la carpeta actualizada de my-content.

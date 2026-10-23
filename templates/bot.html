@@ -189,6 +189,7 @@ const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',pendiente:'En cola',subie
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
 const loginPendientes = new Set();
 const cookiesPendientes = new Set();
+const cierresPendientes = new Set();
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -233,7 +234,7 @@ function pintar() {
     <td>${x.hoy}/${x.limite_dia}</td>
     <td class="acc">
       <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
-      <button class="mini" onclick="cerrarVentana(${x.id})" ${x.login_abierto ? '' : 'disabled'} title="Cierra la ventana de inicio de sesión y comprueba la cuenta">Cerrar ventana</button>
+      <button class="mini" onclick="cerrarVentana(${x.id})" ${x.login_abierto && !cierresPendientes.has(x.id) ? '' : 'disabled'} title="Cierra la ventana de inicio de sesión y comprueba la cuenta">${cierresPendientes.has(x.id) ? 'Cerrando…' : 'Cerrar ventana'}</button>
       <button class="mini" onclick="importarCookies(${x.id})" ${x.abierta || cookiesPendientes.has(x.id) ? 'disabled' : ''} title="Importa cookies con la ventana de esa cuenta cerrada"><i class="ph ph-file-arrow-up"></i> Cookies</button>
       <button class="mini" onclick="probar(${x.id})" title="Comprueba que la sesión sigue abierta"><i class="ph ph-check-circle"></i></button>
       <button class="mini" onclick="pausarCuenta(${x.id}, ${x.activa ? 0 : 1})">${x.activa ? '<i class="ph ph-pause"></i>' : '<i class="ph ph-play"></i>'}</button>
@@ -319,11 +320,14 @@ async function crearCuenta() {
   toast('Cuenta creada. Ahora pulsa "Sesión" para iniciar sesión.'); cargar();
 }
 async function cerrarVentana(id) {
+  if (cierresPendientes.has(id)) return;
+  cierresPendientes.add(id); if (E) pintar();
+  toast('Cerrando la ventana de esa cuenta…');
   try {
     const j = await api(`/api/bot/cuentas/${id}/cerrar`, {});
     toast(j.mensaje);
-    await cargar();
   } catch (e) { toast(e.message, true); }
+  finally { cierresPendientes.delete(id); cargar(); }
 }
 
 async function login(id) {

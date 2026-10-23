@@ -30,7 +30,7 @@ def login_abierto(perfil):
         return os.path.abspath(perfil) in _logins
 
 
-def cerrar_normal(perfil):
+def cerrar_normal(perfil, espera_s=10):
     """Solo cierra el proceso de login de esta cuenta; nunca una subida."""
     with _logins_guard:
         proc = _logins.get(os.path.abspath(perfil))
@@ -58,6 +58,12 @@ def cerrar_normal(perfil):
                 raise ValueError('No pude cerrar la ventana. Ciérrala con la X del navegador.')
         else:
             proc.terminate()
+    # No mantener el registro bloqueado mientras el hilo de login termina.
+    # WM_CLOSE es asíncrono: enviarlo no significa que la ventana se cerró.
+    try:
+        proc.wait(timeout=espera_s)
+    except subprocess.TimeoutExpired:
+        raise ValueError('El navegador todavía no se ha cerrado. Revisa si su ventana muestra un aviso y ciérrala con la X. No se forzó el cierre del perfil.') from None
 
 
 ARGS = [

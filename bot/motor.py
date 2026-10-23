@@ -622,7 +622,7 @@ class Motor:
         if not cuenta:
             raise ValueError("Cuenta no encontrada.")
         navegador.cerrar_normal(self.perfil(cuenta))
-        return {"mensaje": "Cierre solicitado. Al cerrar, se comprobará la sesión."}
+        return {"mensaje": "Ventana cerrada. Compruebo la sesión en segundo plano."}
 
     def abrir_login(self, cid, espera_s=45):
         """Abre el navegador de la cuenta en la página de inicio de sesión. Al cerrarlo, se comprueba.
@@ -670,8 +670,9 @@ class Motor:
         cuenta = self.db.cuenta(cid)
         mod = POR_NOMBRE[cuenta["plataforma"]]
         ok = False
+        # Verificar nunca debe abrir otra ventana después de cerrar el login.
         try:
-            with navegador.abrir(self.perfil(cuenta), headless=self.cfg["headless"], navegador=self.cfg["navegador"]) as ctx:
+            with navegador.abrir(self.perfil(cuenta), headless=True, navegador=self.cfg["navegador"]) as ctx:
                 page = navegador.pagina(ctx)
                 page.goto(cuenta["url_subida"] or mod.URL_SUBIDA, wait_until="domcontentloaded")
                 page.wait_for_timeout(6000)
