@@ -203,6 +203,21 @@ class Cola(unittest.TestCase):
         self._vaciar()
         self.assertEqual(PlataformaFalsa.llamadas, [(self.clips[0], "Mira esto #viral #fyp\n#hola")])
 
+    def test_url_manual_descarga_corta_y_encola_todas_las_partes(self):
+        self.m.db.guardar_regla('*', [self.tk], preset='partes', cortar=True)
+        self.m.cargar_preset = mock.Mock(return_value={
+            'clip_selection': 'sequential', 'clip_duration': 60, 'show_subtitles': False})
+        # Simula la descarga/corte y la publicación; no publica en cuentas reales.
+        tid = self.m.encolar('https://youtu.be/video', cortar=True)
+        self._vaciar()
+        self.m.cargar_preset.assert_called_once_with('partes')
+        self.assertEqual(self.datos_split['source'], 'https://youtu.be/video')
+        self.assertEqual(self.datos_split['clip_selection'], 'sequential')
+        self.assertEqual(self.datos_split['clip_duration'], 60)
+        self.assertEqual([path for path, _ in PlataformaFalsa.llamadas], self.clips)
+        self.assertEqual(self.m.db.trabajo(tid)['estado'], 'listo')
+        self.assertTrue(all(s['estado'] == 'ok' for s in self.m.db.subidas_recientes()))
+
     def test_reintenta_y_luego_ok(self):
         PlataformaFalsa.fallar = [RuntimeError("botón no apareció")]
         self.m.encolar("https://youtu.be/x", cuentas=[self.tk], cortar=False)
@@ -394,3 +409,4 @@ class ServidorDeCortes(unittest.TestCase):
         self.assertIn("volvió", avisos[1])
         self.assertTrue(m._remoto_disponible())
         m.db._con.close()
+
