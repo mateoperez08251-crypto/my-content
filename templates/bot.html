@@ -62,6 +62,11 @@ font:12px/1.5 ui-monospace,Consolas,monospace;color:#9ae6b4;white-space:pre-wrap
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1b1f27;border:1px solid var(--borde);
 padding:10px 16px;border-radius:8px;display:none;z-index:9}
 a{color:var(--acento)}
+dialog.cookies-dialog{width:min(520px,calc(100% - 24px));max-height:90vh;color:var(--texto);padding:20px}
+dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
+.cookies-dialog h2{justify-content:space-between}
+.cookies-dialog button:disabled{opacity:.5;cursor:wait}
+#cookies-descarga-servidor{overflow-wrap:anywhere}
 @media(max-width:520px){main{grid-template-columns:1fr;padding:12px}header{padding:12px}}
 </style>
 </head>
@@ -138,6 +143,10 @@ a{color:var(--acento)}
   <section class="card">
     <h2><i class="ph-duotone ph-link"></i> 2. Añadir videos desde enlaces</h2>
     <textarea id="urls" placeholder="Pega uno o varios enlaces (uno por línea)"></textarea>
+    <div class="fila" style="margin-top:8px">
+      <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies</button>
+      <span class="muted">¿YouTube pide iniciar sesión? Carga tus cookies de descarga, como en Smart Split.</span>
+    </div>
     <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
     <div class="chips" id="chips-url"></div>
     <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar regla del canal o preset por defecto</option></select>
@@ -250,6 +259,25 @@ a{color:var(--acento)}
     <div id="registro"></div>
   </section>
 </main>
+<dialog class="card cookies-dialog" id="cookies-descarga-modal" aria-labelledby="cookies-descarga-titulo">
+  <h2 id="cookies-descarga-titulo">🍪 Cookies de YouTube
+    <button type="button" onclick="cerrarCookiesDescarga()" aria-label="Cerrar cookies">Cerrar</button>
+  </h2>
+  <p class="ayuda">Carga las cookies de tu sesión de YouTube. Son las mismas que usa Smart Split para descargar videos.</p>
+  <label for="cookies-descarga-destino">¿Dónde se descarga el video?</label>
+  <select id="cookies-descarga-destino" onchange="cambiarDestinoCookies()">
+    <option value="pc">Esta PC</option><option value="colab">Colab · servidor de cortes</option>
+  </select>
+  <p class="muted" id="cookies-descarga-servidor"></p>
+  <p id="cookies-descarga-estado" role="status" aria-live="polite"></p>
+  <label for="cookies-descarga-archivo">Archivo .txt (Netscape) o .json · máximo 2 MiB</label>
+  <input id="cookies-descarga-archivo" type="file" accept=".txt,.json,text/plain,application/json">
+  <div class="fila" style="margin-top:12px">
+    <button id="cookies-descarga-guardar" class="prim" onclick="peticionCookiesDescarga('POST')">Guardar cookies</button>
+    <button id="cookies-descarga-quitar" class="peligro" onclick="peticionCookiesDescarga('DELETE')">Quitar cookies</button>
+  </div>
+  <p class="muted">Elige Colab si usas el servidor de cortes. El archivo se enviará solo al destino elegido. Las cookies pueden caducar; guardarlas no confirma que YouTube permita la descarga.</p>
+</dialog>
 <div id="toast"></div>
 <datalist id="smart-presets"></datalist>
 
@@ -259,6 +287,7 @@ const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',sin_comprobar:'Sin compro
   cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar'};
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
 let selLocal = new Set(), archivosLocales = [], enviandoLocales = false;
+let cookiesDescargaOcupado = false, cookiesDescargaDestino = null;
 const loginPendientes = new Set();
 const cookiesPendientes = new Set();
 const cierresPendientes = new Set();
@@ -385,6 +414,69 @@ async function cargarLives() {
 }
 async function detenerLive(id) { await api(`/api/bot/lives/${id}/detener`, {}); await cargarLives(); }
 async function cfg(cambios) { await api('/api/bot/config', cambios); cargar(); }
+
+async function abrirCookiesDescarga() {
+  const modal = $('cookies-descarga-modal');
+  if (!modal.open) modal.showModal();
+  if (cookiesDescargaOcupado) return;
+  $('cookies-descarga-destino').value = 'pc';
+  $('cookies-descarga-archivo').value = '';
+  await cambiarDestinoCookies();
+}
+function cerrarCookiesDescarga() { $('cookies-descarga-modal').close(); }
+
+async function cambiarDestinoCookies() {
+  if (cookiesDescargaOcupado) return;
+  const destino = $('cookies-descarga-destino').value;
+  // Conserva la URL que vio el usuario aunque el sondeo actualice E mientras el diálogo está abierto.
+  const servidor = destino === 'colab' ? String(E?.config?.remoto_url || '').trim().replace(/\/+$/, '') : '';
+  cookiesDescargaDestino = {destino, servidor};
+  $('cookies-descarga-archivo').value = '';
+  $('cookies-descarga-servidor').textContent = destino === 'colab' ?
+    (servidor ? `Se enviarán a: ${servidor}` : 'Guarda primero la URL y la contraseña en Servidor de cortes.') :
+    'Se guardan en esta PC y se comparten con Smart Split. Para descargar en Colab, elige Colab.';
+  await peticionCookiesDescarga('GET');
+}
+
+async function peticionCookiesDescarga(metodo) {
+  if (cookiesDescargaOcupado || !cookiesDescargaDestino) return;
+  const estado = $('cookies-descarga-estado'), destino = {...cookiesDescargaDestino};
+  const controles = ['cookies-descarga-destino','cookies-descarga-archivo','cookies-descarga-guardar','cookies-descarga-quitar'];
+  cookiesDescargaOcupado = true;
+  controles.forEach(id => $(id).disabled = true);
+  estado.style.color = '';
+  estado.textContent = metodo === 'GET' ? 'Consultando cookies…' : metodo === 'POST' ? 'Guardando cookies…' : 'Quitando cookies…';
+  try {
+    if (destino.destino === 'colab' && !destino.servidor) throw new Error('Guarda primero la URL y la contraseña del servidor de cortes.');
+    const opciones = {method:metodo, cache:'no-store'};
+    if (metodo === 'POST') {
+      const archivo = $('cookies-descarga-archivo').files[0];
+      if (!archivo) throw new Error('Elige tu archivo de cookies .txt o .json.');
+      if (!/\.(txt|json)$/i.test(archivo.name) || !archivo.size || archivo.size > 2 * 1024 * 1024)
+        throw new Error('Elige un archivo .txt o .json con contenido y de hasta 2 MiB.');
+      opciones.body = new FormData(); opciones.body.append('archivo', archivo);
+    }
+    const params = new URLSearchParams(destino);
+    const respuesta = await fetch(`/api/bot/cookies_youtube?${params}`, opciones);
+    let datos;
+    try { datos = await respuesta.json(); }
+    catch { throw new Error(`No se confirmó la operación (HTTP ${respuesta.status}). Revisa la conexión.`); }
+    if (!respuesta.ok || datos?.success !== true || typeof datos.hay !== 'boolean')
+      throw new Error(datos?.error || `No se confirmó la operación (HTTP ${respuesta.status}).`);
+    if ((metodo === 'POST' && !datos.hay) || (metodo === 'DELETE' && datos.hay))
+      throw new Error('No se confirmó el cambio de cookies. Vuelve a comprobar el destino.');
+    const nombre = destino.destino === 'colab' ? 'Colab' : 'esta PC';
+    const fecha = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(datos.fecha || '') ? ` · ${datos.fecha}` : '';
+    estado.textContent = datos.hay ? `Cookies guardadas en ${nombre}${fecha}. Puedes reintentar el video en la cola.` : `Sin cookies guardadas en ${nombre}.`;
+    if (metodo === 'POST' || metodo === 'DELETE') $('cookies-descarga-archivo').value = '';
+  } catch (error) {
+    estado.textContent = error.message || 'No se pudo conectar. Revisa el destino y vuelve a intentar.';
+    estado.style.color = 'var(--mal)';
+  } finally {
+    cookiesDescargaOcupado = false;
+    controles.forEach(id => $(id).disabled = false);
+  }
+}
 
 async function encolar() {
   await api('/api/bot/encolar', {url: $('urls').value, cuentas: [...selUrl], cortar: $('cortar').checked,
