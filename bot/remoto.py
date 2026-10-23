@@ -3,8 +3,10 @@
 servidor corta el video y el bot se trae los clips para subirlos desde esta PC."""
 import os
 import time
+import json
 
 import requests
+from . import archivos
 
 
 class ServidorCaido(Exception):
@@ -15,8 +17,16 @@ class ServidorOcupado(Exception):
     pass
 
 
+class TrabajoPerdido(ServidorCaido):
+    pass
+
+
 class FalloTrabajo(Exception):
     """El servidor respondió, pero el corte falló (descarga bloqueada, falta clave de Groq...)."""
+
+
+class FalloCorte(FalloTrabajo):
+    """La edición remota terminó con error; el reintento necesita un trabajo nuevo."""
 
 
 class Cliente:
@@ -62,7 +72,8 @@ class Cliente:
         return d["id"]
 
     def esperar_y_bajar(self, jid, carpeta, progreso=None, cancelar=None, limite_s=4 * 3600, cada_s=10):
-        """Espera a que termine el corte, baja los clips y los borra del servidor.
+        """Espera al corte y guarda todos los clips y su manifiesto en esta PC.
+        El motor confirma la cola en SQLite antes de limpiar la copia remota.
         Devuelve [(ruta_local, publicacion), ...]."""
         fin = time.time() + limite_s
         fallos = 0
@@ -82,9 +93,9 @@ class Cliente:
                 continue
             d = self._json(r)
             if r.status_code == 404:
-                raise ServidorCaido("el servidor se reinició y perdió el trabajo")
+                raise TrabajoPerdido("el servidor se reinició y perdió el trabajo")
             if d.get("estado") == "error":
-                raise FalloTrabajo(d.get("error") or "falló el corte")
+                raise FalloCorte(d.get("error") or "falló el corte")
             if d.get("estado") == "listo":
                 break
             if progreso:
@@ -95,18 +106,37 @@ class Cliente:
         if not d.get("clips"):
             raise FalloTrabajo("El servidor no generó clips.")
         os.makedirs(carpeta, exist_ok=True)
+        registro_path = os.path.join(carpeta, 'descargas.json')
+        try:
+            with open(registro_path, encoding='utf-8') as f:
+                registro = json.load(f)
+            if registro.get('origen') != [self.url, jid] or not isinstance(registro.get('archivos'), dict):
+                registro = {}
+        except (OSError, ValueError, AttributeError):
+            registro = {}
+        registro = registro or {'origen': [self.url, jid], 'archivos': {}}
         salida = []
         for c in d["clips"]:
-            destino = os.path.join(carpeta, os.path.basename(c["nombre"]) or f"clip_{c['n']}.mp4")
-            self._bajar(f"/api/bot/remoto/{jid}/clip/{c['n']}", destino)
+            destino = os.path.join(carpeta, f"{int(c['n']) + 1:04d}_" + os.path.basename(c['nombre']).replace('\\', '_'))
+            size = c.get('bytes')
+            nombre = os.path.basename(destino)
+            if not (isinstance(size, int) and size > 0 and registro['archivos'].get(nombre) == size
+                    and os.path.isfile(destino) and os.path.getsize(destino) == size):
+                self._bajar(f"/api/bot/remoto/{jid}/clip/{c['n']}", destino, esperado=size)
+                registro['archivos'][nombre] = os.path.getsize(destino)
+                with open(registro_path + '.tmp', 'w', encoding='utf-8') as f:
+                    json.dump(registro, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(registro_path + '.tmp', registro_path)
             salida.append((destino, c.get("publicacion") or ""))
-        try:
-            self._pedir("DELETE", f"/api/bot/remoto/{jid}")
-        except ServidorCaido:
-            pass
+        archivos.guardar_manifest(carpeta, salida)
         return salida
 
-    def _bajar(self, ruta, destino, intentos=3):
+    def limpiar(self, jid):
+        self._pedir('DELETE', f'/api/bot/remoto/{jid}')
+
+    def _bajar(self, ruta, destino, intentos=3, esperado=None):
         tmp = destino + ".part"
         for i in range(intentos):
             try:
@@ -116,6 +146,11 @@ class Cliente:
                     with open(tmp, "wb") as f:
                         for trozo in r.iter_content(1 << 20):
                             f.write(trozo)
+                        f.flush()
+                        os.fsync(f.fileno())
+                size = os.path.getsize(tmp)
+                if size <= 0 or (isinstance(esperado, int) and size != esperado):
+                    raise FalloTrabajo('Descarga incompleta; el clip todavía no está guardado en esta PC.')
                 os.replace(tmp, destino)
                 return
             except requests.RequestException as e:

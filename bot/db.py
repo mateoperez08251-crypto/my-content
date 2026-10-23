@@ -79,6 +79,8 @@ class DB:
             self._con.executescript(_ESQUEMA)
             columns = {r[1] for r in self._con.execute('PRAGMA table_info(trabajos)')}
             for name, definition in [('archivo_local', "TEXT NOT NULL DEFAULT ''"),
+                                     ('remoto_id', "TEXT NOT NULL DEFAULT ''"),
+                                     ('remoto_url', "TEXT NOT NULL DEFAULT ''"),
                                      ('opciones', "TEXT NOT NULL DEFAULT '{}'")]:
                 if name not in columns:
                     self._con.execute(f'ALTER TABLE trabajos ADD COLUMN {name} {definition}')
@@ -131,6 +133,14 @@ class DB:
     def editar_cuenta(self, cid, **campos):
         permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre"}
         sets = {k: v for k, v in campos.items() if k in permitidos}
+        if 'limite_dia' in sets:
+            try:
+                valor = int(sets['limite_dia'])
+            except (ValueError, TypeError):
+                raise ValueError('El máximo diario debe ser un número entero.') from None
+            if isinstance(sets['limite_dia'], bool) or valor != float(sets['limite_dia']) or not 1 <= valor <= 1000:
+                raise ValueError('El máximo diario debe estar entre 1 y 1000 publicaciones.')
+            sets['limite_dia'] = valor
         if not sets:
             return
         sql = ", ".join(f"{k}=?" for k in sets)
@@ -166,15 +176,15 @@ class DB:
 
     # -- trabajos -------------------------------------------------------
     def encolar_trabajo(self, url, origen, clave=None, canal="", titulo="", cuentas=(),
-                        preset="", texto_fijo="", cortar=True):
+                        preset="", texto_fijo="", cortar=True, opciones=None):
         """Devuelve el id nuevo, o None si ese video ya estaba en la cola (no se repite)."""
         ahora = time.time()
         try:
             cur = self._q(
                 "INSERT INTO trabajos(clave, url, origen, canal, titulo, cuentas, preset, texto_fijo, "
-                "cortar, creado, actualizado) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "cortar, creado, actualizado, opciones) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (clave, url, origen, canal, titulo, json.dumps([int(c) for c in cuentas]), preset,
-                 texto_fijo, 1 if cortar else 0, ahora, ahora))
+                 texto_fijo, 1 if cortar else 0, ahora, ahora, json.dumps(opciones or {})))
             return cur.lastrowid
         except sqlite3.IntegrityError:
             return None
@@ -204,9 +214,21 @@ class DB:
                                   [(tid, cid, ruta, texto, ahora, ahora) for cid, ruta, texto in subidas])
             self._con.execute("UPDATE trabajos SET estado='listo',error='',actualizado=? WHERE id=?", (ahora, tid))
 
-    def siguiente_trabajo(self):
+    def siguiente_trabajo(self, excluir_live=False):
+        filtro = "AND origen!='live' " if excluir_live else ''
         return self._uno("SELECT * FROM trabajos WHERE estado='pendiente' AND proximo_intento<=? "
-                         "ORDER BY id LIMIT 1", (time.time(),))
+                         + filtro + "ORDER BY id LIMIT 1", (time.time(),))
+
+    def por_preparar(self, excluir_live=False):
+        filtro = " AND origen!='live'" if excluir_live else ''
+        return self._uno("SELECT COUNT(*) AS n FROM trabajos WHERE estado IN "
+                         "('pendiente','descargando','cortando')" + filtro)["n"]
+
+    def subidas_pendientes(self):
+        return self._todos("SELECT * FROM subidas WHERE estado='pendiente' ORDER BY id")
+
+    def archivos_preparados(self):
+        return self._todos("SELECT archivo, COUNT(*) AS publicaciones FROM subidas GROUP BY archivo")
 
     def marcar_trabajo(self, tid, estado, error="", **extra):
         campos = {"estado": estado, "error": error[:1000], "actualizado": time.time(), **extra}

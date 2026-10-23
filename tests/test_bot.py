@@ -201,7 +201,10 @@ class Cola(unittest.TestCase):
     def test_url_manual_sin_cortar(self):
         self.m.encolar("https://youtu.be/x", cuentas=[self.tk], cortar=False, texto_fijo="#hola")
         self._vaciar()
-        self.assertEqual(PlataformaFalsa.llamadas, [(self.clips[0], "Mira esto #viral #fyp\n#hola")])
+        ruta, texto = PlataformaFalsa.llamadas[0]
+        self.assertEqual(pathlib.Path(ruta).read_bytes(), pathlib.Path(self.clips[0]).read_bytes())
+        self.assertIn('bot_clips', pathlib.Path(ruta).parts)
+        self.assertEqual(texto, "Mira esto #viral #fyp\n#hola")
 
     def test_url_manual_descarga_corta_y_encola_todas_las_partes(self):
         self.m.db.guardar_regla('*', [self.tk], preset='partes', cortar=True)
@@ -214,7 +217,9 @@ class Cola(unittest.TestCase):
         self.assertEqual(self.datos_split['source'], 'https://youtu.be/video')
         self.assertEqual(self.datos_split['clip_selection'], 'sequential')
         self.assertEqual(self.datos_split['clip_duration'], 60)
-        self.assertEqual([path for path, _ in PlataformaFalsa.llamadas], self.clips)
+        self.assertEqual([pathlib.Path(path).name for path, _ in PlataformaFalsa.llamadas],
+                         ['0001_clip0.mp4', '0002_clip1.mp4'])
+        self.assertTrue(all(pathlib.Path(path).read_bytes() == b'x' for path, _ in PlataformaFalsa.llamadas))
         self.assertEqual(self.m.db.trabajo(tid)['estado'], 'listo')
         self.assertTrue(all(s['estado'] == 'ok' for s in self.m.db.subidas_recientes()))
 
@@ -390,7 +395,7 @@ class ServidorDeCortes(unittest.TestCase):
         pathlib.Path(self.local).write_bytes(b"l")
         m = self._motor("http://127.0.0.1:9")  # nadie escucha
         m._procesar_trabajo(m.db.siguiente_trabajo())
-        self.assertEqual([s["archivo"] for s in m.db.subidas_recientes()], [self.local])
+        self.assertEqual([pathlib.Path(s['archivo']).read_bytes() for s in m.db.subidas_recientes()], [b'l'])
         self.assertFalse(m._remoto_disponible())  # no lo reintenta en 30 min
         m.db._con.close()
 
