@@ -247,19 +247,23 @@ class LiveManager:
             threading.Thread(target=self._reconcile_loop, daemon=True, name='live-cola').start()
 
     def _update(self, jid, state, detail=''):
-        anterior = self.db._uno('SELECT estado,titulo FROM live_sesiones WHERE id=?', (jid,))
+        anterior = self.db._uno('SELECT estado,titulo,config FROM live_sesiones WHERE id=?', (jid,))
         self.db._q('UPDATE live_sesiones SET estado=?,detalle=?,actualizado=? WHERE id=?',
                    (state, detail[:500], time.time(), jid))
         if anterior and anterior['estado'] != state:
-            from .avisos import breve
-            textos = {'capturando': 'Se encontró la señal; iniciando captura y esperando segmentos cerrados.',
-                      'reconectando': 'Se perdió o no se pudo abrir la señal; reintentando.',
-                      'error': 'Falló la captura. Revisa el detalle en YouTube Live → clips.',
-                      'detenido': 'Captura detenida. Los clips en cola se conservan.',
-                      'finalizado': 'La transmisión terminó. Los clips en cola se conservan.'}
+            from .avisos import breve, cantidad, motivo_fallo
+            cfg = json.loads(anterior['config'])
+            textos = {'capturando': f"Encontré la señal. Voy a capturar bloques de unos {cfg['window']} s; hay que esperar a que se cierre cada bloque para editarlo.",
+                      'reconectando': 'Se perdió o no pude abrir la señal. Estoy intentando conectar otra vez; puede faltar un tramo del live.',
+                      'error': 'No pude seguir capturando. ' + motivo_fallo(detail) + ' Mira YouTube Live → clips para revisar la captura.',
+                      'detenido': 'Paré la captura. Lo que ya entró en la cola sigue ahí.',
+                      'finalizado': 'El live terminó. Voy a dejar en la cola los segmentos que ya se cerraron.'}
             if state in textos:
+                total = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=?', (jid,))['n']
+                enviados = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=? AND trabajo_id IS NOT NULL', (jid,))['n']
                 self.motor.avisar('lives', f'live:{jid}:{state}',
-                                  f"Live · {breve(anterior['titulo']) or jid}: {textos[state]}", state == 'error')
+                                  f"Live: {breve(anterior['titulo']) or 'YouTube Live'}\n{textos[state]}\n"
+                                  f"Tengo {cantidad(total, 'segmento cerrado', 'segmentos cerrados')} en el registro. Enviados a la cola de edición: {enviados}.", state == 'error')
 
     def start(self, data):
         if not isinstance(data, dict):
@@ -429,7 +433,9 @@ class LiveManager:
                 tid = self.db.encolar_archivo_live(segment['url'], key, segment['archivo'], opts,
                     f"{segment['titulo'] or 'YouTube Live'} · parte {part}",
                     cfg['accounts'], cfg['preset'], cfg['text'])
-                self.motor._aviso_trabajo(self.db.trabajo(tid), 'cola', 'Segmento del live guardado; en cola para preparar.', 'cola')
+                from .avisos import duracion
+                self.motor._aviso_trabajo(self.db.trabajo(tid), 'cola',
+                    f"Guardé este tramo del live en la PC: {duracion(segment['fin'] - segment['inicio'])}. Falta editarlo antes de subir.", 'cola')
                 self.db._q("UPDATE live_segmentos SET estado='encolado',trabajo_id=? WHERE sesion=? AND nombre=?",
                            (tid,segment['sesion'],segment['nombre']))
                 self.motor.despertar()
