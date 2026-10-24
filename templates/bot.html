@@ -61,7 +61,8 @@ font:12px/1.5 ui-monospace,Consolas,monospace;color:#9ae6b4;white-space:pre-wrap
 .ayuda{font-size:13px;line-height:1.6;color:var(--suave)}
 .rango label{margin:0;font-size:12px}
 .rango>div{flex:1;min-width:60px}
-#sub-preview{width:130px;max-height:160px;object-fit:cover;border-radius:8px}
+#sub-preview{flex:0 0 96px;width:96px;height:144px;max-width:96px;object-fit:contain;border-radius:8px;background:#05060a;border:1px solid var(--borde)}
+#ed-resumen{flex:1 1 200px;min-width:0;margin:0}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1b1f27;border:1px solid var(--borde);
 padding:10px 16px;border-radius:8px;display:none;z-index:9}
 a{color:var(--acento)}
@@ -113,7 +114,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
       <div><label for="ed-fuente">Fuente</label><select id="ed-fuente"><option value="">La del estilo</option><option value="montserrat">Montserrat</option><option value="anton">Anton</option><option value="bebas">Bebas Neue</option><option value="poppins">Poppins</option><option value="bangers">Bangers</option><option value="playfair">Playfair Display</option><option value="nunito">Nunito</option></select></div>
       <div><label for="ed-escala">Tamaño de subtítulos (%)</label><input id="ed-escala" type="number" min="50" max="150" value="100"></div>
     </div>
-    <div class="fila" style="margin-top:12px"><img id="sub-preview" src="/static/presets/sub_karaoke.webp" alt="Ejemplo del estilo de subtítulos"><p class="ayuda" id="ed-resumen"></p></div>
+    <div class="fila" style="margin-top:12px"><img id="sub-preview" src="/static/presets/sub_karaoke.webp" width="96" height="144" loading="lazy" alt="Ejemplo del estilo de subtítulos"><p class="ayuda" id="ed-resumen"></p></div>
     <p class="ayuda">Pro es la opción de calidad disponible en esta app. En partes consecutivas no se usa IA para elegir momentos. Groq requiere tu clave en el equipo que edita; si falla un modelo, Smart Split puede usar uno de respaldo. La ampliación IA no recupera detalle que no tenga el original.</p>
     <div class="fila"><button class="prim" onclick="guardarPresetBot()">Guardar edición y usarla en el bot</button><button onclick="cargarPresets(true)">Actualizar presets</button><a href="/" target="_blank" rel="noopener">Abrir Smart Split completo para más ajustes</a></div>
     <p class="muted" id="preset-estado" aria-live="polite"></p>
