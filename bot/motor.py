@@ -15,6 +15,7 @@ import time
 import traceback
 from datetime import datetime
 from texto_publicacion import crear_publicacion, limpiar_titulo
+from firebase_radar.functions.canales import coincide, permitido
 
 from . import archivos, locales, navegador, remoto
 from .planificacion import estimar
@@ -379,9 +380,8 @@ class Motor:
         return False
 
     # -- entrada a la cola ----------------------------------------------
-    def destino_para(self, canal: str):
+    def destino_para(self, canal: str, plataforma=None, channel_id=''):
         """Regla que corresponde a un canal: la más específica; si no, la general '*'."""
-        canal_n = normalizar_canal(canal)
         general = None
         for r in self.db.reglas():
             if not r["activa"]:
@@ -389,17 +389,16 @@ class Motor:
             if r["origen"] == "*":
                 general = general or r
                 continue
-            o = normalizar_canal(r["origen"])
-            if o and canal_n and (o == canal_n or o in canal_n or canal_n in o):
+            if coincide(r['origen'], canal, plataforma, channel_id):
                 return r
         return general
 
     def encolar(self, url, origen="manual", clave=None, canal="", titulo="", cuentas=None,
-                cortar=None, texto_fijo="", preset=""):
+                cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id=''):
         url = (url or "").strip()
         if not re.match(r"^https?://", url):
             raise ValueError("Pega un enlace que empiece por http.")
-        regla = self.destino_para(canal or url)
+        regla = self.destino_para(canal or url, plataforma_origen, channel_id)
         if not cuentas:
             cuentas = (regla or {}).get("cuentas") or []
         validas = {c["id"] for c in self.db.cuentas()}
@@ -441,7 +440,8 @@ class Motor:
             if tid:
                 self.db.marcar_trabajo(tid, "omitido", "Video anterior: solo se sube lo nuevo.")
             return None
-        return self.encolar(url, origen="radar", clave=clave, canal=canal, titulo=item.get("title", ""))
+        return self.encolar(url, origen="radar", clave=clave, canal=canal, titulo=item.get("title", ""),
+                            plataforma_origen=item.get('platform'), channel_id=item.get('channel_id', ''))
 
     def encolar_archivo(self, stream, nombre, clave, cuentas, plataforma, texto=''):
         nombre, extension, clave, cuentas, texto = locales.validar(nombre, clave, cuentas, plataforma, texto)
@@ -494,8 +494,20 @@ class Motor:
             self.log(f"No pude leer la bandeja de Firebase: {e}")
             return 0
         nuevos = 0
+        import radar_config
+        import paths
+        try:
+            def remoto_cfg():
+                doc = db.collection('config').document('radar').get()
+                return doc.to_dict() if doc.exists else {}
+            radar_cfg = radar_config.cargar(paths.data_path('radar_config.json'), remoto_cfg)[0]
+        except radar_config.ErrorConfig:
+            self.log('No pude verificar la lista del Radar. No añado videos de Firebase a la cola.')
+            return 0
         for doc in docs:
             d = doc.to_dict() or {}
+            if not permitido(d, radar_cfg):
+                continue
             dt = d.get("detected_at")
             try:
                 if dt and dt.timestamp() < self.cfg["radar_desde"]:
@@ -507,7 +519,8 @@ class Motor:
                 continue
             try:
                 if self.encolar(url, origen="firebase", clave=f"youtube:{doc.id}",
-                                canal=d.get("channel", ""), titulo=d.get("title", "")):
+                                canal=d.get("source_channel", ""), titulo=d.get("title", ""),
+                                plataforma_origen=d.get('platform'), channel_id=d.get('channel_id', '')):
                     nuevos += 1
             except ValueError:
                 pass

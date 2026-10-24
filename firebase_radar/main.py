@@ -2,6 +2,10 @@ import datetime
 import urllib.request
 import re
 import xml.etree.ElementTree as ET
+try:
+    from .functions import canales
+except ImportError:
+    from functions import canales
 # pyrefly: ignore [missing-import]
 from firebase_functions import scheduler_fn
 # pyrefly: ignore [missing-import]
@@ -11,49 +15,16 @@ initialize_app()
 db = firestore.client(database_id='contentvideos-2d335')
 
 def fetch_youtube_rss(channel_url_or_id):
+    def leer(url):
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=20) as response:
+            return response.read().decode('utf-8'), response.geturl()
     try:
-        import yt_dlp
-        
-        url = channel_url_or_id
-        if not url.startswith("http"):
-            if not url.startswith("@") and not url.startswith("UC"):
-                url = f"@{url}"
-            if not url.startswith("http"):
-                url = f"https://www.youtube.com/{url}"
-                
-        if "youtube.com" in url and "/videos" not in url:
-            if not url.endswith("/"):
-                url += "/"
-            url += "videos"
-            
-        ydl_opts = {
-            'extract_flat': 'in_playlist',
-            'playlist_items': '1',
-            'quiet': True,
-            'no_warnings': True,
-            'extractor_args': {'youtube': ['client=IOS,WEB']},
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if 'entries' in info and len(info['entries']) > 0:
-                entry = info['entries'][0]
-                video_id = entry.get('id')
-                title = entry.get('title')
-                video_url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
-                channel_name = info.get('uploader') or info.get('title') or channel_url_or_id
-                
-                return {
-                    "id": video_id,
-                    "title": title,
-                    "url": video_url,
-                    "channel": channel_name,
-                    "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
-                    "published": ""
-                }
-    except Exception as e:
-        print(f"Error revisando {channel_url_or_id}: {e}")
-    return None
+        items = canales.youtube(channel_url_or_id, leer)
+        return items[0] if items else None
+    except Exception:
+        print("No pude verificar el canal y sus videos. No envío recomendaciones.")
+        return None
 
 def send_whatsapp_alert(phone, apikey, text):
     try:
@@ -85,19 +56,29 @@ def radar_monitor(event: scheduler_fn.ScheduledEvent) -> None:
         return
         
     config_data = config_doc.to_dict()
+    if not config_data.get('radar_cloud', config_data.get('cloud', False)):
+        print('El Radar en la nube está apagado.')
+        return
     channels = config_data.get('channels', [])
     if not channels:
         print("La lista de canales está vacía.")
         return
         
-    whatsapp_phone = config_data.get('whatsapp_phone', '').strip()
-    whatsapp_apikey = config_data.get('whatsapp_apikey', '').strip()
+    whatsapp_phone = config_data.get('radar_whatsapp_phone', config_data.get('whatsapp_phone', '')).strip()
+    whatsapp_apikey = config_data.get('radar_whatsapp_apikey', config_data.get('whatsapp_apikey', '')).strip()
         
     for ch_id in channels:
+        ref = canales.canal(ch_id, config_data.get('radar_platform', config_data.get('platform', 'all')))
+        if not ref or ref.plataforma != 'youtube':
+            print('Canal ambiguo o de otra plataforma: usa la URL exacta o elige Solo YouTube.')
+            continue
         print(f"Buscando videos nuevos en: {ch_id}")
-        latest_video = fetch_youtube_rss(ch_id)
+        latest_video = fetch_youtube_rss(ref.url)
         
         if latest_video:
+            actual = config_ref.get().to_dict() or {}
+            if not actual.get('radar_cloud', actual.get('cloud', False)) or not canales.permitido(latest_video, actual):
+                continue
             video_id = latest_video['id']
             inbox_ref = db.collection('inbox').document(video_id)
             if not inbox_ref.get().exists:
@@ -105,8 +86,9 @@ def radar_monitor(event: scheduler_fn.ScheduledEvent) -> None:
                 latest_video['detected_at'] = firestore.SERVER_TIMESTAMP
                 inbox_ref.set(latest_video)
                 
-                if whatsapp_phone and whatsapp_apikey:
+                if config_data.get('radar_whatsapp_notify', config_data.get('whatsapp_notify', False)) and whatsapp_phone and whatsapp_apikey:
                     text = f"⭐ ¡Nuevo video de {latest_video['channel']}!\n\n{latest_video['title']}\n\n{latest_video['url']}"
                     send_whatsapp_alert(whatsapp_phone, whatsapp_apikey, text)
     print("Revisión completada en la nube.")
+
 

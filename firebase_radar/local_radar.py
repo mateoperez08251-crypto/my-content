@@ -26,6 +26,7 @@ import requests
 if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import radar_config
+from firebase_radar.functions import canales
 
 try:
     import paths  # type: ignore
@@ -84,81 +85,65 @@ _YT_RSS = "https://www.youtube.com/feeds/videos.xml"
 
 
 def _yt_channel_id(handle: str) -> str | None:
-    """Resuelve @handle o /c/nombre a UC... (ID de canal)."""
-    handle = handle.strip()
-    if handle.startswith("UC") and len(handle) == 24:
-        return handle
-    url = handle if handle.startswith("http") else f"https://www.youtube.com/{handle.lstrip('/')}"
+    """Solo el dueño de la página; nunca el primer canal recomendado en el HTML."""
+    ref = canales.canal(handle, 'youtube')
+    if not ref:
+        return None
+    if ref.tipo == 'id':
+        return ref.nombre
     try:
-        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-        m = re.search(r'"channelId":"(UC[\w-]{22})"', r.text)
-        if m:
-            return m.group(1)
-    except Exception as exc:
-        _log(f"YT resolve falló {handle}: {exc}")
+        html, final = _leer_publico(ref.url)
+        if not canales.canal(final, 'youtube'):
+            return None
+        return canales.resolver_youtube(ref, html)
+    except Exception:
+        _log(f'No pude confirmar el canal de YouTube: {handle}.')
     return None
 
 
+def _leer_publico(url):
+    response = requests.get(url, timeout=25, headers={'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'es'})
+    response.raise_for_status()
+    return response.text, response.url
+
+
 def fetch_youtube_rss(handle: str) -> list[dict]:
-    """Devuelve los videos recientes de un canal (title, link, published, id)."""
-    cid = _yt_channel_id(handle)
-    if not cid:
-        return []
+    """Comprueba el dueño de la página, del feed y de cada video."""
     try:
-        r = requests.get(f"{_YT_RSS}?channel_id={cid}", timeout=20)
-        if r.status_code != 200:
-            return []
-        items = re.findall(
-            r"<entry>.*?<yt:videoId>(?P<id>[^<]+)</yt:videoId>.*?<title>(?P<title>[^<]+)</title>.*?<published>(?P<pub>[^<]+)</published>.*?</entry>",
-            r.text, flags=re.S,
-        )
-        return [{"id": vid, "title": title, "published": pub,
-                 "link": f"https://youtu.be/{vid}", "platform": "youtube", "channel": handle}
-                for vid, title, pub in items]
-    except Exception as exc:
-        _log(f"YT RSS falló {handle}: {exc}")
+        items = canales.youtube(handle, _leer_publico)
+        if not items:
+            _log(f'Sin videos con propietario confirmado para {handle}. Revisa el enlace del canal; no se enviarán recomendaciones.')
+        return items
+    except Exception:
+        _log(f'No pude comprobar el canal/feed de YouTube: {handle}. No envío videos sin verificar.')
         return []
 
 
 # ----- TikTok (sin API, scraping del HTML público) ---------------------------
 
 def fetch_tiktok(handle: str) -> list[dict]:
-    user = handle.lstrip("@").strip()
-    if not user or "." in user:
-        return []
-    url = f"https://www.tiktok.com/@{user}"
-    try:
-        r = requests.get(url, timeout=25, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119",
-            "Accept-Language": "es-ES,es;q=0.9",
-        })
-        ids = re.findall(r'"video":\{"id":"(\d{15,20})"', r.text)[:10]
-        descs = re.findall(r'"desc":"([^"]{0,180})"', r.text)[:10]
-        return [{"id": vid, "title": (descs[i] if i < len(descs) else "")[:120] or "(sin título)",
-                 "link": f"https://www.tiktok.com/@{user}/video/{vid}",
-                 "platform": "tiktok", "channel": handle, "published": ""}
-                for i, vid in enumerate(ids)]
-    except Exception as exc:
-        _log(f"TikTok scrape falló {handle}: {exc}")
-        return []
+    return _fetch_social(handle, 'tiktok')
 
 
 # ----- Instagram (perfiles públicos, best-effort) ----------------------------
 
 def fetch_instagram(handle: str) -> list[dict]:
-    user = handle.lstrip("@").strip()
-    if not user or "." in user:
+    return _fetch_social(handle, 'instagram')
+
+
+def _fetch_social(handle, plataforma):
+    ref = canales.canal(handle, plataforma)
+    if not ref:
         return []
-    url = f"https://www.instagram.com/{user}/"
     try:
-        r = requests.get(url, timeout=25, headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "es"})
-        codes = list(dict.fromkeys(re.findall(r'/(reel|p)/([A-Za-z0-9_-]{5,20})/', r.text)))[:10]
-        return [{"id": code, "title": "(nueva publicación)",
-                 "link": f"https://www.instagram.com/{kind}/{code}/",
-                 "platform": "instagram", "channel": handle, "published": ""}
-                for kind, code in codes]
-    except Exception as exc:
-        _log(f"IG scrape falló {handle}: {exc}")
+        html, final = _leer_publico(ref.url)
+        destino = canales.canal(final, plataforma)
+        items = canales.publicaciones_sociales(html, ref) if destino and destino.clave == ref.clave else []
+        if not items:
+            _log(f'{plataforma}: no hay publicaciones con dueño confirmado para {handle}. No envío enlaces sugeridos.')
+        return items
+    except Exception:
+        _log(f'No pude verificar las publicaciones de {handle} en {plataforma}.')
         return []
 
 
@@ -263,17 +248,27 @@ def _plataformas_a_consultar(filtro: str) -> list[str]:
 
 
 def _dispatch(handle: str, plats: list[str]) -> list[dict]:
-    out = []
-    if "youtube" in plats and ("@" in handle or "youtube" in handle or handle.startswith("UC")):
-        out += fetch_youtube_rss(handle)
-    if "tiktok" in plats and handle.startswith("@"):
-        out += fetch_tiktok(handle)
-    if "instagram" in plats and handle.startswith("@"):
-        out += fetch_instagram(handle)
-    return out
+    ref = canales.canal(handle, plats[0] if len(plats) == 1 else None)
+    if not ref or ref.plataforma not in plats:
+        _log(f'Canal ambiguo o inválido: {handle}. Pega la URL del perfil o elige una sola plataforma.')
+        return []
+    return {'youtube': fetch_youtube_rss, 'tiktok': fetch_tiktok, 'instagram': fetch_instagram}[ref.plataforma](ref.url)
+
+
+_ronda_lock = threading.Lock()
 
 
 def radar_monitor():
+    # El botón Guardar y los hilos de la app pueden disparar la misma ronda.
+    if not _ronda_lock.acquire(blocking=False):
+        return 0
+    try:
+        return _radar_monitor()
+    finally:
+        _ronda_lock.release()
+
+
+def _radar_monitor():
     """Una ronda del radar. Devuelve el número de novedades encontradas."""
     cfg = _config()
     channels = [c.strip() for c in (cfg.get("radar_channels") or "").replace(";", ",").split(",") if c.strip()]
@@ -285,6 +280,9 @@ def radar_monitor():
     for handle in channels:
         items = _dispatch(handle, plats)
         for it in items:
+            # Una búsqueda lenta pudo terminar después de cambiar la lista.
+            if not canales.permitido(it, _config()):
+                continue
             key = f"{it['platform']}:{it['id']}"
             if key in seen:
                 continue
