@@ -39,6 +39,24 @@ class EdicionAPITests(unittest.TestCase):
         self.assertNotIn('source',saved)
         self.assertIn('bot_calidad',self.namespace['list_smart_presets']()['presets'])
 
+    def test_inicio_persistido_en_disco_y_cambio_a_cero(self):
+        for inicio, esperado in [('02:30', 150), ('00:00', 0)]:
+            self.request.get_json.return_value = {'name': 'bot_calidad', 'config': {
+                'clip_selection': 'sequential', 'skip_intro_seconds': inicio}}
+            self.assertTrue(self.namespace['save_smart_preset']()['success'])
+            disk = json.loads(Path(self.tmp.name, 'smart_presets.json').read_text())
+            self.assertEqual(disk['bot_calidad']['skip_intro_seconds'], esperado)
+            self.assertEqual(self.namespace['_bot_preset']('bot_calidad')['skip_intro_seconds'], esperado)
+            self.assertEqual(self.namespace['list_smart_presets']()['presets']['bot_calidad']['skip_intro_seconds'], esperado)
+
+    def test_inicio_invalido_no_borra_el_guardado(self):
+        self.request.get_json.return_value = {'name': 'propio', 'config': {'skip_intro_seconds': 150}}
+        self.namespace['save_smart_preset']()
+        self.request.get_json.return_value['config']['skip_intro_seconds'] = '02:99'
+        _, status = self.namespace['save_smart_preset']()
+        self.assertEqual(status, 400)
+        self.assertEqual(self.namespace['_bot_preset']('propio')['skip_intro_seconds'], 150)
+
     def test_rechaza_duracion_invalida_sin_guardar(self):
         self.request.get_json.return_value={'name':'malo','config':{'clip_duration':-1}}
         response,status=self.namespace['save_smart_preset']()

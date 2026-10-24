@@ -147,6 +147,30 @@ class PreparacionTests(unittest.TestCase):
         Path(clips[0][0]).write_bytes(b'corto')
         self.assertIsNone(archivos.leer_preparados(os.path.dirname(clips[0][0])))
 
+    def test_inicio_congelado_sobrevive_reinicio_y_no_cambia_por_otro_preset(self):
+        self.options['skip_intro_seconds'] = '02:30'
+        tid = self.encolar()
+        self.options['skip_intro_seconds'] = 0
+        nuevo = self.motor()
+        nuevo._procesar_trabajo(nuevo.db.trabajo(tid))
+        self.assertEqual(self.split.call_args.args[0]['skip_intro_seconds'], 150)
+        self.assertEqual(json.loads(nuevo.db.trabajo(tid)['opciones'])['skip_intro_seconds'], 150)
+        siguiente = nuevo.encolar('https://example.test/nuevo', cuentas=[self.cid])
+        self.assertEqual(json.loads(nuevo.db.trabajo(siguiente)['opciones'])['skip_intro_seconds'], 0)
+
+    def test_colab_recibe_el_inicio_del_trabajo(self):
+        self.options['skip_intro_seconds'] = 150
+        tid = self.encolar()
+        self.options['skip_intro_seconds'] = 0
+        self.m.guardar_cfg({'remoto_url': 'https://colab.example.test'})
+        cliente = Mock()
+        cliente.iniciar.return_value = 'job-inicio'
+        cliente.esperar_y_bajar.side_effect = remoto.ServidorCaido('sin red')
+        with patch.object(self.m, '_cliente_remoto', return_value=cliente):
+            with self.assertRaises(remoto.ServidorCaido):
+                self.m._preparar_remoto(self.m.db.trabajo(tid))
+        self.assertEqual(cliente.iniciar.call_args.args[1]['skip_intro_seconds'], 150)
+
     def test_preset_inexistente_avisa_y_snapshot_omite_rutas_ajenas(self):
         with self.assertRaises(ValueError): resolver({}, 'no_existe')
         copia=snapshot({**CALIDAD,'source':'viejo','python_motor':'C:/python.exe','start_time':'00:30'})

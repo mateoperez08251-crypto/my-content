@@ -98,7 +98,8 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
     <div class="fila" style="margin:12px 0"><button onclick="guardarModo()">Aplicar modo elegido</button><span class="muted" id="modo-activo"></span></div>
     <div class="ajustes" id="editor-preset">
-      <div><label for="ed-modo">Cómo elegir las partes</label><select id="ed-modo" onchange="modoEdicion()"><option value="sequential">Todo el video en partes consecutivas</option><option value="ai">Elegir mejores momentos con IA</option></select></div>
+      <div><label for="ed-inicio">Empezar a editar desde</label><input id="ed-inicio" type="text" value="00:00" placeholder="02:30" aria-describedby="ed-inicio-ayuda"><p class="muted" id="ed-inicio-ayuda">Minutos:segundos (02:30), horas:minutos:segundos o segundos. 00:00 usa el inicio del video.</p></div>
+      <div><label for="ed-modo">Cómo elegir las partes</label><select id="ed-modo" onchange="modoEdicion()"><option value="sequential">Partes consecutivas desde el inicio elegido</option><option value="ai">Elegir mejores momentos con IA</option></select></div>
       <div><label for="ed-duracion">Segundos por parte</label><input id="ed-duracion" type="number" min="1" max="600" value="60" oninput="modoEdicion()"></div>
       <div><label for="ed-cantidad">Clips por video · solo en modo IA</label><input id="ed-cantidad" type="number" min="1" max="100" value="3"></div>
       <div><label for="ed-motor">Motor de edición</label><select id="ed-motor"><option value="pro">Pro · GPT-OSS 120B + Whisper Large V3</option><option value="equilibrado">Equilibrado · GPT-OSS 20B + Whisper Large V3</option><option value="ligero">Rápido · Llama 8B + Whisper Turbo</option></select></div>
@@ -116,6 +117,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
     <div class="fila" style="margin-top:12px"><img id="sub-preview" src="/static/presets/sub_karaoke.webp" width="96" height="144" loading="lazy" alt="Ejemplo del estilo de subtítulos"><p class="ayuda" id="ed-resumen"></p></div>
     <p class="ayuda">Pro es la opción de calidad disponible en esta app. En partes consecutivas no se usa IA para elegir momentos. Groq requiere tu clave en el equipo que edita; si falla un modelo, Smart Split puede usar uno de respaldo. La ampliación IA no recupera detalle que no tenga el original.</p>
+    <p class="ayuda">El inicio queda guardado en este preset al pulsar Guardar, incluso al cerrar la app o reiniciar la PC, hasta que lo cambies. Se usa en nuevos videos de enlaces y del Radar que lleven este preset, tanto en esta PC como en Colab. No se aplica a cada segmento de un live ni a archivos que subes sin editar. Si el video acaba antes del tiempo elegido, se avisa y no se corta desde cero.</p>
     <div class="fila"><button class="prim" onclick="guardarPresetBot()">Guardar edición y usarla en el bot</button><button onclick="cargarPresets(true)">Actualizar presets</button><a href="/" target="_blank" rel="noopener">Abrir Smart Split completo para más ajustes</a></div>
     <p class="muted" id="preset-estado" aria-live="polite"></p>
     <div class="metricas" id="inventario"></div>
@@ -158,7 +160,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
     <div class="chips" id="chips-url"></div>
     <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar regla del canal o preset por defecto</option></select>
-    <p class="muted">Con “Cortar” activado se usa Smart Split. Cada parte se publica una vez en cada cuenta elegida; 10 partes y 2 cuentas son 20 publicaciones.</p>
+    <p class="muted">Con “Cortar” activado se usa Smart Split desde el inicio guardado en el preset elegido. Cada parte se publica una vez en cada cuenta elegida; 10 partes y 2 cuentas son 20 publicaciones.</p>
     <p class="muted">Con “Mejores momentos con IA”, cada clip lleva su título de la IA sin guiones bajos, seguido de su descripción y hashtags.</p>
     <div class="fila" style="margin-top:10px">
       <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
@@ -739,6 +741,7 @@ function seleccionarPreset() {
     element.value = value;
   }
   $('ed-subs').value = presetBase.show_subtitles === false ? 'no' : 'si';
+  $('ed-inicio').value = formatoInicio(presetBase.skip_intro_seconds ?? 0);
   modoEdicion(); vistaSubtitulos();
   $('preset-estado').textContent = 'Los cambios se aplican a los videos que añadas después de guardar. La cola existente conserva su edición.';
 }
@@ -747,8 +750,27 @@ function modoEdicion() {
   $('ed-cantidad').disabled = partes;
   const seconds = Number($('ed-duracion').value);
   $('ed-resumen').textContent = partes ?
-    `Se conserva todo el video, dividido en partes de ${seconds || '…'} s. La última puede ser más corta. Ejemplo: 10 minutos darían ${seconds > 0 ? Math.ceil(600/seconds) : '…'} partes.` :
-    'La IA busca la cantidad de momentos indicada. La duración es mínima y puede alargarse para terminar la idea; el resultado puede tener menos clips.';
+    `Se divide el video desde el inicio elegido en partes de ${seconds || '…'} s. La última puede ser más corta.` :
+    'La IA busca momentos solo desde el inicio elegido. La duración es mínima y puede alargarse para terminar la idea; el resultado puede tener menos clips.';
+}
+function segundosInicio(value) {
+  const text = String(value ?? '').trim();
+  let seconds = 0;
+  if (text.includes(':')) {
+    if (!/^\d+:[0-5]\d(?::[0-5]\d)?(?:\.\d+)?$/.test(text)) throw new Error('Usa MM:SS o HH:MM:SS para el inicio; por ejemplo 02:30.');
+    seconds = text.split(':').reduce((total, part) => total * 60 + Number(part), 0);
+  } else {
+    if (text && !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) throw new Error('El inicio debe ser un tiempo, por ejemplo 02:30.');
+    seconds = Number(text);
+  }
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > 604800) throw new Error('El inicio debe estar entre 0 y 604800 segundos (7 días).');
+  return seconds;
+}
+function formatoInicio(value) {
+  const seconds = segundosInicio(value);
+  if (!Number.isInteger(seconds)) return String(seconds);
+  const minutes = Math.floor(seconds / 60), rest = String(seconds % 60).padStart(2, '0');
+  return String(minutes).padStart(2, '0') + ':' + rest;
 }
 function vistaSubtitulos() {
   $('sub-preview').hidden = $('ed-subs').value === 'no';
@@ -761,7 +783,8 @@ function ajustesEdicion() {
     num_clips:Number($('ed-cantidad').value), motor_ia:$('ed-motor').value, transcripcion:$('ed-transcripcion').value,
     whisper_local:$('ed-whisper').value, video_format:$('ed-formato').value, export_profile:$('ed-calidad').value,
     upscale:$('ed-upscale').value, show_subtitles:$('ed-subs').value === 'si', style:$('ed-estilo').value,
-    sub_fuente:$('ed-fuente').value, subtitle_scale:Number($('ed-escala').value)};
+    sub_fuente:$('ed-fuente').value, subtitle_scale:Number($('ed-escala').value),
+    skip_intro_seconds:segundosInicio($('ed-inicio').value)};
   if (c.video_format !== presetBase.video_format) c.encuadre = c.video_format === 'vertical' ? 'caras' : 'difuminado';
   for (const key of ['source','start_time','end_time','cast_id','voice_cast','custom_output_dir','output_path',
     'python_motor','script_local','subir_tiktok','subir_youtube','subir_facebook']) delete c[key];
@@ -777,7 +800,7 @@ async function guardarPresetBot() {
     await api('/api/bot/config', {preset:name, modo_cola:$('modo_cola').value});
     $('url-preset').value = name;
     seleccionarPreset(); await cargar();
-    toast('Edición guardada: se usará para los nuevos videos.');
+    toast('Edición e inicio guardados. Se conservan al reiniciar y se usan en nuevos videos con este preset.');
   } catch (e) { $('preset-estado').textContent = e.message; toast(e.message, true); }
 }
 async function guardarModo() {

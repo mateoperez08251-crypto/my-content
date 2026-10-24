@@ -116,6 +116,16 @@ class Queue(unittest.TestCase):
             with self.assertRaisesRegex(live.LiveError, 'Groq'):
                 self.manager.start(self.options(mode='ai'))
 
+    def test_inicio_del_preset_no_se_repite_en_cada_segmento(self):
+        with patch.object(self.motor, 'cargar_preset', return_value={
+                'skip_intro_seconds': 150, 'show_subtitles': False}), \
+             patch.object(self.manager, '_capture'):
+            jid = self.manager.start(self.options(preset='sin_intro'))['id']
+            self.manager.threads[jid].join()
+            config = json.loads(self.motor.db._uno(
+                'SELECT config FROM live_sesiones WHERE id=?', (jid,))['config'])
+            self.assertNotIn('skip_intro_seconds', config['options'])
+
     def test_invalid_accounts_and_window_rejected_before_capture(self):
         with patch.object(self.manager, '_capture') as capture:
             for data in [dict(url=URL, accounts=[]), dict(url=URL, accounts=[999]),

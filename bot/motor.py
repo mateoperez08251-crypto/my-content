@@ -288,7 +288,9 @@ class Motor:
             partes = f"hasta {breve(opciones.get('num_clips', 1))} momentos con IA"
         subs = ('subtítulos según el preset' if 'show_subtitles' not in opciones else
                 'con subtítulos' if opciones['show_subtitles'] else 'sin subtítulos')
-        return f'Voy a editar en {lugar}: {partes}, {subs}. Es lo configurado; aún no hay clips nuevos guardados.'
+        inicio = opciones.get('skip_intro_seconds', 0)
+        extra = f' Empiezo desde {duracion(float(inicio))} del video original.' if inicio else ''
+        return f'Voy a editar en {lugar}: {partes}, {subs}.{extra} Es lo configurado; aún no hay clips nuevos guardados.'
 
     def _detalle_fallo(self, error, intentos, reintento=0):
         detalle = f'Intento {intentos}/{self.cfg["max_intentos"]}. {motivo_fallo(error)}'

@@ -1,0 +1,42 @@
+name: Inicio de edición
+on:
+  pull_request:
+    paths:
+      - 'editor_controls.py'
+      - 'smart_editor.py'
+      - 'smart_selection.py'
+      - 'content.py'
+      - 'bot/**'
+      - 'templates/bot.html'
+      - 'tests/**'
+      - '.github/workflows/editor-inicio.yml'
+permissions:
+  contents: read
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install requests
+      - name: Sintaxis Python
+        run: python -m py_compile editor_controls.py smart_editor.py content.py bot/presets.py bot/motor.py bot/remoto.py bot/live.py bot/avisos.py
+      - name: Regresiones de inicio, presets, cola y Colab
+        run: |
+          python - <<'PY'
+          import sys
+          import unittest
+          sys.path.insert(0, 'tests')
+          names = ['test_editor_controls', 'test_bot_edicion_api', 'test_bot_preparacion',
+                   'test_bot_remoto_archivos', 'test_live.Queue.test_inicio_del_preset_no_se_repite_en_cada_segmento']
+          suite = unittest.defaultTestLoader.loadTestsFromNames(names)
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          sys.exit(not result.wasSuccessful())
+          PY
+      - run: node tests/test_bot_panel.js
