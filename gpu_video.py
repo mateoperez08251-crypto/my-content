@@ -34,12 +34,15 @@ def hay_nvenc() -> bool:
 def opciones_moviepy(calidad="alta", preset_cpu="fast", bitrate=None):
     """kwargs para clip.write_videofile(): NVENC si hay GPU NVIDIA, si no libx264."""
     if hay_nvenc():
-        cq = {"alta": "19", "media": "23"}.get(calidad, "21")
+        cq = {"maxima": "16", "alta": "19", "media": "23"}.get(calidad, "21")
         params = ["-rc", "vbr", "-cq", cq]
         if not bitrate:
             params += ["-b:v", "0"]
-        return {"codec": "h264_nvenc", "preset": "p5", "bitrate": bitrate, "ffmpeg_params": params}
-    return {"codec": "libx264", "preset": preset_cpu, "bitrate": bitrate}
+        return {"codec": "h264_nvenc", "preset": "p7" if calidad == "maxima" else "p5", "bitrate": bitrate, "ffmpeg_params": params}
+    result = {"codec": "libx264", "preset": preset_cpu, "bitrate": bitrate}
+    if calidad == 'maxima':
+        result['ffmpeg_params'] = ['-crf', '16', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']
+    return result
 
 
 def args_ffmpeg(crf="17"):

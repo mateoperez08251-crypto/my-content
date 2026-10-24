@@ -53,6 +53,7 @@ async function main(){
     assert.equal(e['sub-preview'].src,'/static/presets/sub_minimal.webp');
     e['ed-estilo'].value='karaoke';e['ed-escala'].value='125';e.modo_cola.value='solo_preparar';
     const selected=ctx.ajustesEdicion();
+    assert.equal(selected.export_profile,'quality'); // cambiar subtítulos no baja la calidad.
     assert.equal(selected.style,'karaoke'); assert.equal(selected.skip_intro_seconds,150);
     assert.equal(selected.subtitle_scale,125); assert.equal(selected.sub_activo,'#FF0000');
     assert(!('source' in selected));assert(!('start_time' in selected));

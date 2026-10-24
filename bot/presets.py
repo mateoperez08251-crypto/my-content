@@ -31,7 +31,7 @@ def snapshot(opciones):
     result = copy.deepcopy(opciones)
     result['skip_intro_seconds'] = inicio_segundos(result.get('skip_intro_seconds', 0))
     for key in ('source', 'custom_output_dir', 'output_path', 'start_time', 'end_time',
-                'cast_id', 'voice_cast', 'python_motor', 'script_local',
+                'cast_id', 'voice_cast', 'python_motor', 'script_local', 'upscale_python', 'upscale_model',
                 'subir_tiktok', 'subir_youtube', 'subir_facebook', '_lanzar_error'):
         result.pop(key, None)
     mode = result.get('clip_selection', 'ai')

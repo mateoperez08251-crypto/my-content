@@ -11,6 +11,43 @@ from smart_selection import new_parts, available_ranges
 
 
 class ClipHistoryTests(unittest.TestCase):
+    def test_same_preset_two_accounts_get_different_parts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def split(datos):
+                part = new_parts(300, 60, 1, datos['excluded_ranges'])[0]
+                path = Path(folder, f"clip-{part['inicio']}.mp4")
+                path.write_text(str(part['inicio']))
+                return [str(path)], [{'archivo': str(path), **part}]
+            m = Motor(folder, smart_split=split, cargar_preset=lambda _: {'num_clips': 1}, log=lambda _: None)
+            a = m.db.crear_cuenta('A', 'tiktok')
+            b = m.db.crear_cuenta('B', 'tiktok')
+            ids = m.encolar('https://youtu.be/source', cuentas=[a, b], devolver_ids=True)
+            self.assertEqual(len(ids), 2)
+            for tid in ids:
+                m._procesar_trabajo(m.db.trabajo(tid))
+            rows = m.db.subidas_pendientes()
+            self.assertEqual([r['cuenta_id'] for r in rows], [a, b])
+            self.assertEqual([Path(r['archivo']).read_text() for r in rows], ['0.0', '60.0'])
+            self.assertEqual(m.db.intervalos_usados('https://youtu.be/source', None), [(0, 60), (60, 120)])
+            self.assertTrue(all(not m.db.conflicto_clip(r['id']) for r in rows))
+            m.db._con.close()
+
+    def test_old_shared_queue_is_stopped_before_opening_browser(self):
+        from bot.cancelacion import ControlSubida
+        with tempfile.TemporaryDirectory() as folder:
+            m = Motor(folder, log=lambda _: None)
+            a = m.db.crear_cuenta('A', 'tiktok')
+            b = m.db.crear_cuenta('B', 'tiktok')
+            tid = m.db.encolar_trabajo('https://youtu.be/old', 'manual', cuentas=[a, b])
+            video = Path(folder, 'old.mp4'); video.write_bytes(b'video')
+            m.db.finalizar_trabajo(tid, [(a, str(video), ''), (b, str(video), '')])
+            with patch('bot.motor.navegador.abrir', side_effect=AssertionError('No publicar')) as navegador:
+                for row in m.db.subidas_pendientes():
+                    m._ejecutar_subida(row, ControlSubida())
+                navegador.assert_not_called()
+            self.assertEqual({r['estado'] for r in m.db.subidas_recientes()}, {'error'})
+            m.db._con.close()
+
     def test_url_variants_preserve_video_identity(self):
         urls = ['https://youtu.be/AbCd123?t=60', 'https://www.youtube.com/watch?v=AbCd123&list=other',
                 'https://youtube.com/shorts/AbCd123', 'https://m.youtube.com/live/AbCd123']

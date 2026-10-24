@@ -107,8 +107,8 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
       <div><label for="ed-transcripcion">Transcripción</label><select id="ed-transcripcion"><option value="groq">Groq · modelo del motor elegido</option><option value="local">Whisper local · requiere modelo instalado</option></select></div>
       <div><label for="ed-whisper">Modelo Whisper local</label><select id="ed-whisper"><option value="large-v3">Large V3 · precisión</option><option value="turbo">Large V3 Turbo · rapidez</option><option value="auto">Automático</option></select></div>
       <div><label for="ed-formato">Formato</label><select id="ed-formato"><option value="vertical_blur">9:16 · video completo y fondo difuminado</option><option value="vertical">9:16 · seguir al hablante</option><option value="horizontal">16:9 · horizontal</option></select></div>
-      <div><label for="ed-calidad">Exportación</label><select id="ed-calidad"><option value="quality">Calidad · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p</option></select></div>
-      <div><label for="ed-upscale">Mejorar imagen</label><select id="ed-upscale"><option value="off">Sin ampliación adicional</option><option value="sharpen">Nitidez y reducción de ruido</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN · requiere instalación; respaldo HD</option></select></div>
+      <div><label for="ed-calidad">Exportación</label><select id="ed-calidad"><option value="quality">Calidad máxima · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p</option></select></div>
+      <div><label for="ed-upscale">Mejorar imagen</label><select id="ed-upscale"><option value="off">Sin ampliación adicional</option><option value="sharpen">Nitidez y reducción de ruido</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN · GPU; avisa y detiene si no puede aplicar IA</option></select></div>
       <div><label for="ed-subs">Subtítulos</label><select id="ed-subs" onchange="vistaSubtitulos()"><option value="si">Activados</option><option value="no">Desactivados</option></select></div>
       <div><label for="ed-estilo">Estilo de subtítulos</label><select id="ed-estilo" onchange="vistaSubtitulos()">
         <option value="karaoke">Karaoke</option><option value="una_palabra">Una palabra</option><option value="pop_art">Pop Art</option><option value="resaltador">Resaltador</option><option value="bubblegum">Bubblegum</option><option value="caja_frase">Frase con fondo</option><option value="neon">Neón</option><option value="terror">Terror</option><option value="cuento">Cuento</option><option value="documental">Documental</option><option value="noticias">Noticias</option><option value="minimal">Minimal</option>
@@ -118,7 +118,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
     <div class="fila" style="margin-top:12px"><img id="sub-preview" src="/static/presets/sub_karaoke.webp" width="96" height="144" loading="lazy" alt="Ejemplo del estilo de subtítulos"><p class="ayuda" id="ed-resumen"></p></div>
     <p class="ayuda">Pro es la opción de calidad disponible en esta app. En partes consecutivas no se usa IA para elegir momentos. Groq requiere tu clave en el equipo que edita; si falla un modelo, Smart Split puede usar uno de respaldo. La ampliación IA no recupera detalle que no tenga el original.</p>
-    <p class="ayuda">Los ajustes se guardan solos y se aplican al siguiente video, sin reiniciar. Puedes guardar varios presets con nombres distintos y elegir uno para cada cuenta. Si varias cuentas usan el mismo nombre, comparten sus ajustes. Usa otro nombre para crear una variante. Se usan en nuevos videos de enlaces y del Radar, tanto en esta PC como en Colab. Los lives usan el preset elegido en su apartado; el tiempo de inicio no se repite en cada segmento. Los archivos que subes sin editar no llevan estos ajustes. Si el video acaba antes del tiempo elegido, se avisa y no se corta desde cero.</p>
+    <p class="ayuda">Los ajustes se guardan solos y se aplican al siguiente video, sin reiniciar. Puedes guardar varios presets con nombres distintos y elegir uno para cada cuenta. Si varias cuentas usan el mismo nombre, comparten sus ajustes, pero reciben partes distintas del video. Usa otro nombre para crear una variante. Se usan en nuevos videos de enlaces y del Radar, tanto en esta PC como en Colab. Los lives usan el preset elegido en su apartado; el tiempo de inicio no se repite en cada segmento. Los archivos que subes sin editar no llevan estos ajustes. Si el video acaba antes del tiempo elegido, se avisa y no se corta desde cero.</p>
     <div class="fila"><button class="prim" onclick="guardarPresetBot()">Guardar edición ahora</button><button id="ed-heredar" hidden onclick="heredarEdicionCuenta()">Usar regla/general en esta cuenta</button><button onclick="cargarPresets(true)">Actualizar presets</button><a href="/" target="_blank" rel="noopener">Abrir Smart Split completo para más ajustes</a></div>
     <p class="muted" id="preset-estado" aria-live="polite"></p>
     <div class="metricas" id="inventario"></div>
@@ -162,7 +162,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <div class="chips" id="chips-url"></div>
     <p class="muted" id="url-subir-ahora-ayuda">Marcado: el primer clip entra a la cola al terminar la edición. Desmarcado: espera la pausa configurada entre publicaciones, contada desde que se guardan los clips. Siempre se respetan el horario, el límite diario y cualquier pausa pendiente de esa cuenta, aunque añadas otra URL.</p>
     <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar edición de cada cuenta (o regla/general)</option></select>
-    <p class="muted">Con “Cortar” activado se usa la edición de cada cuenta. Si tienen presets distintos, se preparan cortes separados. Elegir un preset aquí lo aplica a todas las cuentas de estos enlaces. Los trabajos ya añadidos conservan sus ajustes.</p>
+    <p class="muted">Con “Cortar” activado se usa la edición de cada cuenta. Cada cuenta recibe fragmentos distintos, aunque use el mismo preset. Elegir un preset aquí lo aplica a todas las cuentas de estos enlaces. Los trabajos ya añadidos conservan sus ajustes.</p>
     <p class="muted">Con “Mejores momentos con IA”, cada clip lleva su título de la IA sin guiones bajos, seguido de su descripción y hashtags.</p>
     <div class="fila" style="margin-top:10px">
       <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
@@ -881,7 +881,7 @@ function seleccionarPreset() {
   const mapping = {'ed-modo':['clip_selection','ai'], 'ed-duracion':['clip_duration',60],
     'ed-cantidad':['num_clips',1], 'ed-motor':['motor_ia','pro'], 'ed-transcripcion':['transcripcion','groq'],
     'ed-whisper':['whisper_local','large-v3'], 'ed-formato':['video_format','vertical'],
-    'ed-calidad':['export_profile','balanced'], 'ed-upscale':['upscale','off'],
+    'ed-calidad':['export_profile','quality'], 'ed-upscale':['upscale','off'],
     'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100]};
   for (const [id,[key,def]] of Object.entries(mapping)) {
     const value = String(presetBase[key] ?? def), element = $(id);
