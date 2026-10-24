@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import threading
+from firebase_radar.functions.canales import canal
 
 LOCK = threading.RLock()
 FLAGS = ('radar_cloud', 'radar_email_notify', 'radar_whatsapp_notify', 'radar_auto_dl', 'radar_inbox')
@@ -25,9 +26,11 @@ def normalizar(data):
     channels, seen = [], set()
     for value in raw:
         value = value.strip()
-        if value and value.casefold() not in seen:
+        ref = canal(value, cfg.get('radar_platform'))
+        clave = ref.clave if ref else value.casefold()
+        if value and clave not in seen:
             channels.append(value)
-            seen.add(value.casefold())
+            seen.add(clave)
     # El Radar local usa radar_channels; Cloud Functions usa channels.
     cfg.update(channels=channels, radar_channels=', '.join(channels))
     for key in FLAGS:
@@ -42,7 +45,15 @@ def combinar(anterior, cambios):
     data = {**anterior, **cambios}
     if 'channels' in cambios and 'radar_channels' not in cambios:
         data.pop('radar_channels', None)
-    return normalizar(data)
+    cfg = normalizar(data)
+    if 'radar_platform' in cfg:
+        plataforma = cfg['radar_platform']
+        if plataforma not in ('all', 'youtube', 'tiktok', 'instagram'):
+            raise ErrorConfig('Elige una plataforma válida para el Radar.')
+        for valor in cfg['channels']:
+            if canal(valor, plataforma) is None:
+                raise ErrorConfig('Hay un canal ambiguo o inválido. Usa la URL exacta del perfil; para @usuario elige una sola plataforma. No pegues enlaces de videos ni búsquedas.')
+    return cfg
 
 
 def cargar(ruta, remoto=None):

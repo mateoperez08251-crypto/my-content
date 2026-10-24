@@ -1,7 +1,10 @@
 import datetime
 import urllib.request
 # pyrefly: ignore [missing-import]
-import feedparser
+try:
+    from . import canales
+except ImportError:  # Firebase carga main como módulo raíz.
+    import canales
 from firebase_functions import scheduler_fn
 # pyrefly: ignore [missing-import]
 from firebase_admin import initialize_app, firestore, get_app
@@ -17,49 +20,16 @@ def get_db():
         return firestore.client()
 
 def fetch_youtube_rss(channel_url_or_id):
-    channel_id = channel_url_or_id
-    if "youtube.com/channel/" in channel_url_or_id:
-        channel_id = channel_url_or_id.split("youtube.com/channel/")[1].split("/")[0].split("?")[0]
-    elif "@" in channel_url_or_id:
-        # Resolver @handle a channel_id buscando en el HTML
-        try:
-            req = urllib.request.Request(channel_url_or_id, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as response:
-                html = response.read().decode('utf-8')
-                import re
-                match = re.search(r'itemprop="channelId" content="(UC[\w-]+)"', html)
-                if match:
-                    channel_id = match.group(1)
-                else:
-                    return None
-        except Exception as e:
-            print(f"Error resolviendo @handle {channel_url_or_id}: {e}")
-            return None
-            
-    rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    
+    def leer(url):
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=20) as response:
+            return response.read().decode('utf-8'), response.geturl()
     try:
-        req = urllib.request.Request(rss_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            feed_data = response.read()
-        feed = feedparser.parse(feed_data)
-        
-        if feed.entries:
-            latest = feed.entries[0]
-            video_id = latest.yt_videoid if 'yt_videoid' in latest else latest.id.split(':')[-1]
-            thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
-            
-            return {
-                "id": video_id,
-                "title": latest.title,
-                "url": latest.link,
-                "channel": feed.feed.title,
-                "thumbnail": thumbnail,
-                "published": latest.published
-            }
-    except Exception as e:
-        print(f"Error revisando {channel_id}: {e}")
-    return None
+        items = canales.youtube(channel_url_or_id, leer)
+        return items[0] if items else None
+    except Exception:
+        print("No pude verificar el canal y sus videos. No envío recomendaciones.")
+        return None
 
 @scheduler_fn.on_schedule(
     schedule="every 30 minutes",
@@ -77,26 +47,33 @@ def radar_monitor(event: scheduler_fn.ScheduledEvent) -> None:
         return
         
     config = config_doc.to_dict()
-    cloud_enabled = config.get('cloud', False)
+    cloud_enabled = config.get('radar_cloud', config.get('cloud', False))
     
     if not cloud_enabled:
         print("El radar en la nube está apagado desde la configuración. Saliendo.")
         return
         
     channels = config.get('channels', [])
-    email_sender = config.get('email', '')
-    email_pass = config.get('app_pass', '')
-    email_notify = config.get('email_notify', False)
+    email_sender = config.get('radar_email', config.get('email', ''))
+    email_pass = config.get('radar_password', config.get('app_pass', ''))
+    email_notify = config.get('radar_email_notify', config.get('email_notify', False))
 
     if not channels:
         print("La lista de canales está vacía.")
         return
         
     for ch_id in channels:
+        ref = canales.canal(ch_id, config.get('radar_platform', config.get('platform', 'all')))
+        if not ref or ref.plataforma != 'youtube':
+            print('Canal ambiguo o de otra plataforma: usa la URL exacta o elige Solo YouTube.')
+            continue
         print(f"Buscando videos nuevos en: {ch_id}")
-        latest_video = fetch_youtube_rss(ch_id)
+        latest_video = fetch_youtube_rss(ref.url)
         
         if latest_video:
+            actual = config_ref.get().to_dict() or {}
+            if not actual.get('radar_cloud', actual.get('cloud', False)) or not canales.permitido(latest_video, actual):
+                continue
             video_id = latest_video['id']
             inbox_ref = db.collection('inbox').document(video_id)
             if not inbox_ref.get().exists:
@@ -128,4 +105,5 @@ def radar_monitor(event: scheduler_fn.ScheduledEvent) -> None:
                         print(f"Error enviando correo: {e}")
                 
     print("Revisión completada en la nube.")
+
 
