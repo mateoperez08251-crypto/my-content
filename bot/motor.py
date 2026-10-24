@@ -865,7 +865,7 @@ class Motor:
             control.comprobar()
             self.db.marcar_subida(s["id"], "revisar", error=f"{e} Puede que sí se haya publicado: "
                                   "mira la cuenta y pulsa ✔ o reintentar.", captura=captura)
-            self._aviso_subida(s, f"revisar:{s['intentos']}", 'Pulsé Publicar, pero no recibí confirmación. Puede estar subido. Mira la cuenta y marca el resultado en la cola; no lo voy a repetir por mi cuenta.', 'errores', True)
+            self._aviso_subida(s, f"revisar:{s['intentos']}", 'Intenté publicar, pero no recibí confirmación. Puede estar subido. Mira la cuenta y marca el resultado en la cola; no lo voy a repetir por mi cuenta.', 'errores', True)
             self.log(f"{nombre}: sin confirmación, queda para revisar (no se reintenta solo).")
             self._descanso(cuenta)
             return
