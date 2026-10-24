@@ -43,11 +43,44 @@ class EdicionesCuentaTests(unittest.TestCase):
         for t in filas:
             archivo = Path(self.tmp.name, f"clip-{t['id']}.mp4")
             archivo.write_bytes(b'video')
-            with patch.object(self.m, 'smart_split', return_value=([str(archivo)], [])):
+            with patch.object(self.m, 'smart_split', return_value=([str(archivo)], [
+                    {'archivo': str(archivo), 'inicio': 150, 'fin': 210}])):
                 self.m._procesar_trabajo(t)
         subidas = self.m.db.subidas_pendientes()
         self.assertEqual({(s['trabajo_id'], s['cuenta_id']) for s in subidas}, {(ids[0],self.a),(ids[1],self.b)})
         self.assertNotEqual(subidas[0]['archivo'], subidas[1]['archivo'])
+
+    def test_radar_respeta_ediciones_individuales_y_cuentas_de_la_regla(self):
+        self.m.db.guardar_regla('https://youtube.com/@canal', [self.a, self.b], preset='B')
+        self.assertIsNotNone(self.m.desde_radar({
+            'id': 'nuevo', 'platform': 'youtube', 'link': 'https://youtu.be/nuevo',
+            'channel': 'https://youtube.com/@canal', 'title': 'Video nuevo'}))
+        trabajos = sorted(self.m.db.trabajos_recientes(), key=lambda t: t['id'])
+        self.assertEqual([(t['origen'], t['preset'], t['cuentas']) for t in trabajos],
+                         [('radar', 'A', [self.a]), ('radar', 'B', [self.b])])
+        enviados = []
+        for t in trabajos:
+            def split(datos):
+                enviados.append(datos)
+                archivo = Path(self.tmp.name, f"radar-{t['id']}.mp4")
+                archivo.write_bytes(b'clip simulado')
+                inicio = datos['skip_intro_seconds']
+                return [str(archivo)], [{'archivo': str(archivo), 'inicio': inicio, 'fin': inicio + 60}]
+            with patch.object(self.m, 'smart_split', side_effect=split):
+                self.m._procesar_trabajo(t)
+        self.assertEqual([(d['style'], d['skip_intro_seconds'], d['num_clips']) for d in enviados],
+                         [('minimal', 150, 3), ('neon', 20, 7)])
+        subidas = self.m.db.subidas_pendientes()
+        self.assertEqual({(s['trabajo_id'], s['cuenta_id']) for s in subidas},
+                         {(trabajos[0]['id'], self.a), (trabajos[1]['id'], self.b)})
+
+    def test_radar_repetido_no_crea_otras_ediciones(self):
+        self.m.db.guardar_regla('*', [self.a, self.b])
+        item = {'id': 'nuevo', 'platform': 'youtube', 'link': 'https://youtu.be/nuevo',
+                'channel': 'https://youtube.com/@canal'}
+        self.m.desde_radar(item)
+        self.m.desde_radar(item)
+        self.assertEqual(len(self.m.db.trabajos_recientes()), 2)
 
     def test_mismo_preset_comparte_edicion_y_no_duplica_cuentas(self):
         self.m.guardar_cuenta(self.b, {'preset_corte':'A'})
@@ -142,6 +175,7 @@ class EdicionesCuentaTests(unittest.TestCase):
             con.executescript(_ESQUEMA)
             con.execute("INSERT INTO cuentas(nombre,plataforma,creada,estado) VALUES('Anterior','tiktok',0,'ok')")
             con.execute("INSERT INTO trabajos(clave,url,origen,creado,actualizado) VALUES('viejo','https://example.test','manual',0,0)")
+        con.close()
         db = DB(str(archivo)); self.addCleanup(db._con.close)
         self.assertEqual(db.cuentas()[0]['nombre'], 'Anterior')
         self.assertEqual(db.cuentas()[0]['estado'], 'ok')

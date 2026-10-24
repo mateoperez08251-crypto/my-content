@@ -160,11 +160,13 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
     <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
     <div class="chips" id="chips-url"></div>
+    <p class="muted" id="url-subir-ahora-ayuda">Marcado: el primer clip entra a la cola al terminar la edición. Desmarcado: espera la pausa configurada entre publicaciones, contada desde que se guardan los clips. Siempre se respetan el horario, el límite diario y cualquier pausa pendiente de esa cuenta, aunque añadas otra URL.</p>
     <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar edición de cada cuenta (o regla/general)</option></select>
     <p class="muted">Con “Cortar” activado se usa la edición de cada cuenta. Si tienen presets distintos, se preparan cortes separados. Elegir un preset aquí lo aplica a todas las cuentas de estos enlaces. Los trabajos ya añadidos conservan sus ajustes.</p>
     <p class="muted">Con “Mejores momentos con IA”, cada clip lleva su título de la IA sin guiones bajos, seguido de su descripción y hashtags.</p>
     <div class="fila" style="margin-top:10px">
       <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
+      <label class="switch"><input type="checkbox" id="url-subir-ahora" checked aria-describedby="url-subir-ahora-ayuda"> Subir el primer clip al estar listo</label>
       <input id="texto-url" placeholder="Texto o hashtags fijos (opcional)">
       <button id="encolar-enlaces" class="prim" onclick="encolar()"><i class="ph ph-plus"></i> Añadir a la cola</button>
     </div>
@@ -540,7 +542,7 @@ async function encolar() {
       await asegurarEdicion();
     }
     const result = await api('/api/bot/encolar', {url: $('urls').value, cuentas: [...selUrl], cortar: $('cortar').checked,
-      texto_fijo: $('texto-url').value, preset: $('url-preset').value});
+      texto_fijo: $('texto-url').value, preset: $('url-preset').value, subir_ahora: $('url-subir-ahora').checked});
     $('urls').value = ''; toast(`${result.ids.length} trabajo(s) añadido(s) a la cola`); cargar();
   } catch (e) { toast(e.message, true); }
   finally { button.disabled = false; }

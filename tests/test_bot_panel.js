@@ -32,9 +32,19 @@ function panel() {
   vm.runInContext(html.slice(html.indexOf('async function encolar()'),html.indexOf('function elegirArchivosLocales()')),ctx);
   ctx.iniciarPreset();
   elements.urls.value='https://example.test/video'; elements.cortar.checked=true;
+  elements['url-subir-ahora'].checked=true;
   return {ctx,elements,sent,timers};
 }
 async function main(){
+  {
+    assert.match(html, /id="url-subir-ahora" checked/);
+    const {ctx,elements:e,sent}=panel();
+    await ctx.encolar();
+    assert.equal(sent.find(s=>s.url==='/api/bot/encolar').body.subir_ahora,true);
+    sent.length=0;e.urls.value='https://example.test/otra';e['url-subir-ahora'].checked=false;
+    await ctx.encolar();
+    assert.equal(sent.find(s=>s.url==='/api/bot/encolar').body.subir_ahora,false);
+  }
   {
     const {ctx,elements:e,sent}=panel();
     assert.equal(e['ed-inicio'].value,'02:30');

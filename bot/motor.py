@@ -409,7 +409,9 @@ class Motor:
         self.db.editar_cuenta(cid, **cambios)
 
     def encolar(self, url, origen="manual", clave=None, canal="", titulo="", cuentas=None,
-                cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id='', devolver_ids=False):
+                cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id='', devolver_ids=False, subir_ahora=True):
+        if type(subir_ahora) is not bool:
+            raise ValueError("Elige si el primer clip debe subir al estar listo o esperar su pausa.")
         url = (url or "").strip()
         if not re.match(r"^https?://", url):
             raise ValueError("Pega un enlace que empiece por http.")
@@ -432,7 +434,7 @@ class Motor:
             grupos[preset or respaldo] = []
         # Leer todos los presets actuales antes de crear ninguna fila. Si uno falla no queda un lote a medias.
         trabajos = [dict(url=url, origen=origen, canal=canal, titulo=titulo, cuentas=destinos,
-                         preset=nombre, texto_fijo=texto_fijo, cortar=cortar,
+                         preset=nombre, texto_fijo=texto_fijo, cortar=cortar, subir_ahora=subir_ahora,
                          opciones=snapshot(self.cargar_preset(nombre) or {}) if cortar else {})
                     for nombre, destinos in grupos.items()]
         if not clave:
@@ -641,19 +643,24 @@ class Motor:
             texto = self._texto(publicacion, t, i, len(clips))
             for cid in t["cuentas"]:
                 subidas.append((cid, ruta, texto))
+        programacion = {}
+        if not t.get('subir_ahora', True):
+            ahora = time.time()
+            programacion = {cid: ahora + random.uniform(self.cfg['gap_min'], self.cfg['gap_max']) * 60
+                            for cid in t['cuentas']}
         intervals = None
         if t['cortar'] and not t.get('archivo_local'):
             try:
                 intervals = archivos.leer_intervalos(self.carpeta_clips(t))
                 if any(ruta not in intervals for _, ruta, _ in subidas):
                     raise ValueError('Faltan los tiempos originales de los clips. Actualiza My Content/Colab antes de subirlos.')
-                self.db.finalizar_trabajo(t['id'], subidas, intervals)
+                self.db.finalizar_trabajo(t['id'], subidas, intervals, programacion=programacion)
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 self.db.marcar_trabajo(t['id'], 'error', str(exc))
                 self.log(f'Clips detenidos para evitar repetidos: {exc}')
                 return
         else:
-            self.db.finalizar_trabajo(t['id'], subidas)
+            self.db.finalizar_trabajo(t['id'], subidas, programacion=programacion)
         actual = self.db.trabajo(t['id'])
         if actual and actual['estado'] == 'listo':
             self._aviso_trabajo(t, 'listo', f"Ya guardé {cantidad(len(clips), 'clip')} en tu PC. "
@@ -833,9 +840,11 @@ class Motor:
             return f"Fuera de horario ({self.cfg['hora_inicio']}–{self.cfg['hora_fin']}, hora de esta PC)."
         if self.db.subidas_ok_hoy(c['id']) >= c['limite_dia']:
             return 'La cuenta alcanzó su límite diario. Espera al siguiente día con horario.'
-        limite = max(s.get('proximo_intento', 0), self._libre_global, c['proxima_libre'])
+        limite = max(s.get('proximo_intento', 0), s.get('programada_para', 0), self._libre_global, c['proxima_libre'])
         if limite > ahora:
-            if limite == s.get('proximo_intento', 0):
+            if limite == s.get('programada_para', 0):
+                motivo = 'Primera subida programada al desmarcar subir al estar listo'
+            elif limite == s.get('proximo_intento', 0):
                 motivo = 'Reintento del clip'
             elif limite == c['proxima_libre']:
                 motivo = 'Pausa de esta cuenta tras una publicación anterior o sin confirmar'
@@ -853,7 +862,7 @@ class Motor:
         cuentas = {c["id"]: c for c in self.db.cuentas()}
         for s in self.db.subidas_listas():
             c = cuentas.get(s["cuenta_id"])
-            if not c or c["proxima_libre"] > ahora or navegador.ocupado(self.perfil(c)):
+            if not c or max(c["proxima_libre"], s.get('programada_para', 0)) > ahora or navegador.ocupado(self.perfil(c)):
                 continue
             if self.db.subidas_ok_hoy(c["id"]) >= c["limite_dia"]:
                 continue

@@ -95,5 +95,12 @@ class EdicionAPITests(unittest.TestCase):
         self.assertEqual(self.motor.encolar.call_count,2)
         self.assertTrue(all(c.kwargs['preset']=='mis_subtitulos' for c in self.motor.encolar.call_args_list))
 
+    def test_primer_clip_marcado_por_defecto_y_eleccion_desmarcada(self):
+        for payload, esperado in [({}, True), ({'subir_ahora': False}, False), ({'subir_ahora': True}, True)]:
+            self.motor.encolar.reset_mock()
+            self.request.get_json.return_value = {'url': 'https://example.test/video', **payload}
+            self.namespace['bot_encolar']()
+            self.assertIs(self.motor.encolar.call_args.kwargs['subir_ahora'], esperado)
+
 
 if __name__=='__main__': unittest.main()

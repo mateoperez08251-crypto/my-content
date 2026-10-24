@@ -34,6 +34,40 @@ class PreparacionTests(unittest.TestCase):
     def encolar(self, n=1):
         return self.m.encolar(f'https://example.test/video-{n}', cuentas=[self.cid])
 
+    def test_desmarcar_primer_clip_programa_pausa_desde_que_esta_listo(self):
+        self.m.guardar_cfg({'gap_min': 60, 'gap_max': 60})
+        tid = self.m.encolar('https://example.test/programado', cuentas=[self.cid], subir_ahora=False)
+        antes = time.time()
+        self.m._procesar_trabajo(self.m.db.trabajo(tid))
+        subida = self.m.db.subidas_pendientes()[0]
+        self.assertGreaterEqual(subida['programada_para'], antes + 3600)
+        self.assertLessEqual(subida['programada_para'], time.time() + 3600)
+        self.assertIsNone(self.m._siguiente_subida())
+        self.assertIn('Primera subida programada', self.m.estado()['subidas'][0]['espera'])
+        nuevo = self.motor()
+        self.assertFalse(nuevo.db.trabajo(tid)['subir_ahora'])
+        self.assertEqual(nuevo.db.subida(subida['id'])['programada_para'], subida['programada_para'])
+        nuevo.db.reintentar_subida(subida['id'])
+        nuevo.lanzar_subidas_guardadas()
+        self.assertIsNone(nuevo._siguiente_subida())
+        with patch('bot.motor.time.time', return_value=subida['programada_para'] + 1):
+            self.assertEqual(nuevo._siguiente_subida()['id'], subida['id'])
+
+    def test_marcado_no_anade_pausa_inicial_y_otra_url_respeta_pausa_cuenta(self):
+        self.encolar(); self.m._paso()
+        primera = self.m.db.subidas_pendientes()[0]
+        self.assertEqual(primera['programada_para'], 0)
+        self.assertEqual(self.m._siguiente_subida()['id'], primera['id'])
+        self.m.db.marcar_subida(primera['id'], 'ok')
+        self.m._descanso(self.m.db.cuenta(self.cid))
+        pausa = self.m.db.cuenta(self.cid)['proxima_libre']
+        self.encolar(2); self.m._paso()
+        segunda = self.m.db.subidas_pendientes()[0]
+        self.assertEqual(segunda['programada_para'], 0)
+        self.assertEqual(self.m.db.cuenta(self.cid)['proxima_libre'], pausa)
+        self.m._libre_global = 0
+        self.assertIsNone(self.m._siguiente_subida())
+
     def test_prepara_toda_la_cola_antes_de_subir(self):
         self.encolar(1); self.encolar(2)
         with patch.object(self.m, '_procesar_subida') as subir:

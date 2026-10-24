@@ -99,12 +99,16 @@ class DB:
                                      ('grupo_clave', "TEXT NOT NULL DEFAULT ''"),
                                      ('remoto_id', "TEXT NOT NULL DEFAULT ''"),
                                      ('remoto_url', "TEXT NOT NULL DEFAULT ''"),
-                                     ('opciones', "TEXT NOT NULL DEFAULT '{}'")]:
+                                     ('opciones', "TEXT NOT NULL DEFAULT '{}'"),
+                                     ('subir_ahora', 'INTEGER NOT NULL DEFAULT 1')]:
                 if name not in columns:
                     self._con.execute(f'ALTER TABLE trabajos ADD COLUMN {name} {definition}')
             cuentas = {r[1] for r in self._con.execute('PRAGMA table_info(cuentas)')}
             if 'preset_corte' not in cuentas:
                 self._con.execute("ALTER TABLE cuentas ADD COLUMN preset_corte TEXT NOT NULL DEFAULT ''")
+            subidas = {r[1] for r in self._con.execute('PRAGMA table_info(subidas)')}
+            if 'programada_para' not in subidas:
+                self._con.execute('ALTER TABLE subidas ADD COLUMN programada_para REAL NOT NULL DEFAULT 0')
             self._con.execute('CREATE INDEX IF NOT EXISTS ix_trabajos_grupo ON trabajos(grupo_clave)')
             self._con.commit()
 
@@ -233,10 +237,10 @@ class DB:
                 for n, t in enumerate(trabajos):
                     cur = self._con.execute(
                         'INSERT INTO trabajos(clave,grupo_clave,url,origen,canal,titulo,cuentas,preset,'
-                        'texto_fijo,cortar,creado,actualizado,opciones) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        'texto_fijo,cortar,creado,actualizado,opciones,subir_ahora) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                         (clave if n == 0 else f'{clave}:edicion:{n}', clave, t['url'], t['origen'],
                          t['canal'], t['titulo'], json.dumps(t['cuentas']), t['preset'], t['texto_fijo'],
-                         int(t['cortar']), ahora, ahora, json.dumps(t['opciones'])))
+                         int(t['cortar']), ahora, ahora, json.dumps(t['opciones']), int(t.get('subir_ahora', True))))
                     ids.append(cur.lastrowid)
                 self._con.commit()
                 return ids
@@ -325,7 +329,7 @@ class DB:
                                  'Revisa ese historial antes de volver a procesarlo para estas cuentas.') from None
         return result
 
-    def finalizar_trabajo(self, tid, subidas, intervalos=None):
+    def finalizar_trabajo(self, tid, subidas, intervalos=None, programacion=None):
         """Encolar todos los resultados y marcar listo en una sola transacción."""
         ahora = time.time()
         with self._lock, self._con:
@@ -348,8 +352,9 @@ class DB:
                     start, end = intervalos[ruta]
                     self._con.execute('INSERT OR IGNORE INTO clip_historial VALUES(?,?,?,?,?,?)',
                                       (identity, cid, start, end, tid, ruta))
-            self._con.executemany('INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado) VALUES(?,?,?,?,?,?)',
-                                  [(tid, cid, ruta, texto, ahora, ahora) for cid, ruta, texto in subidas])
+            self._con.executemany('INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado,programada_para) VALUES(?,?,?,?,?,?,?)',
+                                  [(tid, cid, ruta, texto, ahora, ahora, (programacion or {}).get(cid, 0))
+                                   for cid, ruta, texto in subidas])
             self._con.execute("UPDATE trabajos SET estado='listo',error='',actualizado=? WHERE id=?", (ahora, tid))
 
     def siguiente_trabajo(self, excluir_live=False):

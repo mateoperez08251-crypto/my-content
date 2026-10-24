@@ -2211,7 +2211,7 @@ def bot_encolar():
         for u in urls:
             ids.extend(_bot().encolar(u, origen="manual", cuentas=data.get("cuentas") or None,
                                      cortar=data.get("cortar", True), texto_fijo=data.get("texto_fijo", ""),
-                                     preset=data.get('preset', ''), devolver_ids=True))
+                                     preset=data.get('preset', ''), devolver_ids=True, subir_ahora=data.get('subir_ahora', True)))
         return {"ids": ids}
     return _bot_respuesta(hacer)
 

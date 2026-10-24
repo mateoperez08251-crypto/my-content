@@ -35,7 +35,7 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
         candidatas = []
         for s in pendientes:
             cid = s['cuenta_id']
-            t = max(reloj, libres[cid], s['proximo_intento'])
+            t = max(reloj, libres[cid], s['proximo_intento'], s.get('programada_para', 0))
             for _ in range(3700):
                 t = siguiente_horario(t, cfg['hora_inicio'], cfg['hora_fin'])
                 dt = datetime.fromtimestamp(t)
