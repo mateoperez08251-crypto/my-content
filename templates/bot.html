@@ -418,7 +418,20 @@ function pintar() {
   pintarCuentasEdicion();
 }
 
-async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); if (!presetCargado && Object.keys(presetsGuardados).length) iniciarPreset(); await cargarLives(); } catch (e) {} }
+async function cargar() {
+  try {
+    const version = editorVersion, result = await api('/api/bot/estado');
+    if (E && version !== editorVersion) {
+      // Una consulta iniciada antes de guardar no devuelve la cuenta al preset anterior.
+      result.config.preset = E.config.preset;
+      const asignados = new Map(E.cuentas.map(c => [c.id, c.preset_corte]));
+      for (const cuenta of result.cuentas) if (asignados.has(cuenta.id)) cuenta.preset_corte = asignados.get(cuenta.id);
+    }
+    E = result; pintar();
+    if (!presetCargado && Object.keys(presetsGuardados).length) iniciarPreset();
+    await cargarLives();
+  } catch (e) {}
+}
 function modoLive() {
   const ai = $('live-mode').value === 'ai';
   $('live-window-group').hidden = !ai;
@@ -808,6 +821,7 @@ async function asegurarEdicion(forzar = false) {
           await api('/api/bot/config', {preset: datos.name});
           E.config.preset = datos.name;
         }
+        editorVersion++;
         presetsGuardados[datos.name] = result.config || datos.config;
         editorNombre = datos.name;
         editorGuardado = firma;

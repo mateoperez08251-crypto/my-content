@@ -105,6 +105,20 @@ async function main(){
     gate.resolve({success:true,presets:{elegido:{skip_intro_seconds:0}}});await pending;
     assert.equal(e['ed-inicio'].value,'07:00');
   }
+  { // Una respuesta vieja del estado no cambia la asignación recién guardada.
+    const {ctx,elements:e}=panel(),gate=deferred();const real=ctx.api;
+    ctx.pintar=()=>{};ctx.cargarLives=async()=>{};
+    vm.runInContext(html.slice(html.indexOf('async function cargar()'),html.indexOf('function modoLive()')),ctx);
+    await ctx.cambiarCuentaEdicion('1');
+    const viejo=JSON.parse(JSON.stringify(ctx.E));
+    ctx.api=async(url,body)=>url==='/api/bot/estado'?gate.promise:real(url,body);
+    const pending=ctx.cargar();
+    e['preset-nombre'].value='A_nuevo';await ctx.guardarPresetBot();
+    gate.resolve(viejo);await pending;
+    assert.equal(ctx.E.cuentas[0].preset_corte,'A_nuevo');
+    await ctx.cambiarCuentaEdicion('2');await ctx.cambiarCuentaEdicion('1');
+    assert.equal(e['preset-nombre'].value,'A_nuevo');
+  }
   { // El temporizador guarda sin un clic en Guardar.
     const {ctx,elements:e,sent,timers}=panel();e['ed-inicio'].value='00:00';ctx.cambioEdicion();
     await [...timers.values()][0]();await ctx.asegurarEdicion();
