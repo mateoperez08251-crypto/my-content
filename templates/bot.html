@@ -93,7 +93,8 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
         <option value="solo_subir">Solo publicar los clips guardados</option>
         <option value="alternar">Alternar edición y publicación</option>
       </select></div>
-      <div><label for="preset">Preset de Smart Split</label><select id="preset" onchange="seleccionarPreset()"></select></div>
+      <div><label for="ed-cuenta">Editar configuración de</label><select id="ed-cuenta" onchange="cambiarCuentaEdicion(this.value)"><option value="">General · cuentas sin preset propio</option></select></div>
+      <div><label for="preset">Preset de Smart Split</label><select id="preset" onchange="cambiarPresetEdicion(this.value)"></select></div>
       <div><label for="preset-nombre">Guardar estos ajustes con el nombre</label><input id="preset-nombre" value="bot_calidad"></div>
     </div>
     <div class="fila" style="margin:12px 0"><button onclick="guardarModo()">Aplicar modo elegido</button><span class="muted" id="modo-activo"></span></div>
@@ -117,8 +118,8 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
     <div class="fila" style="margin-top:12px"><img id="sub-preview" src="/static/presets/sub_karaoke.webp" width="96" height="144" loading="lazy" alt="Ejemplo del estilo de subtítulos"><p class="ayuda" id="ed-resumen"></p></div>
     <p class="ayuda">Pro es la opción de calidad disponible en esta app. En partes consecutivas no se usa IA para elegir momentos. Groq requiere tu clave en el equipo que edita; si falla un modelo, Smart Split puede usar uno de respaldo. La ampliación IA no recupera detalle que no tenga el original.</p>
-    <p class="ayuda">El inicio queda guardado en este preset al pulsar Guardar, incluso al cerrar la app o reiniciar la PC, hasta que lo cambies. Se usa en nuevos videos de enlaces y del Radar que lleven este preset, tanto en esta PC como en Colab. No se aplica a cada segmento de un live ni a archivos que subes sin editar. Si el video acaba antes del tiempo elegido, se avisa y no se corta desde cero.</p>
-    <div class="fila"><button class="prim" onclick="guardarPresetBot()">Guardar edición y usarla en el bot</button><button onclick="cargarPresets(true)">Actualizar presets</button><a href="/" target="_blank" rel="noopener">Abrir Smart Split completo para más ajustes</a></div>
+    <p class="ayuda">Los ajustes se guardan solos y se aplican al siguiente video, sin reiniciar. Puedes guardar varios presets con nombres distintos y elegir uno para cada cuenta. Si varias cuentas usan el mismo nombre, comparten sus ajustes. Usa otro nombre para crear una variante. Se usan en nuevos videos de enlaces y del Radar, tanto en esta PC como en Colab. Los lives usan el preset elegido en su apartado; el tiempo de inicio no se repite en cada segmento. Los archivos que subes sin editar no llevan estos ajustes. Si el video acaba antes del tiempo elegido, se avisa y no se corta desde cero.</p>
+    <div class="fila"><button class="prim" onclick="guardarPresetBot()">Guardar edición ahora</button><button id="ed-heredar" hidden onclick="heredarEdicionCuenta()">Usar regla/general en esta cuenta</button><button onclick="cargarPresets(true)">Actualizar presets</button><a href="/" target="_blank" rel="noopener">Abrir Smart Split completo para más ajustes</a></div>
     <p class="muted" id="preset-estado" aria-live="polite"></p>
     <div class="metricas" id="inventario"></div>
     <p class="muted" id="carpeta-clips" style="overflow-wrap:anywhere"></p>
@@ -159,13 +160,13 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
     <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
     <div class="chips" id="chips-url"></div>
-    <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar regla del canal o preset por defecto</option></select>
-    <p class="muted">Con “Cortar” activado se usa Smart Split desde el inicio guardado en el preset elegido. Cada parte se publica una vez en cada cuenta elegida; 10 partes y 2 cuentas son 20 publicaciones.</p>
+    <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar edición de cada cuenta (o regla/general)</option></select>
+    <p class="muted">Con “Cortar” activado se usa la edición de cada cuenta. Si tienen presets distintos, se preparan cortes separados. Elegir un preset aquí lo aplica a todas las cuentas de estos enlaces. Los trabajos ya añadidos conservan sus ajustes.</p>
     <p class="muted">Con “Mejores momentos con IA”, cada clip lleva su título de la IA sin guiones bajos, seguido de su descripción y hashtags.</p>
     <div class="fila" style="margin-top:10px">
       <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
       <input id="texto-url" placeholder="Texto o hashtags fijos (opcional)">
-      <button class="prim" onclick="encolar()"><i class="ph ph-plus"></i> Añadir a la cola</button>
+      <button id="encolar-enlaces" class="prim" onclick="encolar()"><i class="ph ph-plus"></i> Añadir a la cola</button>
     </div>
   </section>
 
@@ -373,6 +374,7 @@ function pintar() {
     <td>${x.comprobando || pruebasPendientes.has(x.id) ? '<span class="muted">Comprobando…</span>' : est(x.estado)} ${x.abierta ? '<span class="muted">Navegador abierto</span>' : ''}</td>
     <td>${x.hoy}/${x.limite_dia}</td>
     <td class="acc">
+      <button class="mini" onclick="cambiarCuentaEdicion('${x.id}', true)">Edición: ${esc(x.preset_corte || 'Regla/general')}</button>
       <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
       <button class="mini" onclick="cerrarVentana(${x.id})" ${puedeCerrar(x) ? '' : 'disabled'} title="Busca y cierra la ventana del perfil de esta cuenta, incluso si quedó abierta al reiniciar la app">${cierresPendientes.has(x.id) ? 'Cerrando…' : 'Cerrar ventana'}</button>
       <button class="mini" onclick="importarCookies(${x.id})" ${x.abierta || cookiesPendientes.has(x.id) ? 'disabled' : ''} title="Importa cookies con la ventana de esa cuenta cerrada"><i class="ph ph-file-arrow-up"></i> Cookies</button>
@@ -413,9 +415,23 @@ function pintar() {
   if (abajo) reg.scrollTop = reg.scrollHeight;
   chips('chips-url', selUrl); chips('chips-regla', selRegla); chips('chips-live', selLive);
   pintarLocales();
+  pintarCuentasEdicion();
 }
 
-async function cargar() { try { E = (await api('/api/bot/estado')); pintar(); if (!presetCargado && Object.keys(presetsGuardados).length) iniciarPreset(); await cargarLives(); } catch (e) {} }
+async function cargar() {
+  try {
+    const version = editorVersion, result = await api('/api/bot/estado');
+    if (E && version !== editorVersion) {
+      // Una consulta iniciada antes de guardar no devuelve la cuenta al preset anterior.
+      result.config.preset = E.config.preset;
+      const asignados = new Map(E.cuentas.map(c => [c.id, c.preset_corte]));
+      for (const cuenta of result.cuentas) if (asignados.has(cuenta.id)) cuenta.preset_corte = asignados.get(cuenta.id);
+    }
+    E = result; pintar();
+    if (!presetCargado && Object.keys(presetsGuardados).length) iniciarPreset();
+    await cargarLives();
+  } catch (e) {}
+}
 function modoLive() {
   const ai = $('live-mode').value === 'ai';
   $('live-window-group').hidden = !ai;
@@ -514,9 +530,20 @@ async function peticionCookiesDescarga(metodo) {
 }
 
 async function encolar() {
-  await api('/api/bot/encolar', {url: $('urls').value, cuentas: [...selUrl], cortar: $('cortar').checked,
-    texto_fijo: $('texto-url').value, preset: $('url-preset').value});
-  $('urls').value = ''; toast('Añadido a la cola'); cargar();
+  const button = $('encolar-enlaces');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    if (editorTransicion) await editorTransicion;
+    if ($('cortar').checked) {
+      if (!presetCargado) throw new Error('Espera a que se carguen los ajustes de edición.');
+      await asegurarEdicion();
+    }
+    const result = await api('/api/bot/encolar', {url: $('urls').value, cuentas: [...selUrl], cortar: $('cortar').checked,
+      texto_fijo: $('texto-url').value, preset: $('url-preset').value});
+    $('urls').value = ''; toast(`${result.ids.length} trabajo(s) añadido(s) a la cola`); cargar();
+  } catch (e) { toast(e.message, true); }
+  finally { button.disabled = false; }
 }
 
 function elegirArchivosLocales() {
@@ -704,31 +731,147 @@ async function guardarAvisos() {
   toast('Avisos guardados');
 }
 document.querySelectorAll('.ajustes input, .ajustes select, #remoto_url, #remoto_clave').forEach(i => i.addEventListener('focus', () => editando = true));
+let editorCuenta = '', editorNombre = '', editorGuardado = '', editorTimer = null;
+let editorPromesa = null, editorTransicion = null, editorVersion = 0;
+function listasPresets() {
+  $('smart-presets').replaceChildren(...Object.keys(presetsGuardados).map(name => new Option(name, name)));
+  for (const id of ['preset', 'url-preset']) {
+    const anterior = $(id).value;
+    $(id).replaceChildren();
+    if (id === 'url-preset') $(id).add(new Option('Usar edición de cada cuenta (o regla/general)', ''));
+    for (const name of Object.keys(presetsGuardados)) $(id).add(new Option(name, name));
+    if ([...$(id).options].some(o => o.value === anterior)) $(id).value = anterior;
+  }
+}
+function pintarCuentasEdicion() {
+  const opciones = [['', 'General · cuentas sin preset propio'], ...(E?.cuentas || []).map(c => [String(c.id), `${c.nombre} · ${c.plataforma}`])];
+  const firma = JSON.stringify(opciones);
+  if ($('ed-cuenta').dataset.firma !== firma) {
+    $('ed-cuenta').replaceChildren(...opciones.map(([id, name]) => new Option(name, id)));
+    $('ed-cuenta').value = editorCuenta;
+    $('ed-cuenta').dataset.firma = firma;
+  }
+}
 async function cargarPresets(recargar = false) {
   try {
+    if (editorTransicion) await editorTransicion;
+    if (recargar && presetCargado) await asegurarEdicion();
+    const version = editorVersion;
     const result = await api('/api/smart_presets');
+    if (version !== editorVersion) return; // Una lectura lenta no pisa un cambio más reciente.
     presetsGuardados = result.presets || {};
-    $('smart-presets').replaceChildren(...Object.keys(result.presets || {}).map(name => {
-      const option = document.createElement('option'); option.value = name; return option;
-    }));
-    for (const id of ['preset', 'url-preset']) {
-      const anterior = $(id).value;
-      $(id).replaceChildren();
-      if (id === 'url-preset') $(id).add(new Option('Usar regla o preset por defecto', ''));
-      for (const name of Object.keys(presetsGuardados)) $(id).add(new Option(name, name));
-      if ([...$(id).options].some(o => o.value === anterior)) $(id).value = anterior;
-    }
+    listasPresets();
     if (E && (!presetCargado || recargar)) iniciarPreset();
-  } catch (e) {}
+  } catch (e) { $('preset-estado').textContent = e.message; toast(e.message, true); }
 }
-
 function iniciarPreset() {
-  const name = E.config.preset;
+  editorVersion++;
+  if (!presetCargado) bloquearEdicion(false);
+  const cuenta = (E.cuentas || []).find(c => String(c.id) === editorCuenta);
+  const asignado = cuenta ? cuenta.preset_corte : E.config.preset;
+  const name = asignado || E.config.preset;
   if (!presetsGuardados[name]) {
     presetsGuardados[name] = name === 'default' ? (presetsGuardados.bot_calidad || {}) : {};
-    $('preset').add(new Option(name === 'default' ? 'default (calidad)' : `${name} (falta guardar)`, name));
   }
-  $('preset').value = name; seleccionarPreset(); presetCargado = true;
+  listasPresets(); $('preset').value = name; seleccionarPreset();
+  if (cuenta && !asignado) {
+    $('preset-nombre').value = `cuenta_${cuenta.id}`;
+    $('preset-estado').textContent = 'Esta cuenta usa su regla o el preset general. Al editar o guardar, tendrá su propio preset.';
+  }
+  $('ed-cuenta').value = editorCuenta;
+  $('ed-heredar').hidden = !editorCuenta;
+  editorNombre = name;
+  editorGuardado = firmaEditor();
+  presetCargado = true;
+}
+function datosEditor() {
+  const name = $('preset-nombre').value.trim();
+  if (!name || name.length > 100) throw new Error('Escribe un nombre de 1 a 100 letras para el preset.');
+  return {cuenta: editorCuenta, name, config: ajustesEdicion()};
+}
+function firmaEditor() { return JSON.stringify(datosEditor()); }
+function cambioEdicion() {
+  if (!presetCargado) return;
+  editorVersion++;
+  clearTimeout(editorTimer);
+  $('preset-estado').textContent = 'Cambios pendientes de guardar…';
+  editorTimer = setTimeout(() => asegurarEdicion().catch(() => {}), 650);
+}
+async function asegurarEdicion(forzar = false) {
+  if (!presetCargado) throw new Error('Espera a que se carguen los ajustes de edición.');
+  clearTimeout(editorTimer);
+  if (editorPromesa) {
+    await editorPromesa;
+    return asegurarEdicion(forzar);
+  }
+  editorPromesa = (async () => {
+    try {
+      while (true) {
+        const datos = datosEditor(), firma = JSON.stringify(datos);
+        if (!forzar && firma === editorGuardado) return;
+        forzar = false;
+        editorVersion++;
+        $('preset-estado').textContent = 'Guardando edición…';
+        const result = await api('/api/bot/preset', {name: datos.name, config: datos.config});
+        if (datos.cuenta) {
+          await api(`/api/bot/cuentas/${datos.cuenta}`, {preset_corte: datos.name});
+          const cuenta = E.cuentas.find(c => String(c.id) === datos.cuenta);
+          if (cuenta) cuenta.preset_corte = datos.name;
+        } else {
+          await api('/api/bot/config', {preset: datos.name});
+          E.config.preset = datos.name;
+        }
+        editorVersion++;
+        presetsGuardados[datos.name] = result.config || datos.config;
+        editorNombre = datos.name;
+        editorGuardado = firma;
+        listasPresets(); $('preset').value = datos.name;
+        $('preset-estado').textContent = `Guardado: ${datos.name}. Se usa en nuevos videos, sin reiniciar. La cola existente conserva sus ajustes.`;
+        // Si se escribió mientras guardaba, repetir con el último borrador sin recargar los campos.
+      }
+    } catch (e) {
+      $('preset-estado').textContent = `No se guardó: ${e.message}. No se añadirá el enlace con cambios pendientes.`;
+      throw e;
+    }
+  })();
+  try { await editorPromesa; } finally { editorPromesa = null; }
+}
+function bloquearEdicion(bloquear) {
+  document.querySelectorAll('#editor-preset input, #editor-preset select, #preset, #preset-nombre, #ed-cuenta').forEach(el => el.disabled = bloquear);
+  if (!bloquear) modoEdicion();
+}
+async function cambiarEditor(aplicar) {
+  if (editorTransicion) return editorTransicion;
+  editorTransicion = (async () => {
+    bloquearEdicion(true);
+    try { await asegurarEdicion(); await aplicar(); }
+    catch (e) { toast(e.message, true); }
+    finally {
+      $('ed-cuenta').value = editorCuenta; $('preset').value = editorNombre;
+      bloquearEdicion(false);
+    }
+  })();
+  try { await editorTransicion; } finally { editorTransicion = null; }
+}
+async function cambiarCuentaEdicion(id, mostrar = false) {
+  await cambiarEditor(async () => { editorCuenta = String(id); iniciarPreset(); });
+  if (mostrar) $('preparacion').scrollIntoView({behavior:'smooth'});
+}
+async function cambiarPresetEdicion(name) {
+  await cambiarEditor(async () => {
+    editorVersion++;
+    $('preset').value = name; seleccionarPreset(); editorNombre = name;
+    await asegurarEdicion(true);
+  });
+}
+async function heredarEdicionCuenta() {
+  if (!editorCuenta) return;
+  await cambiarEditor(async () => {
+    await api(`/api/bot/cuentas/${editorCuenta}`, {preset_corte: ''});
+    const cuenta = E.cuentas.find(c => String(c.id) === editorCuenta);
+    if (cuenta) cuenta.preset_corte = '';
+    iniciarPreset();
+  });
 }
 function seleccionarPreset() {
   presetBase = {...(presetsGuardados[$('preset').value] || {})};
@@ -795,16 +938,10 @@ function ajustesEdicion() {
 }
 async function guardarPresetBot() {
   try {
-    const name = $('preset-nombre').value.trim(), config = ajustesEdicion();
-    if (!name) throw new Error('Escribe un nombre para guardar la edición.');
-    await api('/api/bot/preset', {name, config});
-    await cargarPresets();
-    $('preset').value = name;
-    await api('/api/bot/config', {preset:name, modo_cola:$('modo_cola').value});
-    $('url-preset').value = name;
-    seleccionarPreset(); await cargar();
-    toast('Edición e inicio guardados. Se conservan al reiniciar y se usan en nuevos videos con este preset.');
-  } catch (e) { $('preset-estado').textContent = e.message; toast(e.message, true); }
+    if (editorTransicion) await editorTransicion;
+    await asegurarEdicion(true);
+    toast('Edición guardada. Ya se puede usar en nuevos videos.');
+  } catch (e) { toast(e.message, true); }
 }
 async function lanzarSubidasGuardadas() {
   const button = $('lanzar-subidas');
@@ -849,6 +986,20 @@ async function guardarLimite(id, valor) {
   try { await api(`/api/bot/cuentas/${id}`, {limite_dia:Number(valor)}); await cargar(); }
   catch(e) { toast(e.message,true); }
 }
+document.querySelectorAll('#editor-preset input, #editor-preset select').forEach(el => {
+  el.addEventListener('input', cambioEdicion); el.addEventListener('change', cambioEdicion);
+});
+$('preset-nombre').addEventListener('input', () => {
+  editorVersion++; clearTimeout(editorTimer);
+  $('preset-estado').textContent = 'Nombre cambiado. Sal del campo o pulsa Guardar para aplicarlo.';
+});
+$('preset-nombre').addEventListener('change', cambioEdicion);
+window.addEventListener('beforeunload', event => {
+  if (!presetCargado) return;
+  try { if (!editorPromesa && firmaEditor() === editorGuardado) return; } catch (e) {}
+  event.preventDefault(); event.returnValue = '';
+});
+bloquearEdicion(true);
 cargarPresets(); cargar(); setInterval(cargar, 4000);
 </script>
 </body>

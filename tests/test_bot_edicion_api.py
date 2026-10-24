@@ -16,6 +16,7 @@ class EdicionAPITests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.request=SimpleNamespace(path='/api/bot/preset',get_json=Mock())
         self.motor=Mock()
+        self.motor.encolar.return_value = [1]
         self.namespace={'request':self.request,'jsonify':lambda d:d,'json':json,'os':os,
                         '_presets_lock':threading.RLock(),
                         'paths':SimpleNamespace(data_path=lambda p:os.path.join(self.tmp.name,p)),
@@ -24,7 +25,7 @@ class EdicionAPITests(unittest.TestCase):
         nodes=[]
         for node in ast.parse(source.read_text()).body:
             if isinstance(node,ast.FunctionDef) and node.name in {
-                '_presets_path','list_smart_presets','save_smart_preset','_bot_preset','bot_encolar','bot_lanzar_subidas'}:
+                '_presets_path','list_smart_presets','save_smart_preset','_bot_preset','bot_encolar','bot_lanzar_subidas','bot_cuenta_editar'}:
                 node.decorator_list=[]; nodes.append(node)
         exec(compile(ast.Module(body=nodes,type_ignores=[]),'content-routes','exec'),self.namespace)
 
@@ -68,6 +69,24 @@ class EdicionAPITests(unittest.TestCase):
         self.motor.lanzar_subidas_guardadas.return_value = {'pendientes': 2, 'mensaje': 'Listo'}
         self.assertEqual(self.namespace['bot_lanzar_subidas'](), {'pendientes': 2, 'mensaje': 'Listo'})
         self.motor.lanzar_subidas_guardadas.assert_called_once_with()
+
+    def test_respuesta_devuelve_config_normalizada(self):
+        self.request.get_json.return_value = {'name':'nuevo','config':{'skip_intro_seconds':'02:30'}}
+        result = self.namespace['save_smart_preset']()
+        self.assertEqual(result['config']['skip_intro_seconds'], 150)
+        self.assertEqual(result['name'], 'nuevo')
+
+    def test_api_cuenta_filtra_y_delega_preset(self):
+        self.request.method = 'POST'
+        self.request.get_json.return_value = {'preset_corte':'otra', 'nombre':'Cuenta', 'estado':'ok'}
+        self.namespace['bot_cuenta_editar'](2)
+        self.motor.guardar_cuenta.assert_called_once_with(2, {'preset_corte':'otra','nombre':'Cuenta'})
+
+    def test_api_devuelve_todas_las_ediciones_de_cada_url(self):
+        self.motor.encolar.side_effect = [[1, 2], [3, 4]]
+        self.request.get_json.return_value = {'url':'https://example.test/1\nhttps://example.test/2'}
+        self.assertEqual(self.namespace['bot_encolar'](), {'ids':[1,2,3,4]})
+        self.assertTrue(all(c.kwargs['devolver_ids'] for c in self.motor.encolar.call_args_list))
 
     def test_enviar_urls_pasa_el_preset_elegido(self):
         self.request.get_json.return_value={'url':'https://example.test/1\nhttps://example.test/2',
