@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -210,11 +211,12 @@ class PreparacionTests(unittest.TestCase):
         self.m._descanso(self.m.db.cuenta(self.cid))
         libre = self.m.db.cuenta(self.cid)['proxima_libre']
         global_libre = self.m._libre_global
-        self.m.db.marcar_subida(subida['id'], 'pendiente', proximo_intento=10**12)
+        reintento = time.time() + 86400
+        self.m.db.marcar_subida(subida['id'], 'pendiente', proximo_intento=reintento)
         self.m.lanzar_subidas_guardadas()
         self.assertEqual(self.m.db.cuenta(self.cid)['proxima_libre'], libre)
         self.assertEqual(self.m._libre_global, global_libre)
-        self.assertEqual(self.m.db.subida(subida['id'])['proximo_intento'], 10**12)
+        self.assertEqual(self.m.db.subida(subida['id'])['proximo_intento'], reintento)
         self.assertIsNone(self.m._siguiente_subida())
         self.assertIn('Reintento del clip', self.m.estado()['subidas'][0]['espera'])
         for estado in ['ok', 'revisar', 'error']:
