@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python -m pip install requests
+      - run: python -m pip install requests imageio-ffmpeg
       - name: Sintaxis Python
         run: python -m py_compile editor_controls.py smart_editor.py content.py bot/presets.py bot/motor.py bot/remoto.py bot/live.py bot/avisos.py
       - name: Regresiones de inicio, presets, cola y Colab

@@ -2165,6 +2165,11 @@ def bot_config():
     return _bot_respuesta(lambda: _bot().guardar_cfg(data))
 
 
+@app.route('/api/bot/subidas/lanzar', methods=['POST'])
+def bot_lanzar_subidas():
+    return _bot_respuesta(lambda: _bot().lanzar_subidas_guardadas())
+
+
 @app.route('/api/bot/clip/<int:sid>')
 def bot_clip_guardado(sid):
     subida = _bot().db.subida(sid)

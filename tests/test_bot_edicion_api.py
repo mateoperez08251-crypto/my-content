@@ -24,7 +24,7 @@ class EdicionAPITests(unittest.TestCase):
         nodes=[]
         for node in ast.parse(source.read_text()).body:
             if isinstance(node,ast.FunctionDef) and node.name in {
-                '_presets_path','list_smart_presets','save_smart_preset','_bot_preset','bot_encolar'}:
+                '_presets_path','list_smart_presets','save_smart_preset','_bot_preset','bot_encolar','bot_lanzar_subidas'}:
                 node.decorator_list=[]; nodes.append(node)
         exec(compile(ast.Module(body=nodes,type_ignores=[]),'content-routes','exec'),self.namespace)
 
@@ -63,6 +63,11 @@ class EdicionAPITests(unittest.TestCase):
         self.assertEqual(status,400)
         self.assertFalse(response['success'])
         self.assertFalse(Path(self.tmp.name,'smart_presets.json').exists())
+
+    def test_lanzar_subidas_delega_en_motor_sin_otro_hilo(self):
+        self.motor.lanzar_subidas_guardadas.return_value = {'pendientes': 2, 'mensaje': 'Listo'}
+        self.assertEqual(self.namespace['bot_lanzar_subidas'](), {'pendientes': 2, 'mensaje': 'Listo'})
+        self.motor.lanzar_subidas_guardadas.assert_called_once_with()
 
     def test_enviar_urls_pasa_el_preset_elegido(self):
         self.request.get_json.return_value={'url':'https://example.test/1\nhttps://example.test/2',

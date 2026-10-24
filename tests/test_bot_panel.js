@@ -54,6 +54,18 @@ async function main(){
   elements['ed-modo'].value='ai';ctx.modoEdicion();
   assert.equal(elements['ed-cantidad'].disabled,false);
   elements['ed-subs'].value='no';ctx.vistaSubtitulos();assert.equal(elements['sub-preview'].hidden,true);
+  sent.length=0;
+  ctx.api=async(url,body)=>{sent.push({url,body});return {success:true,mensaje:'Listo para subir'};};
+  await ctx.lanzarSubidasGuardadas();
+  assert.equal(sent[0].url,'/api/bot/subidas/lanzar');
+  assert.equal(elements.modo_cola.value,'solo_subir');
+  assert.equal(elements.activo.checked,true);
+  assert.equal(elements['lanzar-subidas-estado'].textContent,'Listo para subir');
+  assert.equal(elements['lanzar-subidas'].disabled,false);
+  ctx.api=async()=>{throw Error('Falta sesión');};
+  await ctx.lanzarSubidasGuardadas();
+  assert.equal(elements['lanzar-subidas-estado'].textContent,'Falta sesión');
+  assert.equal(elements['lanzar-subidas'].disabled,false);
   sent.length=0;ctx.api=async()=>{throw Error('No se pudo guardar');};
   await ctx.guardarPresetBot();
   assert.equal(elements['preset-estado'].textContent,'No se pudo guardar');

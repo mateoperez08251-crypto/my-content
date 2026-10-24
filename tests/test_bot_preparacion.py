@@ -171,6 +171,79 @@ class PreparacionTests(unittest.TestCase):
                 self.m._preparar_remoto(self.m.db.trabajo(tid))
         self.assertEqual(cliente.iniciar.call_args.args[1]['skip_intro_seconds'], 150)
 
+    def test_primer_clip_no_espera_gap_60_120(self):
+        self.m.guardar_cfg({'gap_min': 60, 'gap_max': 120})
+        self.encolar()
+        self.m._paso()
+        subida = self.m.db.subidas_pendientes()[0]
+        self.assertEqual(self.m.db.cuenta(self.cid)['proxima_libre'], 0)
+        self.assertEqual(self.m._siguiente_subida()['id'], subida['id'])
+        self.assertIn('Listo para subir', self.m._motivo_subida(subida))
+        with patch.object(self.m, '_procesar_subida') as subir:
+            self.assertTrue(self.m._paso())
+            subir.assert_called_once()
+
+    def test_boton_libera_clips_sin_esperar_otras_ediciones(self):
+        self.encolar()
+        self.m._paso()
+        otro = self.encolar(2)
+        self.m.guardar_cfg({'modo_cola': 'solo_preparar', 'activo': False, 'gap_min': 60, 'gap_max': 120})
+        resultado = self.m.lanzar_subidas_guardadas()
+        self.assertEqual(resultado['pendientes'], 1)
+        self.assertEqual(self.m.cfg['modo_cola'], 'solo_subir')
+        self.assertTrue(self.m.cfg['activo'])
+        self.split.reset_mock()
+        with patch.object(self.m, '_procesar_subida') as subir:
+            self.assertTrue(self.m._paso())
+            subir.assert_called_once()
+        self.split.assert_not_called()
+        self.assertEqual(self.m.db.trabajo(otro)['estado'], 'pendiente')
+        nuevo = self.motor()
+        self.assertEqual(nuevo.cfg['modo_cola'], 'solo_subir')
+        self.assertTrue(nuevo.cfg['activo'])
+
+    def test_boton_no_reinicia_pausas_ni_reintentos_ni_publicados(self):
+        self.encolar()
+        self.m._paso()
+        subida = self.m.db.subidas_pendientes()[0]
+        self.m.guardar_cfg({'gap_min': 60, 'gap_max': 120})
+        self.m._descanso(self.m.db.cuenta(self.cid))
+        libre = self.m.db.cuenta(self.cid)['proxima_libre']
+        global_libre = self.m._libre_global
+        self.m.db.marcar_subida(subida['id'], 'pendiente', proximo_intento=10**12)
+        self.m.lanzar_subidas_guardadas()
+        self.assertEqual(self.m.db.cuenta(self.cid)['proxima_libre'], libre)
+        self.assertEqual(self.m._libre_global, global_libre)
+        self.assertEqual(self.m.db.subida(subida['id'])['proximo_intento'], 10**12)
+        self.assertIsNone(self.m._siguiente_subida())
+        self.assertIn('Reintento del clip', self.m.estado()['subidas'][0]['espera'])
+        for estado in ['ok', 'revisar', 'error']:
+            self.m.db.marcar_subida(subida['id'], estado)
+            with self.assertRaisesRegex(ValueError, 'No hay clips'):
+                self.m.lanzar_subidas_guardadas()
+            self.assertEqual(self.m.db.subida(subida['id'])['estado'], estado)
+
+    def test_panel_indica_sesion_horario_y_modo_que_retienen(self):
+        self.encolar()
+        self.m._paso()
+        subida = self.m.db.subidas_pendientes()[0]
+        self.m.guardar_cfg({'modo_cola': 'solo_preparar'})
+        self.assertIn('Solo editar', self.m._motivo_subida(subida))
+        self.m.lanzar_subidas_guardadas()
+        self.m.db.editar_cuenta(self.cid, estado='sin_comprobar')
+        self.assertIn('comprobar la sesión', self.m.estado()['subidas'][0]['espera'])
+        self.assertNotIn('nada en la cola', self.m._motivo_espera())
+        self.m.db.editar_cuenta(self.cid, estado='ok')
+        with patch('bot.motor._en_horario', return_value=False):
+            self.assertIn('Fuera de horario', self.m._motivo_subida(subida))
+            self.assertIsNone(self.m._siguiente_subida())
+
+    def test_boton_sin_archivos_no_cambia_el_modo(self):
+        antes = dict(self.m.cfg)
+        with self.assertRaisesRegex(ValueError, 'No hay clips'):
+            self.m.lanzar_subidas_guardadas()
+        self.assertEqual(self.m.cfg, antes)
+
     def test_preset_inexistente_avisa_y_snapshot_omite_rutas_ajenas(self):
         with self.assertRaises(ValueError): resolver({}, 'no_existe')
         copia=snapshot({**CALIDAD,'source':'viejo','python_motor':'C:/python.exe','start_time':'00:30'})

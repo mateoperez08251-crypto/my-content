@@ -254,6 +254,8 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 
   <section class="card ancho">
     <h2><i class="ph-duotone ph-upload-simple"></i> Subidas <small id="res-subidas"></small></h2>
+    <div class="fila"><button id="lanzar-subidas" class="prim" onclick="lanzarSubidasGuardadas()">Lanzar subidas guardadas</button><span id="lanzar-subidas-estado" class="muted" aria-live="polite"></span></div>
+    <p class="ayuda">Activa el bot en «Solo publicar clips guardados» y pone en marcha las publicaciones pendientes. El primer clip listo no espera la pausa de 60–120 min si esa cuenta no tiene una pausa anterior. Respeta el horario, la sesión, los límites y los reintentos. La tarea en curso termina antes. Para volver a editar, cambia el modo en el apartado 1.</p>
     <div class="tabla-scroll"><table><thead><tr><th>#</th><th>Cuenta</th><th>Clip</th><th>Estado</th><th>Detalle</th><th></th></tr></thead>
     <tbody id="subidas"></tbody></table></div>
   </section>
@@ -389,6 +391,7 @@ function pintar() {
     <td class="muted">${s.id}</td><td>${plat(s.plataforma)} ${esc(s.cuenta_nombre || '¿borrada?')}</td>
     <td title="${esc(s.texto)}"><a href="/api/bot/clip/${s.id}" target="_blank" rel="noopener">${base(s.archivo)}</a></td><td>${est(s.estado)}</td>
     <td>${s.url_publicada ? `<a href="${esc(s.url_publicada)}" target="_blank">ver</a>` : ''}
+      ${s.espera ? `<div class="muted">${esc(s.espera)}</div>` : ''}
       ${s.error ? `<div class="err">${esc(s.error)} ${s.captura ? `· <a href="/api/bot/captura/${s.id}" target="_blank">captura</a>` : ''}</div>` : ''}
       ${s.estado === 'pendiente' && s.intentos ? `<span class="muted">intento ${s.intentos}</span>` : ''}</td>
     <td class="acc">${s.estado === 'revisar' ? `<button class="mini" onclick="accion('subidas',${s.id},'ok')" title="Sí se publicó"><i class="ph ph-check"></i></button>` : ''}${!['ok','subiendo','cancelando'].includes(s.estado) ? `<button class="mini" onclick="accion('subidas',${s.id},'reintentar')" title="Reintentar ya"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
@@ -802,6 +805,24 @@ async function guardarPresetBot() {
     seleccionarPreset(); await cargar();
     toast('Edición e inicio guardados. Se conservan al reiniciar y se usan en nuevos videos con este preset.');
   } catch (e) { $('preset-estado').textContent = e.message; toast(e.message, true); }
+}
+async function lanzarSubidasGuardadas() {
+  const button = $('lanzar-subidas');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const result = await api('/api/bot/subidas/lanzar', {});
+    $('modo_cola').value = 'solo_subir';
+    $('activo').checked = true;
+    $('lanzar-subidas-estado').textContent = result.mensaje || 'Subidas activadas.';
+    await cargar();
+    toast('Publicación activada para los clips guardados.');
+  } catch(e) {
+    $('lanzar-subidas-estado').textContent = e.message;
+    toast(e.message, true);
+  } finally {
+    button.disabled = false;
+  }
 }
 async function guardarModo() {
   try { await api('/api/bot/config',{modo_cola:$('modo_cola').value}); await cargar(); toast('Modo guardado. Se aplica al terminar la tarea en curso.'); }
