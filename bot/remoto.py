@@ -67,6 +67,12 @@ class Cliente:
         return data
 
     def iniciar(self, url_video, preset):
+        from editor_controls import CAPACIDAD, inicio_segundos
+        if inicio_segundos(preset.get('skip_intro_seconds', 0)) > 0:
+            capacidades = self.probar().get('capabilities')
+            if not isinstance(capacidades, list) or CAPACIDAD not in capacidades:
+                raise FalloTrabajo('Actualiza My Content en Colab y reinicia las celdas 6 y 6C. '
+                                  'Ese servidor aún no permite elegir el inicio; no se editará desde cero.')
         r = self._pedir("POST", "/api/bot/remoto/cortar", json={"source": url_video, "preset": preset})
         if r.status_code == 409:
             raise ServidorOcupado()

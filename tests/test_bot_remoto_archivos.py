@@ -21,6 +21,25 @@ class ConexionCloudflareTests(unittest.TestCase):
         self.assertEqual(self.cliente.s.auth, ('colab', 'clave-de-prueba'))
         self.assertNotIn('ngrok-skip-browser-warning', self.cliente.s.headers)
 
+    def test_inicio_en_servidor_viejo_no_envia_corte(self):
+        for capacidades in [None, [], 'editor_inicio_v1']:
+            with patch.object(self.cliente, 'probar', return_value={'ok': True, 'capabilities': capacidades}), \
+                 patch.object(self.cliente, '_pedir') as pedir:
+                with self.assertRaisesRegex(remoto.FalloTrabajo, '6 y 6C'):
+                    self.cliente.iniciar('https://example.test/video', {'skip_intro_seconds': 150})
+                pedir.assert_not_called()
+
+    def test_inicio_con_soporte_y_cero_sin_soporte(self):
+        from editor_controls import CAPACIDAD
+        response = Mock(status_code=200)
+        response.json.return_value = {'success': True, 'id': 'job'}
+        with patch.object(self.cliente, 'probar', return_value={'ok': True, 'capabilities': [CAPACIDAD]}) as probar, \
+             patch.object(self.cliente, '_pedir', return_value=response) as pedir:
+            for inicio in [150, 0]:
+                self.assertEqual(self.cliente.iniciar('https://example.test/video', {'skip_intro_seconds': inicio}), 'job')
+                self.assertEqual(pedir.call_args.kwargs['json']['preset']['skip_intro_seconds'], inicio)
+            probar.assert_called_once()
+
     def test_404_al_probar_indica_que_url_copiar(self):
         with patch.object(self.cliente.s, 'request', return_value=Mock(status_code=404)):
             with self.assertRaisesRegex(remoto.ServidorCaido, '6 y 6C'):

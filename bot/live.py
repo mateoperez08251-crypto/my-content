@@ -287,7 +287,7 @@ class LiveManager:
                       dubbing_language='original')
         if preset:
             config.update(self.motor.cargar_preset(preset) or {})
-        for key in ('source','start_time','end_time','cast_id','voice_cast','custom_output_dir',
+        for key in ('source','start_time','end_time','skip_intro_seconds','cast_id','voice_cast','custom_output_dir',
                     'subir_tiktok','subir_youtube','subir_facebook'):
             config.pop(key, None)
         config.update(clip_selection=mode, clip_duration=seconds, num_clips=1)

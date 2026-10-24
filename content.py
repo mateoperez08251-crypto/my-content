@@ -1599,6 +1599,8 @@ def run_smart_split_thread(data):
     """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     _escribir_progreso_smart("Iniciando descargas...|0")
     try:
+        from editor_controls import inicio_segundos
+        inicio_edicion = inicio_segundos(data.get('skip_intro_seconds', 0))
         from smart_selection import needs_groq
         if needs_groq(data) and not get_secret("groq", "api_key", env="GROQ_API_KEY"):
             raise RuntimeError("Falta la clave de Groq para las opciones elegidas. Pulsa '🔑 Configurar clave "
@@ -1641,6 +1643,7 @@ def run_smart_split_thread(data):
             "num_clips": data.get('num_clips', 1),
             "start_time": data.get('start_time', ''),
             "end_time": data.get('end_time', ''),
+            "skip_intro_seconds": inicio_edicion,
             "subtitle_scale": float(data.get('subtitle_scale', 100)),
             "subtitle_style": data.get('style', 'style5'),
             "anti_copyright_filter": data.get('anti_copyright_filter', False),
@@ -1722,6 +1725,15 @@ def run_smart_split_thread(data):
         resultado = {"rutas": [], "meta": []}
 
         def leer_smart(lin):
+            if lin.startswith("RESULT_ERROR:"):
+                try:
+                    fallo = json.loads(lin.split("RESULT_ERROR:", 1)[1])
+                    if isinstance(fallo, dict) and fallo.get('code') == 'inicio_fuera_video':
+                        from editor_controls import ERROR_INTERVALO
+                        resultado['error'] = ERROR_INTERVALO
+                except ValueError:
+                    pass
+                return True
             if lin.startswith("RESULT_META:"):
                 try:
                     resultado["meta"] = json.loads(lin.split("RESULT_META:", 1)[1])
@@ -1743,7 +1755,7 @@ def run_smart_split_thread(data):
             raise Exception("Cancelado.")
         result_paths = resultado["rutas"]
         if codigo != 0 or not result_paths:
-            raise Exception("No se pudo generar el video Smart Split (revisa el log de arriba)")
+            raise Exception(resultado.get('error') or "No se pudo generar el video Smart Split (revisa el log de arriba)")
 
         log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips.")
         show_notification("Smart Split Completado", f"Se han generado {len(result_paths)} clips con éxito.")
@@ -1866,6 +1878,8 @@ def save_smart_preset():
             tmp = _presets_path() + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(presets, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, _presets_path())
         return jsonify({"success": True})
     except OSError as e:
@@ -2149,6 +2163,11 @@ def bot_estado():
 def bot_config():
     data = request.get_json(silent=True) or {}
     return _bot_respuesta(lambda: _bot().guardar_cfg(data))
+
+
+@app.route('/api/bot/subidas/lanzar', methods=['POST'])
+def bot_lanzar_subidas():
+    return _bot_respuesta(lambda: _bot().lanzar_subidas_guardadas())
 
 
 @app.route('/api/bot/clip/<int:sid>')
@@ -2461,8 +2480,10 @@ def get_logs():
 
 @app.route("/api/health", methods=["GET"])
 def health():
+    from editor_controls import CAPACIDAD
     mem = winproc.estado_memoria()
     return jsonify({"ok": True, "status": automation_status,
+                    "capabilities": [CAPACIDAD],
                     "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
 
 

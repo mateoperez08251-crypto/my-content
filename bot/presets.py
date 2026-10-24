@@ -1,6 +1,7 @@
 """Ajustes de Smart Split para el bot, sin cargar modelos."""
 import copy
 import math
+from editor_controls import inicio_segundos
 
 NOMBRE_CALIDAD = 'bot_calidad'
 CALIDAD = {
@@ -11,6 +12,7 @@ CALIDAD = {
     'export_profile': 'quality', 'download_quality': 'best', 'upscale': 'off',
     'dubbing_language': 'original', 'original_volume': 1, 'normalize_audio': True,
     'emojis': False, 'efectos': False, 'anti_copyright_filter': False,
+    'skip_intro_seconds': 0,
 }
 
 
@@ -27,6 +29,7 @@ def snapshot(opciones):
     if not isinstance(opciones, dict):
         raise ValueError('Los ajustes de Smart Split deben ser un objeto.')
     result = copy.deepcopy(opciones)
+    result['skip_intro_seconds'] = inicio_segundos(result.get('skip_intro_seconds', 0))
     for key in ('source', 'custom_output_dir', 'output_path', 'start_time', 'end_time',
                 'cast_id', 'voice_cast', 'python_motor', 'script_local',
                 'subir_tiktok', 'subir_youtube', 'subir_facebook', '_lanzar_error'):

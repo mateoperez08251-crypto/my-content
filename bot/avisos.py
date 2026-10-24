@@ -39,6 +39,8 @@ def motivo_fallo(error):
     texto = re.sub(r'https?://\S+', '', str(error).lower())
     texto = re.sub(r'(?:apikey|api_key|token|password|authorization)\s*[:=]\s*\S+', '', texto)
     motivos = (
+        (('el inicio elegido queda fuera',), 'El video termina antes del inicio elegido o ese tiempo pasa del final. Cambia el inicio del preset y vuelve a añadir el video; no lo edité desde cero.'),
+        (('ese servidor aún no permite elegir el inicio',), 'Colab necesita la versión nueva para saltar el inicio. Actualiza My Content allí y reinicia las celdas 6 y 6C.'),
         (('no coincide con el de la cola',), 'La descripción quedó distinta a la de la cola. No pulsé Publicar; revisa el texto.'),
         (('descripción supera el límite',), 'La descripción es demasiado larga. Acórtala antes de reintentar.'),
         (('no space left', 'errno 28', 'poco disco', 'límite de búfer'), 'Falta espacio o se llenó el búfer. Libera espacio antes de seguir.'),

@@ -32,6 +32,7 @@ Source: "radar_config.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "modulo_ia.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "editor.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "smart_editor.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "editor_controls.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "api_subidor.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "api_clonador_flask.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "audio_extractor.py"; DestDir: "{app}"; Flags: ignoreversion

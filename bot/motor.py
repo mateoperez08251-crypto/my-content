@@ -288,7 +288,9 @@ class Motor:
             partes = f"hasta {breve(opciones.get('num_clips', 1))} momentos con IA"
         subs = ('subtítulos según el preset' if 'show_subtitles' not in opciones else
                 'con subtítulos' if opciones['show_subtitles'] else 'sin subtítulos')
-        return f'Voy a editar en {lugar}: {partes}, {subs}. Es lo configurado; aún no hay clips nuevos guardados.'
+        inicio = opciones.get('skip_intro_seconds', 0)
+        extra = f' Empiezo desde {duracion(float(inicio))} del video original.' if inicio else ''
+        return f'Voy a editar en {lugar}: {partes}, {subs}.{extra} Es lo configurado; aún no hay clips nuevos guardados.'
 
     def _detalle_fallo(self, error, intentos, reintento=0):
         detalle = f'Intento {intentos}/{self.cfg["max_intentos"]}. {motivo_fallo(error)}'
@@ -757,6 +759,49 @@ class Motor:
     def perfil(self, cuenta) -> str:
         return os.path.join(self.almacenamiento, "bot_perfiles", f"cuenta_{int(cuenta['id'])}")
 
+    def lanzar_subidas_guardadas(self):
+        """Cambiar a publicación desde el panel; el mismo hilo conserva pausas y exclusión."""
+        pendientes = [s for s in self.db.subidas_pendientes() if os.path.isfile(s['archivo'])]
+        if not pendientes:
+            raise ValueError('No hay clips guardados pendientes en Subidas. Añade archivos o revisa los errores de la cola.')
+        self.guardar_cfg({'modo_cola': 'solo_subir', 'activo': True})
+        return {'pendientes': len(pendientes), 'mensaje': self._motivo_espera()}
+
+    def _motivo_subida(self, s, cuenta=None, ahora=None):
+        """Motivo visible para una publicación pendiente, sin cambiar sus tiempos."""
+        ahora = time.time() if ahora is None else ahora
+        if not self.cfg['activo']:
+            return 'Bot en pausa. Pulsa Lanzar subidas guardadas para activarlo.'
+        if self.cfg['modo_cola'] == 'solo_preparar':
+            return 'Solo editar y guardar. Pulsa Lanzar subidas guardadas para publicar.'
+        if self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True):
+            return 'Esperando a terminar toda la edición. Lanzar subidas guardadas permite publicar lo que ya está listo.'
+        c = cuenta or self.db.cuenta(s['cuenta_id'])
+        if not c:
+            return 'La cuenta ya no existe.'
+        if not c['activa']:
+            return 'Cuenta pausada.'
+        if c['estado'] != 'ok':
+            return 'Falta comprobar la sesión.' if c['estado'] == 'sin_comprobar' else 'Falta iniciar sesión en la cuenta.'
+        if not os.path.isfile(s['archivo']):
+            return 'El archivo del clip no está en esta PC.'
+        if c.get('abierta', False) or navegador.ocupado(self.perfil(c)):
+            return 'Cierra la ventana de sesión de esta cuenta.'
+        if not _en_horario(self.cfg['hora_inicio'], self.cfg['hora_fin']):
+            return f"Fuera de horario ({self.cfg['hora_inicio']}–{self.cfg['hora_fin']}, hora de esta PC)."
+        if self.db.subidas_ok_hoy(c['id']) >= c['limite_dia']:
+            return 'La cuenta alcanzó su límite diario. Espera al siguiente día con horario.'
+        limite = max(s.get('proximo_intento', 0), self._libre_global, c['proxima_libre'])
+        if limite > ahora:
+            if limite == s.get('proximo_intento', 0):
+                motivo = 'Reintento del clip'
+            elif limite == c['proxima_libre']:
+                motivo = 'Pausa de esta cuenta tras una publicación anterior o sin confirmar'
+            else:
+                motivo = 'Pausa general entre subidas o tras un fallo'
+            return f'{motivo}: hasta {hora(limite)} (hora de esta PC).'
+        return 'Listo para subir en el siguiente turno del bot.'
+
     def _siguiente_subida(self):
         ahora = time.time()
         if ahora < self._libre_global:
@@ -774,14 +819,17 @@ class Motor:
         return None
 
     def _motivo_espera(self):
-        pendientes = self.db.subidas_listas()
+        pendientes = self.db.subidas_pendientes()
         if not pendientes:
-            return "En espera: nada en la cola"
-        if not _en_horario(self.cfg["hora_inicio"], self.cfg["hora_fin"]):
-            return f"Fuera de horario ({self.cfg['hora_inicio']}–{self.cfg['hora_fin']})"
-        if time.time() < self._libre_global:
-            return f"Descanso entre subidas hasta {datetime.fromtimestamp(self._libre_global):%H:%M}"
-        return f"{len(pendientes)} subida(s) esperando su turno (límite diario o tiempo entre subidas)"
+            return 'En espera: no hay subidas pendientes.'
+        motivos = []
+        for subida in pendientes:
+            motivo = self._motivo_subida(subida)
+            if motivo.startswith('Listo para subir'):
+                return motivo
+            if motivo not in motivos:
+                motivos.append(motivo)
+        return ' · '.join(motivos[:3])
 
     def _procesar_subida(self, s):
         # La selección y el clic en Borrar pueden cruzarse: releer bajo el mismo bloqueo.
@@ -1108,6 +1156,12 @@ class Motor:
         plan['clips_en_pc'] = sum(os.path.isfile(r['archivo']) for r in guardados)
         plan['clips_ausentes'] = len(guardados) - plan['clips_en_pc']
         plan['carpeta_clips'] = os.path.join(self.carpeta, 'bot_clips')
+        recientes = self.db.subidas_recientes()
+        por_cuenta = {c['id']: c for c in cuentas}
+        ahora = time.time()
+        for subida in recientes:
+            if subida['estado'] == 'pendiente':
+                subida['espera'] = self._motivo_subida(subida, por_cuenta.get(subida['cuenta_id']), ahora)
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
             "remoto": self._remoto_estado,
@@ -1119,7 +1173,7 @@ class Motor:
             "cuentas": cuentas,
             "reglas": self.db.reglas(),
             "trabajos": self.db.trabajos_recientes(),
-            "subidas": self.db.subidas_recientes(),
+            "subidas": recientes,
             "resumen": self.db.resumen(),
             "registro": list(self.registro)[-80:],
         }

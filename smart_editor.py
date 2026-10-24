@@ -206,7 +206,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
                         speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced",
-                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai"):
+                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai", skip_intro_seconds=0):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -226,32 +226,30 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     print("Iniciando Smart Split · cortes consecutivos sin selección IA" if clip_selection == "sequential"
           else f"Iniciando Smart Split · motor: {motor['nombre']}")
 
-    s_time = parse_time(start_time)
-    e_time = parse_time(end_time)
-
-    # Cortes consecutivos no necesitan analizar el audio salvo subtítulos o doblaje.
-    words, segmentos = [], []
-    needs_transcription = clip_selection == 'ai' or show_subtitles or dubbing_language != 'original'
-    if needs_transcription:
-        local = transcripcion == "local"
-        write_progress("Transcribiendo el audio en tu GPU (Whisper local)..." if local
-                       else "Transcribiendo el audio con IA (Groq)...", 8)
-        words, segmentos = cv.transcribir(
-            video_path, s_time, e_time, modelo=motor["whisper"], idioma=None,
-            progreso=lambda n, total: write_progress(
-                "Transcribiendo en tu GPU (Whisper local)..." if local else f"Transcribiendo audio ({n + 1}/{total})...",
-                8 + int(12 * n / max(total, 1))),
-            proveedor=transcripcion, python_local=python_motor, script_local=script_local, modelo_local=whisper_local)
-        print("Transcripción completada. Total palabras:", len(words))
-
-    clip = VideoFileClip(video_path)
+    from editor_controls import intervalo
+    original = VideoFileClip(video_path)
+    clip = original
     speaker_resources = ExitStack()
     try:
-        base = 0.0
-        if s_time is not None or e_time is not None:
-            base = s_time or 0.0
-            fin_video = min(e_time if e_time is not None else clip.duration, clip.duration)
-            clip = clip.subclipped(base, fin_video)
+        # Validar la duración real antes de transcribir; los tiempos son relativos al tramo.
+        s_time, e_time = intervalo(original.duration, start_time, end_time, skip_intro_seconds)
+        base = s_time
+        words, segmentos = [], []
+        needs_transcription = clip_selection == 'ai' or show_subtitles or dubbing_language != 'original'
+        if needs_transcription:
+            local = transcripcion == "local"
+            write_progress("Transcribiendo el audio en tu GPU (Whisper local)..." if local
+                           else "Transcribiendo el audio con IA (Groq)...", 8)
+            words, segmentos = cv.transcribir(
+                video_path, s_time, e_time, modelo=motor["whisper"], idioma=None,
+                progreso=lambda n, total: write_progress(
+                    "Transcribiendo en tu GPU (Whisper local)..." if local else f"Transcribiendo audio ({n + 1}/{total})...",
+                    8 + int(12 * n / max(total, 1))),
+                proveedor=transcripcion, python_local=python_motor, script_local=script_local, modelo_local=whisper_local)
+            print("Transcripción completada. Total palabras:", len(words))
+
+        if s_time > 0 or e_time < original.duration:
+            clip = original.subclipped(s_time, e_time)
         total_duration = clip.duration
 
         # 2. Momentos con IA o partes consecutivas de duración fija.
@@ -432,8 +430,10 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         print("¡Proceso finalizado!")
         return generated_files
     finally:
-        speaker_resources.close()
-        clip.close()
+        try:
+            speaker_resources.close()
+        finally:
+            original.close()
 
 
 def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
@@ -561,6 +561,7 @@ def _limpiar_audio(video):
 
 def main(argv):
     """Modo subproceso: smart_editor.py --config <json>. Imprime RESULT_PATHS y RESULT_META."""
+    from editor_controls import InicioFueraDeVideo
     if len(argv) >= 2 and argv[0] == "--config":
         with open(argv[1], "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -583,7 +584,11 @@ def main(argv):
                 cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False), cfg.get("export_profile", "balanced"),
                 cfg.get("preserve_background", False), cfg.get("upscale", "off"),
                 cfg.get("video_format", "vertical"), cfg.get("background_volume", 0.75),
-                cfg.get("clip_selection", "ai"))
+                cfg.get("clip_selection", "ai"), skip_intro_seconds=cfg.get("skip_intro_seconds", 0))
+        except InicioFueraDeVideo as e:
+            print('RESULT_ERROR:' + json.dumps({'code': 'inicio_fuera_video'}))
+            write_progress(f"Error: {e}", -1)
+            return 1
         except Exception as e:
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)
