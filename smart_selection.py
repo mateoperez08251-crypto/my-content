@@ -2,6 +2,13 @@
 import math
 
 
+class NoNewClips(ValueError):
+    pass
+
+
+ERROR_NUEVOS = "No quedan fragmentos nuevos con la duración elegida para estas cuentas."
+
+
 def available_ranges(total, excluded, base=0):
     """Tramos libres relativos a la edición; historial en segundos del original."""
     cursor = 0.0

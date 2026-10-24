@@ -60,6 +60,16 @@ class LocalFilesTests(unittest.TestCase):
         self.assertEqual(nuevo.db.trabajo(result['id'])['estado'], 'listo')
         self.assertEqual(nuevo.estado()['plan']['clips_en_pc'], 1)
 
+    def test_same_file_with_new_name_and_key_is_not_queued_twice(self):
+        first = self.upload()
+        again = self.upload(nombre='Otro nombre.mp4', clave=str(uuid.uuid4()))
+        self.assertEqual(again['id'], first['id'])
+        self.assertTrue(again['repetido'])
+        self.assertEqual(len(self.m.db.subidas_pendientes()), 1)
+        mixed = self.upload(clave=str(uuid.uuid4()), cuentas=[self.tt, self.tt2])
+        self.assertEqual(mixed['publicaciones'], 1)
+        self.assertEqual(self.m.db.trabajo(mixed['id'])['cuentas'], [self.tt2])
+
     def test_retries_after_lost_response_do_not_copy_or_enqueue_again(self):
         first = self.upload()
         before = self.files()

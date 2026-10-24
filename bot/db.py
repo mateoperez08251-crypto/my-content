@@ -272,6 +272,8 @@ class DB:
                 else:
                     nuevos.append(cid)
             if not nuevos:
+                if self.trabajo(anterior_archivo) is None:
+                    raise ValueError('Este archivo ya se reservó para estas cuentas. No se volverá a subir.')
                 return anterior_archivo, False
             cuentas = nuevos
             cur = self._con.execute(

@@ -1730,6 +1730,8 @@ def run_smart_split_thread(data):
             if lin.startswith("RESULT_ERROR:"):
                 try:
                     fallo = json.loads(lin.split("RESULT_ERROR:", 1)[1])
+                    if isinstance(fallo, dict) and fallo.get('code') == 'clips_agotados':
+                        resultado['error'] = fallo['message']
                     if isinstance(fallo, dict) and fallo.get('code') == 'inicio_fuera_video':
                         from editor_controls import ERROR_INTERVALO
                         resultado['error'] = ERROR_INTERVALO

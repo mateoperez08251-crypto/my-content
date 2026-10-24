@@ -617,7 +617,7 @@ class Motor:
             if liberar_al_fallar:
                 self.liberar()
             intentos = t["intentos"] + 1
-            if intentos >= self.cfg["max_intentos"]:
+            if intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
                 self._aviso_trabajo(t, f'error:{intentos}', 'No pude prepararlo en la PC. ' + self._detalle_fallo(e, intentos), 'errores', True)
             else:
@@ -713,7 +713,6 @@ class Motor:
         self._actividad(f"Cortando en el servidor remoto: {nombre}")
         self._aviso_trabajo(t, f"remoto:{t['intentos']}", self._detalle_preparacion(t, 'el servidor de cortes (Colab)'))
         datos = json.loads(t.get('opciones') or '{}') or dict(self.cargar_preset(t['preset']) or {})
-        datos.update(bot_unique=True, excluded_ranges=self.db.intervalos_usados(t['url'], t['cuentas'], t['id']))
         carpeta = self.carpeta_clips(t)
         jid = t.get('remoto_id') if t.get('remoto_url') == self.cfg['remoto_url'] else None
 
@@ -722,6 +721,7 @@ class Motor:
             self._remoto_estado = "Trabajando ✅"
 
         try:
+            datos.update(bot_unique=True, excluded_ranges=self.db.intervalos_usados(t['url'], t['cuentas'], t['id']))
             if not jid:
                 jid = cli.iniciar(t['url'], datos)
                 self.db.marcar_trabajo(t['id'], 'cortando', remoto_id=jid, remoto_url=self.cfg['remoto_url'])
@@ -729,7 +729,7 @@ class Motor:
         except (remoto.FalloTrabajo, OSError, ValueError) as e:
             intentos = t["intentos"] + 1
             extra = {'remoto_id':'', 'remoto_url':''} if isinstance(e, remoto.FalloCorte) else {}
-            if intentos >= self.cfg["max_intentos"]:
+            if intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos, **extra)
                 self._aviso_trabajo(t, f'error:{intentos}', 'No pude terminar con el servidor de cortes. ' + self._detalle_fallo(e, intentos), 'errores', True)
             else:

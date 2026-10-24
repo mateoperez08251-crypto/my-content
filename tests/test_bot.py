@@ -164,7 +164,7 @@ class Cola(unittest.TestCase):
 
     def _split(self, datos):
         self.datos_split = datos
-        return list(self.clips), [{"archivo": self.clips[0], "publicacion": "Clip IA #a"}]
+        return list(self.clips), [{"archivo": self.clips[0], "publicacion": "Clip IA #a", "inicio": 0, "fin": 60}, {"archivo": self.clips[1], "inicio": 60, "fin": 120}]
 
     def _vaciar(self, vueltas=20):
         for _ in range(vueltas):
@@ -203,9 +203,9 @@ class Cola(unittest.TestCase):
     def test_publica_titulo_de_cada_momento_y_no_el_del_video_original(self):
         self.m.smart_split = lambda datos: (self.clips, [
             {"archivo": self.clips[0], "titulo": "NO_PODÍA_CREERLO 😱",
-             "descripcion": "Así reaccionó.", "hashtags": ["#mi_video"]},
+             "inicio": 0, "fin": 60, "descripcion": "Así reaccionó.", "hashtags": ["#mi_video"]},
             {"archivo": self.clips[1], "titulo": "EL_GIRO_FINAL",
-             "publicacion": "Nadie lo esperaba. #final"}])
+             "inicio": 60, "fin": 120, "publicacion": "Nadie lo esperaba. #final"}])
         self.m.encolar("https://youtu.be/x", cuentas=[self.tk], cortar=True,
                        titulo="nombre_del_video_original", texto_fijo="@mi_cuenta")
         self._vaciar()
@@ -419,7 +419,7 @@ class ServidorDeCortes(unittest.TestCase):
                     pathlib.Path(p).write_bytes(b"clip%d" % i)
                     rutas.append(p)
                 cls.datos_remotos = datos
-                return rutas, [{"archivo": rutas[0], "publicacion": "Desde Colab #gpu"}]
+                return rutas, [{"archivo": rutas[0], "publicacion": "Desde Colab #gpu", "inicio": 0, "fin": 60}, {"archivo": rutas[1], "inicio": 60, "fin": 120}]
             finally:
                 _content._terminar_trabajo()
 
@@ -440,7 +440,7 @@ class ServidorDeCortes(unittest.TestCase):
     def _motor(self, url):
         d = tempfile.mkdtemp(dir=self.tmp.name)
         m = Motor(d, smart_split=lambda datos: self.fail("no debía cortar en local") if url.endswith(
-            str(self.puerto)) else ([self.local], []), ocupar=lambda: True, log=lambda x: None,
+            str(self.puerto)) else ([self.local], [{"archivo":self.local,"inicio":0,"fin":60}]), ocupar=lambda: True, log=lambda x: None,
             cargar_preset=lambda n: {"num_clips": 2})
         m.guardar_cfg({"remoto_url": url, "remoto_clave": "x", "velocidad": 0})
         cid = m.db.crear_cuenta("A", "tiktok")

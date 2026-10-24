@@ -219,7 +219,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     validate_edit_options(dubbing_language, speaker_dubbing, filter_strength, denoise_audio)
     from smart_dubbing import validate_layout
     validate_layout(video_format, preserve_background, background_volume)
-    from smart_selection import validate_selection, sequential_parts
+    from smart_selection import validate_selection, sequential_parts, available_ranges, NoNewClips, ERROR_NUEVOS
     validate_selection(clip_selection, clip_duration)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
     write_progress("Iniciando Smart Split...", 3)
@@ -234,6 +234,10 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         # Validar la duración real antes de transcribir; los tiempos son relativos al tramo.
         s_time, e_time = intervalo(original.duration, start_time, end_time, skip_intro_seconds)
         base = s_time
+        if bot_unique:
+            free = available_ranges(e_time - s_time, excluded_ranges or [], base)
+            if not free or (clip_selection == 'ai' and all(b - a < float(clip_duration) for a, b in free)):
+                raise NoNewClips(ERROR_NUEVOS)
         words, segmentos = [], []
         needs_transcription = clip_selection == 'ai' or show_subtitles or dubbing_language != 'original'
         if needs_transcription:
@@ -286,7 +290,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         break
                 seleccion = sorted(candidates, key=lambda c: c['puntuacion'], reverse=True)[:int(num_clips)]
             if not seleccion:
-                raise ValueError('No quedan fragmentos nuevos con la duración elegida para estas cuentas.')
+                raise NoNewClips(ERROR_NUEVOS)
         for c in seleccion:
             print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['titulo']}")
 
@@ -617,6 +621,9 @@ def main(argv):
             write_progress(f"Error: {e}", -1)
             return 1
         except Exception as e:
+            from smart_selection import NoNewClips
+            if isinstance(e, NoNewClips):
+                print('RESULT_ERROR:' + json.dumps({'code': 'clips_agotados', 'message': str(e)}))
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)
             return 1
