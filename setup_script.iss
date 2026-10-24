@@ -28,6 +28,7 @@ Source: "firebase_radar\*"; DestDir: "{app}\firebase_radar"; Excludes: "function
 Source: "content.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "desktop_tray.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "windows_icon.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "radar_config.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "modulo_ia.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "editor.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "smart_editor.py"; DestDir: "{app}"; Flags: ignoreversion

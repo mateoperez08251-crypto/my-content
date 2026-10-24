@@ -15,6 +15,7 @@ import os
 import re
 import smtplib
 import ssl
+import sys
 import threading
 import time
 import urllib.parse
@@ -22,6 +23,9 @@ from email.mime.text import MIMEText
 from datetime import datetime, timezone
 
 import requests
+if __package__ in (None, ''):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import radar_config
 
 try:
     import paths  # type: ignore
@@ -60,20 +64,17 @@ def _save_state(state: dict):
 
 
 def _config() -> dict:
-    """Lee la config desde Firebase si está, si no desde el archivo local."""
+    """Usa la misma copia persistente que muestra el panel, sin importar otra app."""
+    local = paths.data_path('radar_config.json') if paths else 'radar_config.json'
+    app = sys.modules.get('content') or sys.modules.get('__main__')
+    firebase = getattr(app, 'firebase_db', None)
+    def remoto():
+        doc = firebase.collection('config').document('radar').get()
+        return doc.to_dict() if doc.exists else None
     try:
-        import content  # type: ignore
-        if getattr(content, "firebase_db", None):
-            doc = content.firebase_db.collection("config").document("radar").get()
-            if getattr(doc, "exists", False):
-                return doc.to_dict() or {}
-    except Exception:
-        pass
-    local = paths.data_path("radar_config.json") if paths else "radar_config.json"
-    try:
-        with open(local, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
+        return radar_config.cargar(local, remoto if firebase else None)[0]
+    except radar_config.ErrorConfig as exc:
+        _log(str(exc))
         return {}
 
 

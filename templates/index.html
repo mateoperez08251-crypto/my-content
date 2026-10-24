@@ -2283,13 +2283,15 @@
 
             <div style="flex: 1; overflow-y: auto; padding-right: 15px;">
                 <form id="radarForm">
+                    <fieldset id="radar-fields" style="border:0;padding:0;margin:0;min-width:0" disabled>
                     <div class="form-group">
                         <label style="display:flex;align-items:center;">Canales / Cuentas a Monitorear <div
                                 class="custom-tooltip"><i class="ph-duotone ph-info"></i><span class="tooltip-text">Pon
                                     el nombre de usuario o la URL del canal de YouTube, TikTok, etc.</span></div>
                             </label>
-                        <input type="text" id="radar_channels" class="form-control"
-                            placeholder="Ej: @MrBeast, youtube.com/c/canal" value="">
+                        <textarea id="radar_channels" class="form-control" rows="2"
+                            placeholder="Ej: @canal1, @canal2"></textarea>
+                        <small style="color:var(--text-muted)">Esta es la lista completa. Separa los canales por comas o líneas. Pulsa Guardar y Activar para conservar los cambios al cerrar la app.</small>
                     </div>
 
                     <div class="form-group" style="margin-top: 15px;">
@@ -2358,13 +2360,14 @@
                             <input type="password" id="radar_whatsapp_apikey" class="form-control" placeholder="1234567" value="">
                         </div>
                     </div>
+                    </fieldset>
                 </form>
             </div>
 
             <div
                 style="display: flex; justify-content: flex-end; gap: 15px; margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">
                 <button class="btn" style="background: transparent;" onclick="closeRadarModal()">Cancelar</button>
-                <button class="btn btn-primary" onclick="saveRadarConfig()"><i class="ph-bold ph-floppy-disk"></i>
+                <button id="radar-save" class="btn btn-primary" onclick="saveRadarConfig()" disabled><i class="ph-bold ph-floppy-disk"></i>
                     Guardar y Activar</button>
             </div>
         </div>
@@ -4187,111 +4190,7 @@
             }
         }
 
-        async function openRadarModal() {
-            document.getElementById('radarModal').style.display = 'flex';
-
-            // Intentar cargar desde la nube
-            try {
-                const res = await fetch('/api/radar_config_get');
-                const result = await res.json();
-
-                const cloudStatus = document.getElementById('radar_cloud_status');
-                const cloudStatusText = document.getElementById('radar_cloud_status_text');
-
-                if (result.success && result.data) {
-                    const data = result.data;
-
-                    // Fill inputs
-                    if (data.radar_channels) document.getElementById('radar_channels').value = data.radar_channels;
-                    if (data.radar_email) document.getElementById('radar_email').value = data.radar_email;
-                    if (data.radar_password) document.getElementById('radar_password').value = data.radar_password;
-                    if (data.radar_interval) document.getElementById('radar_interval').value = data.radar_interval;
-                    if (data.radar_platform) document.getElementById('radar_platform').value = data.radar_platform;
-                    if (data.radar_whatsapp_phone) document.getElementById('radar_whatsapp_phone').value = data.radar_whatsapp_phone;
-                    if (data.radar_whatsapp_apikey) document.getElementById('radar_whatsapp_apikey').value = data.radar_whatsapp_apikey;
-
-                    // Fill checkboxes
-                    document.getElementById('radar_cloud').checked = (data.radar_cloud === 'on' || data.radar_cloud === true);
-                    document.getElementById('radar_email_notify').checked = (data.radar_email_notify === 'on' || data.radar_email_notify === true);
-                    document.getElementById('radar_whatsapp_notify').checked = (data.radar_whatsapp_notify === 'on' || data.radar_whatsapp_notify === true);
-                    document.getElementById('radar_auto_dl').checked = (data.radar_auto_dl === 'on' || data.radar_auto_dl === true);
-                    document.getElementById('radar_inbox').checked = (data.radar_inbox === 'on' || data.radar_inbox === true);
-
-                    if (data.radar_cloud === 'on' || data.radar_cloud === true) {
-                        cloudStatus.style.display = 'flex';
-                        cloudStatusText.textContent = "El radar está ACTIVO en la nube con esta configuración.";
-                        cloudStatus.style.borderColor = "rgba(86, 211, 100, 0.3)";
-                        cloudStatus.style.color = "#56d364";
-                        cloudStatus.style.background = "rgba(86, 211, 100, 0.1)";
-                    } else {
-                        cloudStatus.style.display = 'flex';
-                        cloudStatusText.textContent = "Configuración cargada de la nube (Radar INACTIVO).";
-                        cloudStatus.style.borderColor = "rgba(255, 171, 0, 0.3)";
-                        cloudStatus.style.color = "#ffab00";
-                        cloudStatus.style.background = "rgba(255, 171, 0, 0.1)";
-                    }
-                } else {
-                    cloudStatus.style.display = 'flex';
-                    cloudStatusText.textContent = "Aún no hay configuración guardada en la nube.";
-                    cloudStatus.style.borderColor = "rgba(255, 255, 255, 0.2)";
-                    cloudStatus.style.color = "var(--text-muted)";
-                    cloudStatus.style.background = "rgba(255, 255, 255, 0.05)";
-                }
-            } catch (err) {
-                console.error("Error al cargar radar_config_get", err);
-            }
-        }
-        function closeRadarModal() {
-            document.getElementById('radarModal').style.display = 'none';
-        }
-        async function saveRadarConfig() {
-            const formData = new FormData(document.getElementById('radarForm'));
-            // handle checkboxes manually
-            ['radar_cloud', 'radar_email_notify', 'radar_whatsapp_notify', 'radar_auto_dl', 'radar_inbox'].forEach(cb => {
-                const el = document.getElementById(cb);
-                if (el && el.checked) formData.append(cb, 'on');
-            });
-            const data = Object.fromEntries(formData.entries());
-
-            // Add inputs without name attributes manually
-            data.radar_email = document.getElementById('radar_email') ? document.getElementById('radar_email').value : '';
-            data.radar_password = document.getElementById('radar_password') ? document.getElementById('radar_password').value : '';
-            data.radar_interval = document.getElementById('radar_interval') ? document.getElementById('radar_interval').value : '';
-            data.radar_platform = document.getElementById('radar_platform') ? document.getElementById('radar_platform').value : '';
-            data.radar_whatsapp_phone = document.getElementById('radar_whatsapp_phone') ? document.getElementById('radar_whatsapp_phone').value : '';
-            data.radar_whatsapp_apikey = document.getElementById('radar_whatsapp_apikey') ? document.getElementById('radar_whatsapp_apikey').value : '';
-
-            let channels_str = document.getElementById('radar_channels') ? document.getElementById('radar_channels').value : '';
-            data.channels = channels_str.split(',').map(c => c.trim()).filter(c => c !== '');
-
-            // Show radar indicator in topnav if inbox/cloud is checked
-            if (data.radar_inbox === 'on' || data.radar_cloud === 'on') {
-                const ind = document.getElementById('radarStatusIndicator');
-                if (ind) ind.style.display = 'flex';
-            }
-
-            try {
-                const res = await fetch('/api/radar_config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                const result = await res.json();
-                if (result.success) {
-                    appendLog(result.message, "success");
-                    closeRadarModal();
-                    const btn = document.querySelector('button[onclick="openRadarModal()"]');
-                    if (btn) {
-                        btn.innerHTML = '<i class="ph-duotone ph-radar"></i> Radar Activo';
-                        btn.style.color = 'var(--accent-primary)';
-                    }
-                } else {
-                    alert("Error guardando radar: " + result.message);
-                }
-            } catch (e) {
-                alert("Error de conexión al guardar radar.");
-            }
-        }
+        // Configuración del Radar: static/js/radar.js
 
         // Funciones del Modal de Inbox
         let clonerStarted = false;
@@ -4329,25 +4228,7 @@
 
         window.onload = function () {
             loadFormFromLocalStorage('automationForm');
-            loadFormFromLocalStorage('radarForm');
-
-            // Re-apply specific checkboxes handling from localStorage because form.elements might miss some logic
-            const rs = localStorage.getItem('radarFormState');
-            if (rs) {
-                try {
-                    const savedState = JSON.parse(rs);
-                    if (savedState['radar_channels'] && savedState['radar_channels'].trim() !== '') {
-                        const ind = document.getElementById('radarStatusIndicator');
-                        if (ind) ind.style.display = 'flex';
-
-                        const btn = document.querySelector('button[onclick="openRadarModal()"]');
-                        if (btn) {
-                            btn.innerHTML = '<i class="ph-duotone ph-radar"></i> Radar Activo';
-                            btn.style.color = 'var(--accent-primary)';
-                        }
-                    }
-                } catch (e) { }
-            }
+            iniciarRadarConfig();
 
             if (window.ocultarSplash) window.ocultarSplash();
             if (typeof startLogsPolling === 'function') startLogsPolling();
@@ -4359,6 +4240,7 @@
                 try {
                     const data = JSON.parse(saved);
                     for (const key in data) {
+                        if (key.startsWith('radar_')) continue;
                         const el = document.getElementById(key);
                         if (el) {
                             if (el.type === 'checkbox') {
@@ -4385,15 +4267,6 @@
                 });
             }
 
-            // Guardar radarForm
-            const formRadar = document.getElementById('radarForm');
-            if (formRadar) {
-                new FormData(formRadar).forEach((value, key) => data[key] = value);
-                formRadar.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                    data[cb.id] = cb.checked;
-                });
-            }
-
             localStorage.setItem('content_app_settings', JSON.stringify(data));
         }
 
@@ -4403,6 +4276,7 @@
                 try {
                     const data = JSON.parse(saved);
                     for (const key in data) {
+                        if (key.startsWith('radar_')) continue;
                         const el = document.getElementById(key);
                         if (el) {
                             if (el.type === 'checkbox') {
@@ -5208,6 +5082,7 @@
             }).catch(err => alert("Error enviando actualización: " + err.message));
         }
     </script>
+    <script src="/static/js/radar.js"></script>
 </body>
 
 </html>

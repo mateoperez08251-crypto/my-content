@@ -54,6 +54,7 @@ import requests
 from flask import Flask, render_template, request, jsonify, send_from_directory
 
 import paths
+import radar_config
 import winproc
 from desktop_tray import Bandeja
 from app_secrets import get_secret
@@ -1886,42 +1887,40 @@ def delete_smart_preset(name):
 
 @app.route("/api/radar_config_get", methods=["GET"])
 def get_radar_config():
-    if firebase_db:
-        try:
-            doc = firebase_db.collection('config').document('radar').get()
-            if doc.exists:
-                return jsonify({'success': True, 'data': doc.to_dict()})
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)})
-    return jsonify({'success': False, 'message': 'No data'})
+    try:
+        data, fuente = _leer_radar_config()
+        return jsonify({'success': True, 'data': data, 'fuente': fuente})
+    except radar_config.ErrorConfig as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 500
 
 
 def _radar_config_local_path():
     return paths.data_path("radar_config.json")
 
 
+def _leer_radar_config():
+    def remoto():
+        doc = firebase_db.collection('config').document('radar').get()
+        return doc.to_dict() if doc.exists else None
+    return radar_config.cargar(_radar_config_local_path(), remoto if firebase_db else None)
+
+
 def _save_radar_locally(data):
-    """Guarda la config del radar en un archivo JSON local como fallback."""
-    try:
-        p = _radar_config_local_path()
-        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
-    except OSError as e:
-        print(f"Error guardando radar local: {e}")
-        return False
+    return radar_config.guardar(_radar_config_local_path(), data)
 
 
 @app.route("/api/radar_config", methods=["POST"])
 def save_radar_config():
     try:
         data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'success': False, 'message': 'No se recibieron datos'})
+        if not isinstance(data, dict) or not data:
+            return jsonify({'success': False, 'message': 'No se recibieron datos válidos'}), 400
 
-        # Siempre guardar localmente (fallback seguro)
-        _save_radar_locally(data)
+        # No anunciar éxito ni cambiar Firebase si falló la escritura local.
+        with radar_config.LOCK:
+            anterior, _ = _leer_radar_config()
+            data = radar_config.combinar(anterior, data)
+            _save_radar_locally(data)
 
         firebase_ok = False
         firebase_error = ""
@@ -1929,9 +1928,9 @@ def save_radar_config():
             try:
                 firebase_db.collection('config').document('radar').set(data)
                 firebase_ok = True
-            except Exception as fb_err:
-                firebase_error = str(fb_err)
-                print(f"Error guardando radar en Firebase: {fb_err}")
+            except Exception:
+                firebase_error = 'No se pudo sincronizar Firebase.'
+                print(firebase_error)
 
         def trigger_radar():
             try:
@@ -1942,20 +1941,16 @@ def save_radar_config():
         threading.Thread(target=trigger_radar, daemon=True).start()
 
         if firebase_ok:
-            return jsonify({'success': True, 'message': 'Radar guardado y activo en Firebase'})
-        elif firebase_db and "billing" in firebase_error.lower():
-            return jsonify({'success': True, 'message':
-                'Radar guardado localmente. ⚠️ Para activar el radar en LA NUBE '
-                '(Cloud Functions), habilita la facturación en tu proyecto de Google Cloud: '
-                'Consola de Google Cloud → Facturación → Habilitar plan Blaze. '
-                'El radar LOCAL funciona sin problemas.'})
+            mensaje = 'Radar guardado en esta PC y sincronizado con Firebase.'
         elif firebase_db and firebase_error:
-            return jsonify({'success': True, 'message':
-                f'Radar guardado localmente (Firebase falló: {firebase_error[:100]})'})
+            mensaje = 'Radar guardado en esta PC. No se pudo sincronizar con Firebase; el Radar local usará esta lista.'
         else:
-            return jsonify({'success': True, 'message': 'Radar guardado localmente (Firebase no conectado)'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+            mensaje = 'Radar guardado en esta PC (Firebase no conectado).'
+        return jsonify({'success': True, 'message': mensaje, 'data': data, 'fuente': 'local', 'firebase_ok': firebase_ok})
+    except radar_config.ErrorConfig as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except Exception:
+        return jsonify({'success': False, 'message': 'No se pudo completar el guardado del Radar. Reabre su configuración para comprobar la lista.'}), 500
 
 
 def _inbox_push(item: dict):
