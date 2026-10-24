@@ -1655,7 +1655,7 @@ def run_smart_split_thread(data):
             "background_volume": data.get('background_volume', 0.75),
             "video_format": data.get('video_format', 'vertical'),
             "upscale": str(data.get('upscale', 'off')),
-            "export_profile": data.get("export_profile", "balanced"),
+            "export_profile": data.get("export_profile", "quality"),
             "filter_strength": data.get('filter_strength', 1.0),
             "denoise_audio": data.get('denoise_audio', False),
             "dubbing_language": data.get('dubbing_language', 'original'),
@@ -1680,6 +1680,14 @@ def run_smart_split_thread(data):
             "efectos": bool(data.get('efectos', True)),
             "vol_musica": float(data.get('vol_musica', 0.2) or 0.2),
         }
+        if cfg_datos['upscale'] == 'ia':
+            from smart_upscale import elegir_python
+            from modulo_ia import _candidatos_python, _rutas_mejora
+            cfg_datos['upscale_python'] = elegir_python(_candidatos_python())
+            modelo_x4 = paths.data_path('models', 'video_ai', 'RealESRGAN_x4plus.pth')
+            cfg_datos['upscale_model'] = os.environ.get('CONTENTAPP_ESRGAN_MODEL') or _rutas_mejora().get('esrgan') or (
+                modelo_x4 if os.path.isfile(modelo_x4) else paths.data_path('models', 'video_ai', 'RealESRGAN_x2plus.pth'))
+            log('Mejora IA: usando el motor CUDA y ' + os.path.basename(cfg_datos['upscale_model']) + ', antes de los subtítulos.')
         if cfg_datos["transcripcion"] == "local":
             # Whisper local corre con el Python del motor de video (torch + GPU)
             from modulo_ia import motor_listo, whisper_instalado

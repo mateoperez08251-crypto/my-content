@@ -625,6 +625,16 @@ AVAILABLE_MODELS = [
         "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
     },
     {
+        "id": "realesrgan_x4",
+        "name": "Real-ESRGAN x4 (mayor ampliación) - mejora",
+        "type": "mejora",
+        "motor": "esrgan",
+        "description": "Modelo x4 para imágenes pequeñas. Requiere más cómputo; no siempre mejora más que x2.",
+        "size_gb": 0.07,
+        "filename": "RealESRGAN_x4plus.pth",
+        "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+    },
+    {
         "id": "director_ia_prompts",
         "type": "other",
         "name": "Director IA (Llama 3 8B)",

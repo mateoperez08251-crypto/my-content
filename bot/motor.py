@@ -429,14 +429,14 @@ class Motor:
         grupos = {}
         for cid in cuentas:
             nombre = (preset or validas[cid].get('preset_corte') or respaldo) if cortar else (preset or respaldo)
-            grupos.setdefault(nombre, []).append(cid)
+            grupos.setdefault((nombre, cid if cortar else None), []).append(cid)
         if not grupos:
-            grupos[preset or respaldo] = []
+            grupos[(preset or respaldo, None)] = []
         # Leer todos los presets actuales antes de crear ninguna fila. Si uno falla no queda un lote a medias.
         trabajos = [dict(url=url, origen=origen, canal=canal, titulo=titulo, cuentas=destinos,
                          preset=nombre, texto_fijo=texto_fijo, cortar=cortar, subir_ahora=subir_ahora,
                          opciones=snapshot(self.cargar_preset(nombre) or {}) if cortar else {})
-                    for nombre, destinos in grupos.items()]
+                    for (nombre, _), destinos in grupos.items()]
         if not clave:
             clave = f"{origen}:{url}:{time.time_ns()}"  # lo manual se puede repetir a propósito
         ids = self.db.encolar_ediciones(clave, trabajos)
@@ -591,7 +591,7 @@ class Motor:
                         raise RuntimeError('No se encuentra el segmento local del live.')
                 opciones = json.loads(t.get('opciones') or '{}') or (self.cargar_preset(t['preset']) or {})
                 datos = {**opciones, "bot_unique": not bool(local),
-                         "excluded_ranges": self.db.intervalos_usados(t['url'], t['cuentas'], t['id']) if not local else [],
+                         "excluded_ranges": self.db.intervalos_usados(t['url'], None, t['id']) if not local else [],
                          "source": local or t["url"],
                          "download_quality": "best", "subir_tiktok": False, "subir_youtube": False,
                          "subir_facebook": False, "_lanzar_error": True}
@@ -728,7 +728,7 @@ class Motor:
             self._remoto_estado = "Trabajando ✅"
 
         try:
-            datos.update(bot_unique=True, excluded_ranges=self.db.intervalos_usados(t['url'], t['cuentas'], t['id']))
+            datos.update(bot_unique=True, excluded_ranges=self.db.intervalos_usados(t['url'], None, t['id']))
             if not jid:
                 jid = cli.iniciar(t['url'], datos)
                 self.db.marcar_trabajo(t['id'], 'cortando', remoto_id=jid, remoto_url=self.cfg['remoto_url'])
@@ -916,6 +916,11 @@ class Motor:
 
     def _ejecutar_subida(self, s, control):
         control.comprobar()
+        conflicto = self.db.conflicto_clip(s['id'])
+        if conflicto:
+            self.db.marcar_subida(s['id'], 'error', error=conflicto)
+            self._aviso_subida(s, 'duplicado', conflicto, 'errores', True)
+            return
         inicio = time.monotonic()
         cuenta = self.db.cuenta(s["cuenta_id"])
         if cuenta is None:

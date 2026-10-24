@@ -11,6 +11,16 @@ from smart_dubbing import validate_layout, separate_background
 
 
 class LayoutBackgroundTests(unittest.TestCase):
+    def test_narrow_vertical_source_is_cropped_without_stretching(self):
+        import cv2
+        frame = np.zeros((1600, 720, 3), dtype=np.uint8)
+        with patch('smart_editor.cv2.resize', wraps=cv2.resize) as resize:
+            output = se._encuadrar(frame, 'caras', 360, 900, 1080, 1920)
+        self.assertEqual(output.shape, (1920, 1080, 3))
+        crop = resize.call_args.args[0]
+        self.assertAlmostEqual(crop.shape[1] / crop.shape[0], 9 / 16, places=3)
+        self.assertEqual(resize.call_args.kwargs['interpolation'], cv2.INTER_LANCZOS4)
+
     def test_invalid_options(self):
         for args in [('square', False, .75), ('vertical', 'false', .75),
                      ('horizontal', True, float('nan')), ('vertical_blur', True, 2)]:

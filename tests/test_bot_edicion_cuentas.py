@@ -44,7 +44,7 @@ class EdicionesCuentaTests(unittest.TestCase):
             archivo = Path(self.tmp.name, f"clip-{t['id']}.mp4")
             archivo.write_bytes(b'video')
             with patch.object(self.m, 'smart_split', return_value=([str(archivo)], [
-                    {'archivo': str(archivo), 'inicio': 150, 'fin': 210}])):
+                    {'archivo': str(archivo), 'inicio': t['id'] * 100, 'fin': t['id'] * 100 + 60}])):
                 self.m._procesar_trabajo(t)
         subidas = self.m.db.subidas_pendientes()
         self.assertEqual({(s['trabajo_id'], s['cuenta_id']) for s in subidas}, {(ids[0],self.a),(ids[1],self.b)})
@@ -82,23 +82,20 @@ class EdicionesCuentaTests(unittest.TestCase):
         self.m.desde_radar(item)
         self.assertEqual(len(self.m.db.trabajos_recientes()), 2)
 
-    def test_mismo_preset_comparte_edicion_y_no_duplica_cuentas(self):
+    def test_mismo_preset_separa_fragmentos_y_no_duplica_cuentas(self):
         self.m.guardar_cuenta(self.b, {'preset_corte':'A'})
         ids = self.encolar(cuentas=[self.a,self.b,self.a])
-        self.assertEqual(len(ids), 1)
-        self.assertEqual(self.m.db.trabajo(ids[0])['cuentas'], [self.a,self.b])
+        self.assertEqual(len(ids), 2)
+        self.assertEqual([self.m.db.trabajo(t)['cuentas'] for t in ids], [[self.a], [self.b]])
 
-    def test_preset_explicito_prevalece_y_sin_cortar_no_crea_variantes(self):
-        for opciones in ({'preset':'B'}, {'cortar':False}):
-            with self.subTest(opciones=opciones):
-                ids = self.encolar(**opciones)
-                self.assertEqual(len(ids), 1)
-                t = self.m.db.trabajo(ids[0])
-                self.assertEqual(t['cuentas'], [self.a,self.b])
-                if opciones.get('cortar') is False:
-                    self.assertEqual(json.loads(t['opciones']), {})
-                else:
-                    self.assertEqual(t['preset'], 'B')
+    def test_preset_explicito_conserva_partes_individuales_y_sin_cortar_no_crea_variantes(self):
+        ids = self.encolar(preset='B')
+        self.assertEqual(len(ids), 2)
+        self.assertEqual([self.m.db.trabajo(t)['preset'] for t in ids], ['B', 'B'])
+        ids = self.encolar(cortar=False)
+        self.assertEqual(len(ids), 1)
+        self.assertEqual(self.m.db.trabajo(ids[0])['cuentas'], [self.a, self.b])
+        self.assertEqual(json.loads(self.m.db.trabajo(ids[0])['opciones']), {})
 
     def test_cuenta_prevalece_sobre_regla_y_hereda_si_esta_vacia(self):
         self.m.db.guardar_regla('*', [self.a,self.b], preset='B')
@@ -107,8 +104,8 @@ class EdicionesCuentaTests(unittest.TestCase):
         self.assertEqual([self.m.db.trabajo(t)['preset'] for t in ids], ['A','B'])
         self.m.guardar_cuenta(self.a, {'preset_corte':''})
         ids = self.encolar(cuentas=None)
-        self.assertEqual(len(ids), 1)
-        self.assertEqual(self.m.db.trabajo(ids[0])['preset'], 'B')
+        self.assertEqual(len(ids), 2)
+        self.assertEqual([self.m.db.trabajo(t)['preset'] for t in ids], ['B', 'B'])
 
     def test_nuevos_videos_usan_cambio_sin_reiniciar_y_cola_anterior_no_cambia(self):
         anterior = self.encolar(cuentas=[self.a])[0]

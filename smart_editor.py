@@ -123,7 +123,7 @@ def _encuadrar(frame, modo, cx, fixed_crop_w, final_w, final_h, zoom=1.0):
         fh = int(round(orig_h * final_w / orig_w))
         if fh > final_h:
             fh, fw = final_h, int(round(orig_w * final_h / orig_h))
-        frente = cv2.resize(frame, (fw, fh), interpolation=cv2.INTER_AREA)
+        frente = cv2.resize(frame, (fw, fh), interpolation=cv2.INTER_LANCZOS4 if fw > orig_w or fh > orig_h else cv2.INTER_AREA)
         y = (final_h - fh) // 2
         x = (final_w - fw) // 2
         fondo[y:y + fh, x:x + fw] = frente
@@ -140,12 +140,14 @@ def _encuadrar(frame, modo, cx, fixed_crop_w, final_w, final_h, zoom=1.0):
         salida[mitad_h - 3:mitad_h + 3] = (15, 15, 20)
         return salida
     cw, ch = fixed_crop_w / zoom, orig_h / zoom
+    factor = min(1., orig_w / cw, orig_h / ch)
+    cw, ch = cw * factor, ch * factor
     x1 = int(round(cx - cw / 2))
     x1 = max(0, min(x1, orig_w - int(cw)))
-    y1 = int(round(orig_h * 0.42 - ch / 2)) if zoom > 1.0 else 0  # al hacer zoom, más cerca de la cara
+    y1 = int(round(orig_h * 0.42 - ch / 2)) if ch < orig_h else 0  # conservar proporciones incluso en originales muy estrechos
     y1 = max(0, min(y1, orig_h - int(ch)))
     recorte = frame[y1:y1 + int(ch), x1:x1 + int(cw)]
-    return cv2.resize(recorte, (final_w, final_h), interpolation=cv2.INTER_AREA if zoom <= 1.0 else cv2.INTER_CUBIC)
+    return cv2.resize(recorte, (final_w, final_h), interpolation=cv2.INTER_LANCZOS4 if final_w > recorte.shape[1] or final_h > recorte.shape[0] else cv2.INTER_AREA)
 
 
 def _componer(frame, t, subs, gen_title, clip_st, clip_et, w, h, show_progress_bar):
@@ -165,7 +167,7 @@ def _componer(frame, t, subs, gen_title, clip_st, clip_et, w, h, show_progress_b
             ty += int((bbox[3] - bbox[1]) * 1.15)
         frame = np.array(pil_img)
     else:
-        frame = np.ascontiguousarray(frame)
+        frame = np.array(frame, copy=True, order="C")
     r = subs.en(t) if subs is not None else None
     if r is not None:
         frame = subtitulos.pegar_numpy(frame, *r)
@@ -206,7 +208,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
                         speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced",
-                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai", skip_intro_seconds=0, excluded_ranges=None, bot_unique=False):
+                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai", skip_intro_seconds=0, excluded_ranges=None, bot_unique=False, upscale_python="", upscale_model=""):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -380,20 +382,37 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 write_progress(f"Renderizando clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.35))
 
                 def process_frame(get_frame, t, st=st, et=et, tiempos=tiempos, centros=centros, gen_title=gen_title,
-                                  subs=subs, pulsos=pulsos):
+                                  subs=subs, pulsos=pulsos, overlay=True):
                     frame = get_frame(t)
                     cx = reencuadre.centro_en(tiempos, centros, t)
                     zoom = _zoom_en(pulsos, st + t) if pulsos else 1.0
-                    recorte = _encuadrar(frame, encuadre, cx, fixed_crop_w, final_w, final_h, zoom)
+                    recorte = _encuadrar(frame, encuadre, cx, fixed_crop_w, render_w, render_h, zoom)
                     if anti_copyright_filter:
                         recorte = cv2.convertScaleAbs(recorte, alpha=1 + 0.01 * float(filter_strength), beta=float(filter_strength))
                         f32 = recorte.astype(np.float32)
                         f32[:, :, 0] += float(filter_strength)
                         f32[:, :, 2] += 0.5 * float(filter_strength)
                         recorte = np.clip(f32, 0, 255).astype(np.uint8)
-                    return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar)
+                    return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar) if overlay else recorte
 
-                processed_clip = subclip.transform(process_frame)
+                render_w, render_h = final_w, final_h
+                if upscale == 'ia':
+                    # Mejorar la imagen ANTES de dibujar texto: la IA no deforma las letras.
+                    scale = 1.0 if encuadre == 'difuminado' else min(1., orig_h / final_h, min(fixed_crop_w, orig_w) / final_w)
+                    render_w, render_h = max(2, int(final_w * scale / 2) * 2), max(2, int(final_h * scale / 2) * 2)
+                    clean_dir = resources.enter_context(tempfile.TemporaryDirectory(prefix='smart_ia_'))
+                    clean_path = os.path.join(clean_dir, 'imagen.mp4')
+                    subclip.transform(lambda get, t: process_frame(get, t, overlay=False)).write_videofile(
+                        clean_path, audio=False, codec='libx264rgb', preset='ultrafast',
+                        ffmpeg_params=['-crf', '0'], fps=subclip.fps, logger=None)
+                    _mejorar_calidad_video(clean_path, 'ia', final_w, final_h,
+                                          python_ia=upscale_python, modelo_ia=upscale_model)
+                    enhanced = resources.enter_context(VideoFileClip(clean_path))
+                    processed_clip = enhanced.transform(lambda get, t: _componer(
+                        get(t), st + t, subs if show_subtitles else None, gen_title, st, et,
+                        final_w, final_h, show_progress_bar))
+                else:
+                    processed_clip = subclip.transform(process_frame)
                 processed_clip = processed_clip.with_audio(final_audio)
 
                 out_base, ext = os.path.splitext(output_path)
@@ -409,10 +428,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     n_copia += 1
 
                 import gpu_video
-                opciones = gpu_video.opciones_moviepy(preset_cpu={"quality": "fast", "balanced": "veryfast", "fast": "ultrafast"}[export_profile])
+                opciones = gpu_video.opciones_moviepy(calidad="maxima" if export_profile == "quality" else "alta",
+                    preset_cpu={"quality": "slow", "balanced": "veryfast", "fast": "ultrafast"}[export_profile])
                 if idx == 0:
                     print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
-                processed_clip.write_videofile(out_name, audio_codec="aac", threads=max(2, os.cpu_count() or 2),
+                processed_clip.write_videofile(out_name, audio_codec="aac", audio_bitrate="320k" if export_profile == "quality" else "192k", threads=max(2, os.cpu_count() or 2),
                                                logger=None, fps=min(subclip.fps, 30) if export_profile == "fast" else subclip.fps, **opciones)
                 if denoise_audio:
                     _limpiar_audio(out_name)
@@ -425,14 +445,14 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                           eventos, subclip.duration, audio_mix)
                     except Exception as e:
                         raise RuntimeError(f"No se pudo aplicar la mezcla o normalización solicitada: {e}") from e
-                if upscale and upscale != "off":
+                if upscale and upscale not in ("off", "ia"):
                     write_progress(f"Mejorando calidad visual · clip {parte_num}...", p0 + int(tramo * 0.97))
                     try:
                         def _up_prog(msg, pct):
                             write_progress(f"Clip {parte_num}: {msg}", p0 + int(tramo * 0.97))
                         _mejorar_calidad_video(out_name, upscale, final_w, final_h, progress=_up_prog)
                     except Exception as e:
-                        print(f'[upscale] No se pudo mejorar calidad: {e}')
+                        raise RuntimeError(f'No se pudo aplicar la mejora de imagen solicitada: {e}') from e
                 generated_files.append(out_name)
 
                 # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
@@ -485,92 +505,30 @@ def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
     os.replace(tmp, video)
 
 
-def _mejorar_calidad_video(video, modo, final_w, final_h, progress=None):
-    """Mejora de calidad del clip final.
-    - 'sharpen': solo nitidez + reducción leve de ruido (sin cambiar resolución, barato).
-    - 'hd': reescala a 1080x1920 con lanczos + unsharp + hqdn3d (buena para 720p -> 1080p).
-    - 'ia': intenta Real-ESRGAN (si existe el binario `realesrgan-ncnn-vulkan`), si no cae a 'hd'.
-    """
-    import shutil as _shutil
-    tmp = os.path.splitext(video)[0] + "_up.mp4"
-    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-
+def _mejorar_calidad_video(video, modo, final_w, final_h, progress=None, python_ia='', modelo_ia=''):
+    """IA real o filtros explícitos; nunca sustituir IA por un filtro sin avisar."""
     if modo == 'ia':
-        # Pipeline Real-ESRGAN directo con PyTorch/CUDA sobre cada frame.
-        # Si falta torch/realesrgan o no hay GPU, cae a HD con lanczos+unsharp.
-        import tempfile
-        model_dir = os.environ.get('REALESRGAN_MODEL_DIR', os.path.join(os.path.dirname(__file__), 'models', 'realesrgan'))
-        os.makedirs(model_dir, exist_ok=True)
-        model_path = os.path.join(model_dir, 'RealESRGAN_x4plus.pth')
-        ok = False
-        try:
-            import torch
-            from basicsr.archs.rrdbnet_arch import RRDBNet
-            from realesrgan import RealESRGANer
-            # Descarga el modelo si falta
-            if not os.path.exists(model_path):
-                import urllib.request
-                url = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
-                print(f'[upscale] Descargando RealESRGAN_x4plus.pth a {model_path}...')
-                urllib.request.urlretrieve(url, model_path)
-            arch = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
-            upsampler = RealESRGANer(scale=4, model_path=model_path, model=arch,
-                                     tile=256, tile_pad=10, pre_pad=0,
-                                     half=torch.cuda.is_available(),
-                                     gpu_id=0 if torch.cuda.is_available() else None)
-            with tempfile.TemporaryDirectory(prefix='upscale_') as tdir:
-                frames_in = os.path.join(tdir, 'in'); frames_out = os.path.join(tdir, 'out')
-                os.makedirs(frames_in); os.makedirs(frames_out)
-                probe = subprocess.run([ffmpeg, '-i', video, '-hide_banner'], capture_output=True, text=True)
-                fps_match = re.search(r'(\d+(?:\.\d+)?)\s+fps', probe.stderr or '') if probe.stderr else None
-                fps = fps_match.group(1) if fps_match else '30'
-                subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
-                                os.path.join(frames_in, '%06d.png')],
-                               capture_output=True, creationflags=SIN_VENTANA)
-                frames = sorted(f for f in os.listdir(frames_in) if f.endswith('.png'))
-                total = len(frames)
-                print(f'[upscale] Procesando {total} frames con Real-ESRGAN...')
-                for i, fname in enumerate(frames):
-                    img = cv2.imread(os.path.join(frames_in, fname), cv2.IMREAD_UNCHANGED)
-                    out, _ = upsampler.enhance(img, outscale=2)
-                    cv2.imwrite(os.path.join(frames_out, fname), out)
-                    if i % 10 == 0 and progress:
-                        try:
-                            progress(f'Mejorando con IA: {i+1}/{total} frames', min(99, int(100 * (i + 1) / max(1, total))))
-                        except Exception:
-                            pass
-                    if i % 30 == 0:
-                        print(f'[upscale] {i+1}/{total}')
-                subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', str(fps),
-                                '-i', os.path.join(frames_out, '%06d.png'),
-                                '-i', video, '-map', '0:v:0', '-map', '1:a:0?',
-                                '-vf', f'scale={final_w}:{final_h}:flags=lanczos,unsharp=5:5:0.6',
-                                '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
-                                '-c:a', 'copy', '-movflags', '+faststart', tmp],
-                               capture_output=True, creationflags=SIN_VENTANA)
-                ok = os.path.exists(tmp) and os.path.getsize(tmp) > 0
-        except Exception as e:
-            print(f'[upscale] Real-ESRGAN falló ({e.__class__.__name__}: {e}); uso HD')
-        if not ok:
-            modo = 'hd'
-        else:
-            modo = 'done'
+        from smart_upscale import mejorar
+        return mejorar(video, final_w, final_h, python_ia, modelo_ia, progress)
+    if modo not in ('hd', 'sharpen'):
+        raise ValueError('Mejora de imagen no válida.')
+    import uuid
+    tmp = os.path.splitext(video)[0] + '_up_' + uuid.uuid4().hex + '.mp4'
+    vf = 'hqdn3d=1.5:1:6:6,unsharp=5:5:0.6:5:5:0.0'
     if modo == 'hd':
-        vf = f'scale={final_w}:{final_h}:flags=lanczos,hqdn3d=1.5:1:6:6,unsharp=5:5:0.9:5:5:0.0'
-        subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
-                        '-vf', vf, '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
-                        '-c:a', 'copy', '-movflags', '+faststart', tmp],
-                       capture_output=True, creationflags=SIN_VENTANA)
-    elif modo == 'sharpen':
-        vf = 'hqdn3d=1.5:1:6:6,unsharp=5:5:0.8:5:5:0.0'
-        subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-i', video,
-                        '-vf', vf, '-c:v', 'libx264', '-preset', 'medium', '-crf', '19',
-                        '-c:a', 'copy', '-movflags', '+faststart', tmp],
-                       capture_output=True, creationflags=SIN_VENTANA)
-    if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+        vf = f'scale={final_w}:{final_h}:flags=lanczos,' + vf
+    try:
+        result = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-y', '-loglevel', 'error', '-i', video,
+                                 '-vf', vf, '-c:v', 'libx264', '-preset', 'slow', '-crf', '16',
+                                 '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', tmp],
+                                capture_output=True, creationflags=SIN_VENTANA)
+        if result.returncode or not os.path.isfile(tmp) or os.path.getsize(tmp) == 0:
+            raise RuntimeError('Falló la mejora de imagen: ' + result.stderr.decode(errors='replace')[-600:])
         os.replace(tmp, video)
-    elif os.path.exists(tmp):
-        os.remove(tmp)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return modo
 
 
 def _limpiar_audio(video):
@@ -615,7 +573,8 @@ def main(argv):
                 cfg.get("preserve_background", False), cfg.get("upscale", "off"),
                 cfg.get("video_format", "vertical"), cfg.get("background_volume", 0.75),
                 cfg.get("clip_selection", "ai"), skip_intro_seconds=cfg.get("skip_intro_seconds", 0),
-                excluded_ranges=cfg.get("excluded_ranges"), bot_unique=cfg.get("bot_unique", False))
+                excluded_ranges=cfg.get("excluded_ranges"), bot_unique=cfg.get("bot_unique", False),
+                upscale_python=cfg.get("upscale_python", ""), upscale_model=cfg.get("upscale_model", ""))
         except InicioFueraDeVideo as e:
             print('RESULT_ERROR:' + json.dumps({'code': 'inicio_fuera_video'}))
             write_progress(f"Error: {e}", -1)

@@ -60,6 +60,13 @@ class LocalFilesTests(unittest.TestCase):
         self.assertEqual(nuevo.db.trabajo(result['id'])['estado'], 'listo')
         self.assertEqual(nuevo.estado()['plan']['clips_en_pc'], 1)
 
+    def test_renamed_same_file_is_blocked_on_another_account_before_publishing(self):
+        first = self.upload()
+        second = self.upload(nombre='Renombrado.mp4', clave=str(uuid.uuid4()), cuentas=[self.tt2])
+        rows = self.m.db.subidas_pendientes()
+        self.assertFalse(self.m.db.conflicto_clip(rows[0]['id']))
+        self.assertIn('mismo video', self.m.db.conflicto_clip(rows[1]['id']))
+
     def test_same_file_with_new_name_and_key_is_not_queued_twice(self):
         first = self.upload()
         again = self.upload(nombre='Otro nombre.mp4', clave=str(uuid.uuid4()))

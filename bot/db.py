@@ -305,16 +305,16 @@ class DB:
 
     def intervalos_usados(self, url, cuentas, excluir_trabajo=0):
         from .identidad import fuente
-        ids = set(cuentas)
+        ids = None if cuentas is None else set(cuentas)
         identity = fuente(url)
         result = [(r['inicio'], r['fin']) for r in self._todos(
             'SELECT * FROM clip_historial WHERE fuente=? AND trabajo_id!=?',
-            (identity, excluir_trabajo)) if r['cuenta_id'] in ids]
+            (identity, excluir_trabajo)) if ids is None or r['cuenta_id'] in ids]
         # Los trabajos anteriores a esta mejora pueden tener manifiesto con tiempos.
         # Si no los tienen, detenerse: adivinar permitiría volver a publicar lo mismo.
         for job in self._todos("SELECT * FROM trabajos WHERE estado='listo' AND cortar=1 "
                                "AND archivo_local='' AND id!=?", (excluir_trabajo,)):
-            if not (ids & set(job['cuentas'])) or fuente(job['url']) != identity:
+            if (ids is not None and not (ids & set(job['cuentas']))) or fuente(job['url']) != identity:
                 continue
             if self._uno('SELECT 1 FROM clip_historial WHERE trabajo_id=? LIMIT 1', (job['id'],)):
                 continue
@@ -345,9 +345,9 @@ class DB:
                     start, end = intervalos[ruta]
                     if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
                         raise ValueError('El clip no contiene tiempos válidos del video original.')
-                    used = self.intervalos_usados(job['url'], [cid], tid)
+                    used = self.intervalos_usados(job['url'], None, tid)
                     if any(min(end, b) > max(start, a) for a, b in used):
-                        raise ValueError('Ese fragmento ya está reservado para esta cuenta. No se subirá otra vez.')
+                        raise ValueError('Ese fragmento ya está reservado en otra publicación. No se enviará a otra cuenta.')
                 for cid, ruta, texto in subidas:
                     start, end = intervalos[ruta]
                     self._con.execute('INSERT OR IGNORE INTO clip_historial VALUES(?,?,?,?,?,?)',
@@ -392,6 +392,38 @@ class DB:
         return self._q("INSERT INTO subidas(trabajo_id, cuenta_id, archivo, texto, creado, actualizado) "
                        "VALUES(?,?,?,?,?,?)",
                        (trabajo_id, int(cuenta_id), archivo, texto, ahora, ahora)).lastrowid
+
+    def conflicto_clip(self, sid):
+        """Última barrera antes del navegador, también para colas de versiones anteriores."""
+        s = self.subida(sid)
+        if not s:
+            return 'La publicación ya no existe.'
+        job = self.trabajo(s['trabajo_id'])
+        if job and job['cortar'] and len(job['cuentas']) > 1:
+            return 'Trabajo antiguo con clips compartidos entre cuentas. Retíralo y añade la URL de nuevo para generar partes distintas.'
+        anterior = self._uno('SELECT id FROM subidas WHERE archivo=? AND cuenta_id!=? AND id<? LIMIT 1',
+                             (s['archivo'], s['cuenta_id'], sid))
+        if anterior:
+            return 'Este archivo ya está asignado a otra cuenta. No se volverá a publicar.'
+        huella = self._uno('SELECT huella FROM archivo_historial WHERE trabajo_id=? AND cuenta_id=?',
+                           (s['trabajo_id'], s['cuenta_id']))
+        if huella:
+            anterior = self._uno('SELECT 1 FROM archivo_historial h JOIN subidas s '
+                                 'ON s.trabajo_id=h.trabajo_id AND s.cuenta_id=h.cuenta_id '
+                                 'WHERE h.huella=? AND s.cuenta_id!=? AND s.id<? LIMIT 1',
+                                 (huella['huella'], s['cuenta_id'], sid))
+            if anterior:
+                return 'El mismo video, aunque tenga otro nombre, ya está asignado a otra cuenta.'
+        actual = self._uno('SELECT * FROM clip_historial WHERE trabajo_id=? AND cuenta_id=? AND archivo=?',
+                           (s['trabajo_id'], s['cuenta_id'], s['archivo']))
+        if actual:
+            anterior = self._uno('SELECT 1 FROM clip_historial WHERE fuente=? AND cuenta_id!=? '
+                                 'AND inicio<? AND fin>? AND (trabajo_id<? OR (trabajo_id=? AND cuenta_id<?)) LIMIT 1',
+                                 (actual['fuente'], s['cuenta_id'], actual['fin'], actual['inicio'],
+                                  s['trabajo_id'], s['trabajo_id'], s['cuenta_id']))
+            if anterior:
+                return 'Este tramo del video ya está asignado a otra cuenta. Prepara un fragmento nuevo.'
+        return ''
 
     def subida(self, sid):
         return self._uno("SELECT * FROM subidas WHERE id=?", (int(sid),))
