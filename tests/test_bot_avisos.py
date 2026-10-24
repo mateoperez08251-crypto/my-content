@@ -43,14 +43,38 @@ class Entrega(unittest.TestCase):
         self.assertFalse(self.a.procesar(self.now + 299))
         self.assertTrue(self.a.procesar(self.now + 301))
         texto = self.enviar.call_args.args[0]
-        self.assertIn('Entradas en cola: 4', texto)
+        self.assertIn('hora de tu PC', texto)
         self.assertIn('Clip 3 en cola', texto)
-        self.assertNotIn('Clip 0 en cola', texto)
+        self.assertIn('Clip 0 en cola', texto)
         otra = Avisos(self.db, self.enviar, lambda: self.cfg, self.log)
         otra.agregar('cola', '3', 'repetido')
         self.assertFalse(otra.procesar(self.now + 1000))
         self.enviar.assert_called_once()
         self.assertEqual(otra.resumen(), {'enviado': 4})
+
+    def test_mensaje_largo_conserva_detalles_y_deja_el_resto_pendiente(self):
+        for i in range(4):
+            self.a.agregar('cola', str(i), f'Video {i}\n' + 'detalle ' * 90 + f'\nPara: Cuenta {i} en TikTok. FIN {i}')
+        self.assertTrue(self.a.procesar(self.now + 301))
+        primero = self.enviar.call_args.args[0]
+        self.assertLessEqual(len(primero), 1800)
+        self.assertIn('FIN 0', primero)
+        self.assertEqual(self.a.resumen(), {'enviado': 2, 'pendiente': 2})
+        self.assertTrue(self.a.procesar(self.now + 361))
+        segundo = self.enviar.call_args.args[0]
+        self.assertIn('FIN 2', segundo)
+        self.assertIn('FIN 3', segundo)
+        self.assertNotIn('FIN 0', segundo)
+        self.assertEqual(self.a.resumen(), {'enviado': 4})
+
+    def test_urgentes_tambien_respetan_tamano_sin_perder_avisos(self):
+        for i in range(3):
+            self.a.agregar('errores', str(i), f'Error {i}: ' + 'x' * 940 + f' FIN {i}', True)
+        for i in range(3):
+            self.assertTrue(self.a.procesar(self.now + 1 + i * 60))
+            self.assertLessEqual(len(self.enviar.call_args.args[0]), 1800)
+            self.assertIn(f'FIN {i}', self.enviar.call_args.args[0])
+        self.assertEqual(self.a.resumen(), {'enviado': 3})
 
     def test_prioridad_y_separacion_minima(self):
         self.a.agregar('cola', 'cola', 'Clip listo')

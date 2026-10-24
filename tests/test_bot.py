@@ -193,7 +193,7 @@ class Cola(unittest.TestCase):
         self.assertEqual({s["estado"] for s in self.m.db.subidas_recientes()}, {"ok"})
         eventos = self.m.db._todos('SELECT * FROM bot_avisos')
         self.assertEqual(sum(e['categoria'] == 'publicados' for e in eventos), 2)
-        self.assertTrue(any('guardados en la PC' in e['texto'] for e in eventos))
+        self.assertTrue(any('Ya guardé 2 clips en tu PC' in e['texto'] for e in eventos))
         # La entrega externa no participa en el hilo de publicación.
         self.assertEqual(self.avisos, [])
         self.m._avisos.enviar = mock.Mock(side_effect=RuntimeError('sin red'))
@@ -291,7 +291,7 @@ class Cola(unittest.TestCase):
         self.assertEqual(len(PlataformaFalsa.llamadas), 1)
         eventos = self.m.db._todos('SELECT * FROM bot_avisos')
         self.assertFalse(any(e['categoria'] == 'publicados' for e in eventos))
-        self.assertTrue(any('No se confirmó' in e['texto'] for e in eventos))
+        self.assertTrue(any('no recibí confirmación' in e['texto'] for e in eventos))
 
     def test_cierre_falla_tras_confirmar_no_repite(self):
         @contextmanager

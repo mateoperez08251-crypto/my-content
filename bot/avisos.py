@@ -1,5 +1,4 @@
 """Avisos persistentes y agrupados. Ninguna petición de red bloquea una subida."""
-from collections import defaultdict
 from datetime import datetime
 import json
 import re
@@ -17,6 +16,54 @@ def breve(texto):
     # Los avisos llevan títulos/estados, nunca trazas de excepciones ni rutas.
     texto = re.sub(r'https?://\S+', '[enlace]', str(texto or ''))
     return ' '.join(texto.split())[:160]
+
+
+def cantidad(n, singular, plural=None):
+    return f"{n} {singular if n == 1 else plural or singular + 's'}"
+
+
+def hora(fecha):
+    return datetime.fromtimestamp(fecha).strftime('%d/%m a las %H:%M')
+
+
+def duracion(segundos):
+    segundos = max(0, round(segundos))
+    minutos, segundos = divmod(segundos, 60)
+    return f'{minutos} min {segundos} s' if minutos else f'{segundos} s'
+
+
+def motivo_fallo(error):
+    """Traducir señales conocidas, sin reenviar trazas, cookies ni URL privadas."""
+    # Una URL o un valor secreto puede contener palabras como "privado" o
+    # "timeout" sin que ese sea el fallo. No se usan para elegir el motivo.
+    texto = re.sub(r'https?://\S+', '', str(error).lower())
+    texto = re.sub(r'(?:apikey|api_key|token|password|authorization)\s*[:=]\s*\S+', '', texto)
+    motivos = (
+        (('no coincide con el de la cola',), 'La descripción quedó distinta a la de la cola. No pulsé Publicar; revisa el texto.'),
+        (('descripción supera el límite',), 'La descripción es demasiado larga. Acórtala antes de reintentar.'),
+        (('no space left', 'errno 28', 'poco disco', 'límite de búfer'), 'Falta espacio o se llenó el búfer. Libera espacio antes de seguir.'),
+        (('contraseña incorrecta',), 'El servidor no aceptó la contraseña. Revisa la clave del servidor de cortes.'),
+        (('http 401',), 'El servicio no aceptó el acceso (401). Revisa la sesión o la clave configurada.'),
+        (('http 404',), 'La dirección respondió 404: no encontré ese recurso. Si es el servidor de cortes, vuelve a copiar su URL de Cloudflare.'),
+        (('es privado', 'private video', 'para miembros', 'no está disponible en tu región'), 'El video tiene acceso restringido. Comprueba que tu cuenta pueda verlo.'),
+        (('no está transmitiendo', 'todavía no empieza'), 'Ese live todavía no está transmitiendo. Abre el enlace y comprueba si ya empezó o si terminó.'),
+        (('soporte javascript', 'no ofreció el formato'), 'No pude obtener un formato compatible del live. Ejecuta actualizar_youtube.bat y reinicia la app.'),
+        (('not a bot', 'sign in', 'cookies', 'iniciar sesión'), 'El error apunta al acceso o las cookies. Comprueba la sesión y vuelve a guardar las cookies si el video las pide.'),
+        (('429', 'too many requests'), 'El servicio está limitando las peticiones (429). Hay que esperar antes de probar otra vez.'),
+        (('403', 'forbidden'), 'El servicio bloqueó el acceso (403). Revisa que puedas abrir el video con tu cuenta.'),
+        (('no apareció el ', 'no apareció ningún elemento', 'no se encontró el botón'), 'No encontré el campo o botón que esperaba en la página. Revisa la captura del fallo en la cola.'),
+        (('smart split no generó clips', 'servidor no generó clips'), 'La edición terminó sin clips. Revisa el video y los ajustes de Smart Split.'),
+        (('smart split no está disponible',), 'Smart Split no está disponible en esta PC. Revisa la instalación del editor.'),
+        (('descarga incompleta', 'no dejó ningún archivo'), 'La descarga no terminó. El archivo todavía no está guardado completo.'),
+        (('no se encuentra el segmento', 'no such file', 'filenotfounderror'), 'No encontré el archivo necesario. Revisa que siga en esta PC.'),
+        (('tardó demasiado', 'timed out', 'timeout', 'más de 4 horas'), 'El paso tardó más de lo permitido y se cortó la espera.'),
+        (('connection', 'conexión', 'getaddrinfo', 'name resolution'), 'No pude mantener la conexión con el servicio.'),
+        (('rechazó', 'rechazado'), 'La plataforma rechazó el video. Revisa el motivo y la captura en la cola.'),
+    )
+    for pistas, mensaje in motivos:
+        if any(pista in texto for pista in pistas):
+            return mensaje
+    return 'No pude completar este paso. El detalle del error está en la cola.'
 
 
 class Avisos:
@@ -43,7 +90,7 @@ class Avisos:
             if categoria not in CATEGORIAS:
                 return
             self.db._q('INSERT OR IGNORE INTO bot_avisos(clave,categoria,texto,urgente,creado) VALUES(?,?,?,?,?)',
-                       (clave, categoria, texto[:600], int(urgente), time.time()))
+                       (clave, categoria, texto[:1000], int(urgente), time.time()))
             self.wake.set()
         except Exception:
             self.log('No se pudo guardar un aviso. La cola de videos continúa.')
@@ -95,19 +142,20 @@ class Avisos:
             urgentes = [r for r in rows if r['urgente']]
             if urgentes:
                 rows = urgentes[:3]
-                texto = 'Bot de subida\n\n' + '\n\n'.join(
-                    datetime.fromtimestamp(r['creado']).strftime('%d/%m %H:%M') + ' · ' + r['texto'] for r in rows)
             else:
                 if ahora < rows[0]['creado'] + cfg.get('avisos_intervalo_min', 5) * 60:
                     return False
-                grupos = defaultdict(list)
-                for row in rows:
-                    grupos[row['categoria']].append(row)
-                lines = ['Actividad registrada del bot · ' + datetime.fromtimestamp(ahora).strftime('%H:%M')]
-                for categoria, events in grupos.items():
-                    lines.append(f'{CATEGORIAS[categoria]}: {len(events)}')
-                    lines.extend('• ' + datetime.fromtimestamp(r['creado']).strftime('%H:%M') + ' · ' + r['texto'][:180] for r in events[-2:])
-                texto = '\n'.join(lines)
+            # Cada aviso conserva su hora y su contexto. Solo se marcan los que
+            # caben en este mensaje; el resto sigue pendiente para el siguiente.
+            texto = 'My Content · Lo que pasó (hora de tu PC)'
+            incluidos = []
+            for row in rows:
+                bloque = '\n\n' + datetime.fromtimestamp(row['creado']).strftime('%d/%m %H:%M') + '\n' + row['texto']
+                if incluidos and len(texto) + len(bloque) > 1800:
+                    break
+                texto += bloque
+                incluidos.append(row)
+            rows = incluidos
             self._marcar(rows, 'enviando')
             self.db._q("INSERT OR REPLACE INTO bot_avisos_meta(clave,valor) VALUES('ultimo',?)", (ahora,))
             try:

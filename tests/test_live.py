@@ -149,7 +149,8 @@ class Queue(unittest.TestCase):
         self.assertEqual(len(self.motor.db.trabajos_recientes()), 1)
         avisos = self.motor.db._todos("SELECT * FROM bot_avisos WHERE categoria='cola'")
         self.assertEqual(len(avisos), 1)
-        self.assertIn('Segmento del live guardado', avisos[0]['texto'])
+        self.assertIn('Guardé este tramo del live en la PC: 1 min 0 s', avisos[0]['texto'])
+        self.assertIn('Falta editarlo antes de subir', avisos[0]['texto'])
 
     def test_avisos_del_live_sin_urls_privadas_ni_duplicados(self):
         jid, _ = self.seed()
@@ -159,6 +160,8 @@ class Queue(unittest.TestCase):
         self.assertEqual(len(avisos), 4)
         self.assertEqual(sum(r['urgente'] for r in avisos), 1)
         self.assertNotIn('SECRETO', str(avisos))
+        self.assertIn('0 segmentos cerrados', avisos[0]['texto'])
+        self.assertIn('esperar a que se cierre', avisos[0]['texto'])
 
     def test_motor_uses_local_snapshot_and_never_remote_or_downloader(self):
         self.seed()
@@ -177,6 +180,10 @@ class Queue(unittest.TestCase):
         self.assertEqual(self.motor.db.trabajo(task['id'])['estado'], 'listo')
         upload = self.motor.db._uno('SELECT * FROM subidas')
         self.assertEqual(upload['texto'], 'Mi transmisión · parte 1\n#prueba')
+        aviso = self.motor.db._uno('SELECT texto FROM bot_avisos WHERE clave=?',
+                                  (f"trabajo:{task['id']}:preparando:0",))['texto']
+        self.assertIn('el segmento completo del live', aviso)
+        self.assertNotIn('600', aviso)
 
     def test_full_disk_stops_and_preserves_pending(self):
         self.seed()
