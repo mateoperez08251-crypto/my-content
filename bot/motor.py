@@ -395,38 +395,61 @@ class Motor:
                 return r
         return general
 
+    def guardar_cuenta(self, cid, cambios):
+        if not self.db.cuenta(cid):
+            raise ValueError('Cuenta no encontrada.')
+        if 'preset_corte' in cambios:
+            nombre = cambios['preset_corte']
+            if not isinstance(nombre, str) or len(nombre) > 100:
+                raise ValueError('Elige un preset de edición válido.')
+            nombre = nombre.strip()
+            if nombre:
+                snapshot(self.cargar_preset(nombre) or {})
+            cambios = {**cambios, 'preset_corte': nombre}
+        self.db.editar_cuenta(cid, **cambios)
+
     def encolar(self, url, origen="manual", clave=None, canal="", titulo="", cuentas=None,
-                cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id=''):
+                cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id='', devolver_ids=False):
         url = (url or "").strip()
         if not re.match(r"^https?://", url):
             raise ValueError("Pega un enlace que empiece por http.")
+        if clave and self.db.trabajo_por_clave(clave):
+            return [] if devolver_ids else None
         regla = self.destino_para(canal or url, plataforma_origen, channel_id)
         if not cuentas:
             cuentas = (regla or {}).get("cuentas") or []
-        validas = {c["id"] for c in self.db.cuentas()}
-        cuentas = [int(c) for c in cuentas if int(c) in validas]
+        validas = {c["id"]: c for c in self.db.cuentas()}
+        cuentas = list(dict.fromkeys(int(c) for c in cuentas if int(c) in validas))
         if cortar is None:
             cortar = bool((regla or {}).get("cortar", 1))
-        preset = preset or (regla or {}).get("preset") or self.cfg["preset"]
+        respaldo = (regla or {}).get("preset") or self.cfg["preset"]
         texto_fijo = texto_fijo or (regla or {}).get("texto_fijo") or ""
+        grupos = {}
+        for cid in cuentas:
+            nombre = (preset or validas[cid].get('preset_corte') or respaldo) if cortar else (preset or respaldo)
+            grupos.setdefault(nombre, []).append(cid)
+        if not grupos:
+            grupos[preset or respaldo] = []
+        # Leer todos los presets actuales antes de crear ninguna fila. Si uno falla no queda un lote a medias.
+        trabajos = [dict(url=url, origen=origen, canal=canal, titulo=titulo, cuentas=destinos,
+                         preset=nombre, texto_fijo=texto_fijo, cortar=cortar,
+                         opciones=snapshot(self.cargar_preset(nombre) or {}) if cortar else {})
+                    for nombre, destinos in grupos.items()]
         if not clave:
-            clave = f"{origen}:{url}:{time.time()}"  # lo manual se puede repetir a propósito
-        tid = self.db.encolar_trabajo(url, origen, clave=clave, canal=canal, titulo=titulo, cuentas=cuentas, preset=preset,
-                                      texto_fijo=texto_fijo, cortar=cortar,
-                                      opciones=snapshot(self.cargar_preset(preset) or {}) if cortar else {})
-        if tid is None:
-            return None
-        if not cuentas:
-            self.db.marcar_trabajo(tid, "sin_destino",
-                                   "No hay cuentas para este canal. Crea una regla o elige cuentas.")
-            self.log(f"Sin destino: {titulo or url}")
-            self._aviso_trabajo(self.db.trabajo(tid), 'sin_destino', 'Lo recibí, pero no tiene cuenta de destino. Elige una cuenta o crea una regla para este canal.', 'errores', True)
-        else:
-            self.log(f"En cola ({origen}): {titulo or url} → {len(cuentas)} cuenta(s)")
-            self._aviso_trabajo(self.db.trabajo(tid), 'cola', 'Ya lo añadí a la cola. Falta editarlo y guardar los clips.' if cortar else
-                                'Ya lo añadí a la cola. Falta descargarlo completo; no se harán cortes.', 'cola')
+            clave = f"{origen}:{url}:{time.time_ns()}"  # lo manual se puede repetir a propósito
+        ids = self.db.encolar_ediciones(clave, trabajos)
+        for tid in ids:
+            t = self.db.trabajo(tid)
+            if not t['cuentas']:
+                self.db.marcar_trabajo(tid, "sin_destino", "No hay cuentas para este canal. Crea una regla o elige cuentas.")
+                self.log(f"Sin destino: {titulo or url}")
+                self._aviso_trabajo(t, 'sin_destino', 'Lo recibí, pero no tiene cuenta de destino. Elige una cuenta o crea una regla para este canal.', 'errores', True)
+            else:
+                self.log(f"En cola ({origen}): {titulo or url} · {t['preset']} → {len(t['cuentas'])} cuenta(s)")
+                self._aviso_trabajo(t, 'cola', 'Ya lo añadí a la cola. Falta editarlo y guardar los clips.' if cortar else
+                                    'Ya lo añadí a la cola. Falta descargarlo completo; no se harán cortes.', 'cola')
         self._despertar.set()
-        return tid
+        return ids if devolver_ids else (ids[0] if ids else None)
 
     def desde_radar(self, item: dict):
         """Lo llama el radar local con cada publicación nueva."""
