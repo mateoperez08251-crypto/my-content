@@ -206,7 +206,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
                         speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced",
-                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai", skip_intro_seconds=0):
+                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai", skip_intro_seconds=0, excluded_ranges=None, bot_unique=False):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -259,8 +259,34 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         else:
             write_progress("Buscando los momentos más virales (IA)...", 22)
             frs = cv.frases(words, segmentos)
-            seleccion = cv.seleccionar(frs, int(num_clips), float(clip_duration), total_duration,
-                                       motor=motor_ia, avisar=print)
+            seleccion = [] if bot_unique and excluded_ranges else cv.seleccionar(
+                frs, int(num_clips), float(clip_duration), total_duration, motor=motor_ia, avisar=print)
+        if bot_unique:
+            from smart_selection import new_parts, available_ranges
+            if clip_selection == 'sequential':
+                seleccion = new_parts(total_duration, clip_duration, int(num_clips), excluded_ranges or [], base)
+            elif excluded_ranges:
+                # Cada análisis recibe un tramo continuo libre: nunca une frases a ambos lados de un clip usado.
+                candidates = []
+                for a, b in available_ranges(total_duration, excluded_ranges, base):
+                    if b - a < float(clip_duration):
+                        continue
+                    phrases = [dict(f) for f in frs if f['start'] >= a and f['end'] <= b]
+                    for i, f in enumerate(phrases):
+                        f.update(i=i, start=f['start'] - a, end=f['end'] - a)
+                    if not phrases:
+                        continue
+                    for c in cv.seleccionar(phrases, int(num_clips), float(clip_duration), b - a,
+                                             motor=motor_ia, avisar=print):
+                        c['inicio'] += a
+                        c['fin'] += a
+                        if a <= c['inicio'] < c['fin'] <= b:
+                            candidates.append(c)
+                    if len(candidates) >= int(num_clips):
+                        break
+                seleccion = sorted(candidates, key=lambda c: c['puntuacion'], reverse=True)[:int(num_clips)]
+            if not seleccion:
+                raise ValueError('No quedan fragmentos nuevos con la duración elegida para estas cuentas.')
         for c in seleccion:
             print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['titulo']}")
 
@@ -584,7 +610,8 @@ def main(argv):
                 cfg.get("filter_strength", 1.0), cfg.get("denoise_audio", False), cfg.get("export_profile", "balanced"),
                 cfg.get("preserve_background", False), cfg.get("upscale", "off"),
                 cfg.get("video_format", "vertical"), cfg.get("background_volume", 0.75),
-                cfg.get("clip_selection", "ai"), skip_intro_seconds=cfg.get("skip_intro_seconds", 0))
+                cfg.get("clip_selection", "ai"), skip_intro_seconds=cfg.get("skip_intro_seconds", 0),
+                excluded_ranges=cfg.get("excluded_ranges"), bot_unique=cfg.get("bot_unique", False))
         except InicioFueraDeVideo as e:
             print('RESULT_ERROR:' + json.dumps({'code': 'inicio_fuera_video'}))
             write_progress(f"Error: {e}", -1)

@@ -2,6 +2,36 @@
 import math
 
 
+def available_ranges(total, excluded, base=0):
+    """Tramos libres relativos a la edición; historial en segundos del original."""
+    cursor = 0.0
+    result = []
+    for start, end in sorted((max(0., float(a) - base), min(total, float(b) - base))
+                             for a, b in excluded):
+        if not math.isfinite(start) or not math.isfinite(end):
+            raise ValueError('Historial de clips no válido.')
+        if end <= cursor or start >= total:
+            continue
+        if start > cursor:
+            result.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < total:
+        result.append((cursor, total))
+    return result
+
+
+def new_parts(total, duration, count, excluded, base=0):
+    result = []
+    for start, end in available_ranges(total, excluded, base):
+        for part in sequential_parts(end - start, duration):
+            part['inicio'] += start
+            part['fin'] += start
+            result.append(part)
+            if len(result) >= count:
+                return result
+    return result
+
+
 def needs_groq(options):
     """El corte por tiempo con audio original y sin subtítulos no usa Groq."""
     if options.get('clip_selection', 'ai') == 'ai' or options.get('dubbing_language', 'original') != 'original':

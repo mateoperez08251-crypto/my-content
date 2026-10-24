@@ -1644,6 +1644,8 @@ def run_smart_split_thread(data):
             "start_time": data.get('start_time', ''),
             "end_time": data.get('end_time', ''),
             "skip_intro_seconds": inicio_edicion,
+            "excluded_ranges": data.get("excluded_ranges", []),
+            "bot_unique": bool(data.get("bot_unique", False)),
             "subtitle_scale": float(data.get('subtitle_scale', 100)),
             "subtitle_style": data.get('style', 'style5'),
             "anti_copyright_filter": data.get('anti_copyright_filter', False),
@@ -2405,7 +2407,8 @@ def remoto_estado(jid):
         pass
     por_archivo = {m.get("archivo"): m for m in t["meta"]}
     clips = [{"n": i, "nombre": os.path.basename(r), "bytes": os.path.getsize(r) if os.path.isfile(r) else 0,
-              "publicacion": crear_publicacion(por_archivo.get(r) or {})}
+              "publicacion": crear_publicacion(por_archivo.get(r) or {}),
+              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin')}}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
                     "progreso": progreso, "clips": clips})
@@ -2483,7 +2486,7 @@ def health():
     from editor_controls import CAPACIDAD
     mem = winproc.estado_memoria()
     return jsonify({"ok": True, "status": automation_status,
-                    "capabilities": [CAPACIDAD],
+                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1"],
                     "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
 
 

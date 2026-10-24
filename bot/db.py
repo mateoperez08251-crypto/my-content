@@ -65,11 +65,28 @@ CREATE TABLE IF NOT EXISTS subidas (
 );
 CREATE INDEX IF NOT EXISTS ix_subidas_estado ON subidas(estado, proximo_intento);
 CREATE INDEX IF NOT EXISTS ix_trabajos_estado ON trabajos(estado, proximo_intento);
+CREATE TABLE IF NOT EXISTS clip_historial (
+    fuente TEXT NOT NULL,
+    cuenta_id INTEGER NOT NULL,
+    inicio REAL NOT NULL,
+    fin REAL NOT NULL,
+    trabajo_id INTEGER NOT NULL,
+    archivo TEXT NOT NULL,
+    UNIQUE(trabajo_id, cuenta_id, archivo)
+);
+CREATE INDEX IF NOT EXISTS ix_clip_fuente ON clip_historial(fuente, cuenta_id);
+CREATE TABLE IF NOT EXISTS archivo_historial (
+    huella TEXT NOT NULL,
+    cuenta_id INTEGER NOT NULL,
+    trabajo_id INTEGER NOT NULL,
+    PRIMARY KEY(huella, cuenta_id)
+);
 """
 
 
 class DB:
     def __init__(self, ruta: str):
+        self._carpeta = os.path.dirname(os.path.abspath(ruta))
         os.makedirs(os.path.dirname(os.path.abspath(ruta)), exist_ok=True)
         self._lock = threading.RLock()
         self._con = sqlite3.connect(ruta, check_same_thread=False, timeout=30)
@@ -199,6 +216,9 @@ class DB:
         """El archivo ya se guardó: trabajo listo y destinos se confirman juntos.
         Repetir una petición cuya respuesta se perdió no duplica publicaciones."""
         ahora = time.time()
+        import hashlib
+        with open(archivo, 'rb') as stream:
+            huella = hashlib.file_digest(stream, 'sha256').hexdigest()
         with self._lock, self._con:
             anterior = self._con.execute('SELECT id FROM trabajos WHERE clave=?', (clave,)).fetchone()
             if anterior:
@@ -207,11 +227,25 @@ class DB:
                 cuenta = self._con.execute('SELECT plataforma FROM cuentas WHERE id=?', (cid,)).fetchone()
                 if not cuenta or cuenta[0] != plataforma:
                     raise ValueError('Una cuenta ya no existe o no es de la plataforma seleccionada.')
+            nuevos = []
+            anterior_archivo = None
+            for cid in cuentas:
+                seen = self._con.execute('SELECT trabajo_id FROM archivo_historial WHERE huella=? AND cuenta_id=?',
+                                         (huella, cid)).fetchone()
+                if seen:
+                    anterior_archivo = seen[0]
+                else:
+                    nuevos.append(cid)
+            if not nuevos:
+                return anterior_archivo, False
+            cuentas = nuevos
             cur = self._con.execute(
                 "INSERT INTO trabajos(clave,url,origen,titulo,cuentas,texto_fijo,cortar,estado,creado,actualizado,archivo_local) "
                 "VALUES(?,'','local',?,?,?,0,'listo',?,?,?)",
                 (clave, nombre, json.dumps(cuentas), texto, ahora, ahora, archivo))
             tid = cur.lastrowid
+            self._con.executemany('INSERT INTO archivo_historial VALUES(?,?,?)',
+                                  [(huella, cid, tid) for cid in cuentas])
             self._con.executemany(
                 'INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado) VALUES(?,?,?,?,?,?)',
                 [(tid, cid, archivo, texto, ahora, ahora) for cid in cuentas])
@@ -228,13 +262,55 @@ class DB:
                  archivo, json.dumps(opciones)))
             return self._con.execute('SELECT id FROM trabajos WHERE clave=?', (clave,)).fetchone()[0]
 
-    def finalizar_trabajo(self, tid, subidas):
+    def intervalos_usados(self, url, cuentas, excluir_trabajo=0):
+        from .identidad import fuente
+        ids = set(cuentas)
+        identity = fuente(url)
+        result = [(r['inicio'], r['fin']) for r in self._todos(
+            'SELECT * FROM clip_historial WHERE fuente=? AND trabajo_id!=?',
+            (identity, excluir_trabajo)) if r['cuenta_id'] in ids]
+        # Los trabajos anteriores a esta mejora pueden tener manifiesto con tiempos.
+        # Si no los tienen, detenerse: adivinar permitiría volver a publicar lo mismo.
+        for job in self._todos("SELECT * FROM trabajos WHERE estado='listo' AND cortar=1 "
+                               "AND archivo_local='' AND id!=?", (excluir_trabajo,)):
+            if not (ids & set(job['cuentas'])) or fuente(job['url']) != identity:
+                continue
+            if self._uno('SELECT 1 FROM clip_historial WHERE trabajo_id=? LIMIT 1', (job['id'],)):
+                continue
+            from .archivos import leer_intervalos
+            try:
+                old = leer_intervalos(os.path.join(self._carpeta, 'bot_clips', f"trabajo_{job['id']}"))
+                if not old:
+                    raise ValueError('Sin tiempos')
+                result.extend(old.values())
+            except (OSError, ValueError, KeyError, TypeError):
+                raise ValueError('Este video tiene clips anteriores sin tiempos registrados. '
+                                 'Revisa ese historial antes de volver a procesarlo para estas cuentas.') from None
+        return result
+
+    def finalizar_trabajo(self, tid, subidas, intervalos=None):
         """Encolar todos los resultados y marcar listo en una sola transacción."""
         ahora = time.time()
         with self._lock, self._con:
             row = self._con.execute('SELECT estado FROM trabajos WHERE id=?', (tid,)).fetchone()
             if row is None or row[0] == 'listo':
                 return
+            if intervalos is not None:
+                from .identidad import fuente
+                import math
+                job = self.trabajo(tid)
+                identity = fuente(job['url'])
+                for cid, ruta, texto in subidas:
+                    start, end = intervalos[ruta]
+                    if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+                        raise ValueError('El clip no contiene tiempos válidos del video original.')
+                    used = self.intervalos_usados(job['url'], [cid], tid)
+                    if any(min(end, b) > max(start, a) for a, b in used):
+                        raise ValueError('Ese fragmento ya está reservado para esta cuenta. No se subirá otra vez.')
+                for cid, ruta, texto in subidas:
+                    start, end = intervalos[ruta]
+                    self._con.execute('INSERT OR IGNORE INTO clip_historial VALUES(?,?,?,?,?,?)',
+                                      (identity, cid, start, end, tid, ruta))
             self._con.executemany('INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado) VALUES(?,?,?,?,?,?)',
                                   [(tid, cid, ruta, texto, ahora, ahora) for cid, ruta, texto in subidas])
             self._con.execute("UPDATE trabajos SET estado='listo',error='',actualizado=? WHERE id=?", (ahora, tid))

@@ -464,6 +464,7 @@ class Motor:
             if not conservar:
                 shutil.rmtree(carpeta, ignore_errors=True)
         if nuevo:
+            cuentas = self.db.trabajo(tid)['cuentas']
             self.log(f'Archivo local guardado: {nombre} → {len(cuentas)} cuenta(s). En cola de publicación.')
             self._aviso_trabajo(self.db.trabajo(tid), 'listo', f"Ya guardé tu archivo en la PC. Añadí {cantidad(len(cuentas), 'subida')} a la cola.\n" + self._estado_publicacion(), 'cola')
         self._despertar.set()
@@ -553,6 +554,7 @@ class Motor:
         liberar_al_fallar = True
         self._aviso_trabajo(t, f"preparando:{t['intentos']}", self._detalle_preparacion(t, 'esta PC'))
         try:
+            por_archivo = {}
             if t["cortar"]:
                 self.db.marcar_trabajo(t["id"], "cortando")
                 self._actividad(f"Descargando y cortando: {nombre}")
@@ -563,7 +565,9 @@ class Motor:
                     if os.path.commonpath([root, local]) != root or not os.path.isfile(local):
                         raise RuntimeError('No se encuentra el segmento local del live.')
                 opciones = json.loads(t.get('opciones') or '{}') or (self.cargar_preset(t['preset']) or {})
-                datos = {**opciones, "source": local or t["url"],
+                datos = {**opciones, "bot_unique": not bool(local),
+                         "excluded_ranges": self.db.intervalos_usados(t['url'], t['cuentas'], t['id']) if not local else [],
+                         "source": local or t["url"],
                          "download_quality": "best", "subir_tiktok": False, "subir_youtube": False,
                          "subir_facebook": False, "_lanzar_error": True}
                 if not self.smart_split:
@@ -585,7 +589,7 @@ class Motor:
                 if not ruta or not os.path.isfile(ruta):
                     raise RuntimeError("La descarga no dejó ningún archivo.")
                 clips = [(ruta, "")]
-            clips = archivos.conservar(self.carpeta_clips(t), clips)
+            clips = archivos.conservar(self.carpeta_clips(t), clips, por_archivo)
         except Exception as e:
             if liberar_al_fallar:
                 self.liberar()
@@ -614,7 +618,19 @@ class Motor:
             texto = self._texto(publicacion, t, i, len(clips))
             for cid in t["cuentas"]:
                 subidas.append((cid, ruta, texto))
-        self.db.finalizar_trabajo(t['id'], subidas)
+        intervals = None
+        if t['cortar'] and not t.get('archivo_local'):
+            try:
+                intervals = archivos.leer_intervalos(self.carpeta_clips(t))
+                if any(ruta not in intervals for _, ruta, _ in subidas):
+                    raise ValueError('Faltan los tiempos originales de los clips. Actualiza My Content/Colab antes de subirlos.')
+                self.db.finalizar_trabajo(t['id'], subidas, intervals)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                self.db.marcar_trabajo(t['id'], 'error', str(exc))
+                self.log(f'Clips detenidos para evitar repetidos: {exc}')
+                return
+        else:
+            self.db.finalizar_trabajo(t['id'], subidas)
         actual = self.db.trabajo(t['id'])
         if actual and actual['estado'] == 'listo':
             self._aviso_trabajo(t, 'listo', f"Ya guardé {cantidad(len(clips), 'clip')} en tu PC. "
@@ -674,6 +690,7 @@ class Motor:
         self._actividad(f"Cortando en el servidor remoto: {nombre}")
         self._aviso_trabajo(t, f"remoto:{t['intentos']}", self._detalle_preparacion(t, 'el servidor de cortes (Colab)'))
         datos = json.loads(t.get('opciones') or '{}') or dict(self.cargar_preset(t['preset']) or {})
+        datos.update(bot_unique=True, excluded_ranges=self.db.intervalos_usados(t['url'], t['cuentas'], t['id']))
         carpeta = self.carpeta_clips(t)
         jid = t.get('remoto_id') if t.get('remoto_url') == self.cfg['remoto_url'] else None
 
@@ -707,6 +724,8 @@ class Motor:
             self.db.marcar_trabajo(t["id"], "pendiente", "Se perdió la conexión con el servidor de cortes.")
             raise
         self._finalizar_clips(t, clips)
+        if self.db.trabajo(t['id'])['estado'] != 'listo':
+            return
         try:
             cli.limpiar(jid)
         except remoto.ServidorCaido:

@@ -19,7 +19,7 @@ class PreparacionTests(unittest.TestCase):
         self.original = Path(self.folder, 'original.mp4')
         self.original.write_bytes(b'video-editado')
         self.options = dict(CALIDAD)
-        self.split = Mock(return_value=([str(self.original)], [{'archivo':str(self.original),'publicacion':'Parte 1'}]))
+        self.split = Mock(return_value=([str(self.original)], [{'archivo':str(self.original),'publicacion':'Parte 1','inicio':0,'fin':60}]))
         self.m = self.motor()
         self.cid = self.m.db.crear_cuenta('Prueba', 'youtube')
         self.m.db.editar_cuenta(self.cid, estado='ok')
@@ -109,7 +109,7 @@ class PreparacionTests(unittest.TestCase):
         cliente = Mock()
         cliente.iniciar.return_value = 'job-1'
         def descargar(jid, carpeta, *args, **kwargs):
-            return archivos.conservar(carpeta, [(str(self.original),'Parte 1')])
+            return archivos.conservar(carpeta, [(str(self.original),'Parte 1')], {str(self.original): {'inicio':0,'fin':60}})
         cliente.esperar_y_bajar.side_effect = descargar
         def limpiar(jid):
             self.assertEqual(self.m.db.trabajo(tid)['estado'], 'listo')

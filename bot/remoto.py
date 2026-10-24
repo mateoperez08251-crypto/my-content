@@ -73,6 +73,9 @@ class Cliente:
             if not isinstance(capacidades, list) or CAPACIDAD not in capacidades:
                 raise FalloTrabajo('Actualiza My Content en Colab y reinicia las celdas 6 y 6C. '
                                   'Ese servidor aún no permite elegir el inicio; no se editará desde cero.')
+        if preset.get('bot_unique'):
+            if 'unique_clip_ranges_v1' not in (self.probar().get('capabilities') or []):
+                raise FalloTrabajo('Actualiza My Content en Colab y reinicia el servidor. Falta la protección de clips repetidos.')
         r = self._pedir("POST", "/api/bot/remoto/cortar", json={"source": url_video, "preset": preset})
         if r.status_code == 409:
             raise ServidorOcupado()
@@ -170,7 +173,8 @@ class Cliente:
                     os.fsync(f.fileno())
                 os.replace(registro_path + '.tmp', registro_path)
             salida.append((destino, c.get("publicacion") or ""))
-        archivos.guardar_manifest(carpeta, salida)
+        metadata = {ruta: c for (ruta, _), c in zip(salida, d['clips'])}
+        archivos.guardar_manifest(carpeta, salida, metadata)
         return salida
 
     def limpiar(self, jid):
