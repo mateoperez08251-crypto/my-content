@@ -96,19 +96,28 @@ class DB:
             self._con.executescript(_ESQUEMA)
             columns = {r[1] for r in self._con.execute('PRAGMA table_info(trabajos)')}
             for name, definition in [('archivo_local', "TEXT NOT NULL DEFAULT ''"),
+                                     ('grupo_clave', "TEXT NOT NULL DEFAULT ''"),
                                      ('remoto_id', "TEXT NOT NULL DEFAULT ''"),
                                      ('remoto_url', "TEXT NOT NULL DEFAULT ''"),
                                      ('opciones', "TEXT NOT NULL DEFAULT '{}'")]:
                 if name not in columns:
                     self._con.execute(f'ALTER TABLE trabajos ADD COLUMN {name} {definition}')
+            cuentas = {r[1] for r in self._con.execute('PRAGMA table_info(cuentas)')}
+            if 'preset_corte' not in cuentas:
+                self._con.execute("ALTER TABLE cuentas ADD COLUMN preset_corte TEXT NOT NULL DEFAULT ''")
+            self._con.execute('CREATE INDEX IF NOT EXISTS ix_trabajos_grupo ON trabajos(grupo_clave)')
             self._con.commit()
 
     # -- utilidades -----------------------------------------------------
     def _q(self, sql, args=()):
         with self._lock:
-            cur = self._con.execute(sql, args)
-            self._con.commit()
-            return cur
+            try:
+                cur = self._con.execute(sql, args)
+                self._con.commit()
+                return cur
+            except Exception:
+                self._con.rollback()
+                raise
 
     def _todos(self, sql, args=()):
         with self._lock:
@@ -148,7 +157,7 @@ class DB:
         return cur.lastrowid
 
     def editar_cuenta(self, cid, **campos):
-        permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre"}
+        permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre", "preset_corte"}
         sets = {k: v for k, v in campos.items() if k in permitidos}
         if 'limite_dia' in sets:
             try:
@@ -209,8 +218,34 @@ class DB:
     def trabajo(self, tid):
         return self._uno("SELECT * FROM trabajos WHERE id=?", (int(tid),))
 
+    def encolar_ediciones(self, clave, trabajos):
+        """Todas las ediciones de una entrada se confirman juntas y se deduplican juntas."""
+        ahora = time.time()
+        with self._lock:
+            try:
+                self._con.execute('BEGIN IMMEDIATE')
+                anterior = self._con.execute(
+                    'SELECT id FROM trabajos WHERE clave=? OR grupo_clave=? LIMIT 1', (clave, clave)).fetchone()
+                if anterior:
+                    self._con.rollback()
+                    return []
+                ids = []
+                for n, t in enumerate(trabajos):
+                    cur = self._con.execute(
+                        'INSERT INTO trabajos(clave,grupo_clave,url,origen,canal,titulo,cuentas,preset,'
+                        'texto_fijo,cortar,creado,actualizado,opciones) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        (clave if n == 0 else f'{clave}:edicion:{n}', clave, t['url'], t['origen'],
+                         t['canal'], t['titulo'], json.dumps(t['cuentas']), t['preset'], t['texto_fijo'],
+                         int(t['cortar']), ahora, ahora, json.dumps(t['opciones'])))
+                    ids.append(cur.lastrowid)
+                self._con.commit()
+                return ids
+            except Exception:
+                self._con.rollback()
+                raise
+
     def trabajo_por_clave(self, clave):
-        return self._uno('SELECT * FROM trabajos WHERE clave=?', (clave,))
+        return self._uno('SELECT * FROM trabajos WHERE clave=? OR grupo_clave=? ORDER BY id LIMIT 1', (clave, clave))
 
     def encolar_local(self, clave, nombre, archivo, cuentas, plataforma, texto):
         """El archivo ya se guardó: trabajo listo y destinos se confirman juntos.

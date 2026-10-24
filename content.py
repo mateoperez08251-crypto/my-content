@@ -1859,9 +1859,10 @@ def list_smart_presets():
 @app.route("/api/bot/preset", methods=["POST"])
 def save_smart_preset():
     data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
+    name = data.get("name") or ""
+    name = name.strip() if isinstance(name, str) else ""
     cfg = data.get("config") or {}
-    if not name or not isinstance(cfg, dict):
+    if not name or len(name) > 100 or not isinstance(cfg, dict):
         return jsonify({"success": False, "error": "Nombre o config inválidos"}), 400
     if request.path == '/api/bot/preset':
         from bot.presets import snapshot
@@ -1883,7 +1884,7 @@ def save_smart_preset():
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, _presets_path())
-        return jsonify({"success": True})
+        return jsonify({"success": True, "name": name, "config": cfg})
     except OSError as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -2204,10 +2205,11 @@ def bot_encolar():
         urls = [u.strip() for u in str(data.get("url", "")).replace(",", "\n").splitlines() if u.strip()]
         if not urls:
             raise ValueError("Pega al menos un enlace.")
-        ids = [_bot().encolar(u, origen="manual", cuentas=data.get("cuentas") or None,
-                              cortar=data.get("cortar", True), texto_fijo=data.get("texto_fijo", ""),
-                              preset=data.get('preset', ''))
-               for u in urls]
+        ids = []
+        for u in urls:
+            ids.extend(_bot().encolar(u, origen="manual", cuentas=data.get("cuentas") or None,
+                                     cortar=data.get("cortar", True), texto_fijo=data.get("texto_fijo", ""),
+                                     preset=data.get('preset', ''), devolver_ids=True))
         return {"ids": ids}
     return _bot_respuesta(hacer)
 
@@ -2269,8 +2271,8 @@ def bot_cuenta_editar(cid):
     d = request.get_json(silent=True) or {}
     if request.method == "DELETE":
         return _bot_respuesta(lambda: _bot().db.borrar_cuenta(cid))
-    return _bot_respuesta(lambda: _bot().db.editar_cuenta(cid, **{
-        k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida")}))
+    return _bot_respuesta(lambda: _bot().guardar_cuenta(cid, {
+        k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte")}))
 
 
 @app.route("/api/bot/cuentas/<int:cid>/cerrar", methods=["POST"])
