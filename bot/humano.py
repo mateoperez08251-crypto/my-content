@@ -95,6 +95,15 @@ class Humano:
             previo = locator.evaluate("el => ('value' in el ? el.value : el.innerText)") or ''
             texto = previo + texto
         comprobar_cancelacion(self.page)
+        if borrar:
+            # Los editores controlados (Draft.js/React) pueden conservar el texto
+            # previo si se reemplaza todo en un único evento. Vaciar primero y
+            # comprobarlo evita concatenar el título al nombre del archivo.
+            locator.fill('', timeout=15000)
+            comprobar_cancelacion(self.page)
+            previo = locator.evaluate("el => ('value' in el ? el.value : el.innerText)") or ''
+            if previo.strip():
+                raise RuntimeError('El editor no quedó vacío; no se añadirá texto sobre el título anterior.')
         # fill enfoca el input/contenteditable y emite input con el texto completo.
         # Evita perder letras, saltos y emojis por un clic aleatorio fuera del editor.
         locator.fill(texto, timeout=15000)

@@ -43,6 +43,20 @@ class Escritura(unittest.TestCase):
         self.h.escribir(self.editor, ' más texto', borrar=False)
         self.assertEqual(self.editor.valor, 'nombre_del_archivo más texto')
 
+    def test_editor_que_concatena_reemplazos_se_vacia_primero(self):
+        class EditorControlado(Campo):
+            def fill(self, texto, **kwargs):
+                self.valor = self.valor + texto if texto else ''
+        editor = EditorControlado(self.page)
+        self.h.escribir(editor, 'Título correcto')
+        self.assertEqual(editor.valor, 'Título correcto')
+
+    def test_si_el_borrado_falla_no_escribe_encima(self):
+        self.editor.fill = Mock()
+        with self.assertRaisesRegex(RuntimeError, 'no quedó vacío'):
+            self.h.escribir(self.editor, 'Título nuevo')
+        self.editor.fill.assert_called_once_with('', timeout=15000)
+
     def test_cancelar_antes_de_escribir_deja_el_campo_intacto(self):
         control = ControlSubida()
         self.page._bot_control_subida = control

@@ -122,7 +122,7 @@ class CancelarCola(unittest.TestCase):
             iniciar_publicacion(page)
         self.ejecutar(subir)
         self.page.keyboard.press.assert_not_called()
-        editor.fill.assert_called_once_with('muchas letras', timeout=15000)
+        editor.fill.assert_called_once_with('', timeout=15000)
         self.assertIsNone(self.m.db.subida(self.sid))
 
     def test_cancelar_interrumpe_una_pausa_ya_iniciada(self):
