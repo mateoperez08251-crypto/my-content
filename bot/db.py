@@ -464,6 +464,8 @@ class DB:
                 options = json.loads(row.pop('edicion_opciones') or '{}')
             except (ValueError, TypeError):
                 options = {}
+            if not isinstance(options, dict):
+                options = {}
             row['edicion'] = {k: options.get(k) for k in ('export_profile', 'upscale', 'style', 'show_subtitles', 'video_format')}
         return rows
 

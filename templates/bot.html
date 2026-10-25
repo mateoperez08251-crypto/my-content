@@ -394,7 +394,7 @@ function tarjetaSubida(s) {
   const peso = s.bytes == null ? 'No disponible' : `${(s.bytes/1024/1024).toFixed(1)} MB`;
   return `<div>${s.archivo_existe !== false ? `<video controls playsinline preload="none" src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
     <div><div class="publicacion-cabecera"><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><span class="publicacion-estado">${est(s.estado === 'ok' ? 'publicada' : s.estado)}</span></div>
-    <div>${plat(s.plataforma)} <b>${esc(s.cuenta_nombre || 'Cuenta eliminada')}</b> <span class="muted">· Publicación #${id}</span></div>
+    <div>${plat(s.plataforma)} ${esc({tiktok:"TikTok",youtube:"YouTube",facebook:"Facebook"}[s.plataforma] || "Plataforma no registrada")} · <b>${esc(s.cuenta_nombre || 'Cuenta eliminada')}</b> <span class="muted">· Publicación #${id}</span></div>
     <p class="publicacion-origen">${esc(s.origen || 'Origen no registrado')}${s.canal ? ' · '+esc(s.canal) : ''}${origen ? ` · <a href="${esc(origen)}" target="_blank" rel="noopener">Video original</a>` : ''}</p>
     <p class="publicacion-espera">${esc(s.espera || '')}</p><p class="publicacion-error err">${esc(s.error || '')}</p>
     <dl class="publicacion-datos"><div><dt>Parte del video original</dt><dd>${tramo}</dd></div><div><dt>Preset de esta cuenta</dt><dd>${esc(s.preset || 'Sin edición / no registrado')}</dd></div>
