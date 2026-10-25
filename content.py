@@ -614,9 +614,10 @@ def _es_ruido_progreso(lin):
     return bool(m) and int(m.group(2)) % 25 != 0
 
 
-def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None):
+def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None, cancel_checker=None):
     """Lanza un subproceso cancelable, reenvía su salida y devuelve el código de salida."""
     global current_subprocess
+    fin_monitor = threading.Event()
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -630,6 +631,13 @@ def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None):
             cancelado = cancel_requested
         if cancelado:
             winproc.matar_arbol(proc)
+        if cancel_checker:
+            def vigilar_cancelacion():
+                while not fin_monitor.wait(.2) and proc.poll() is None:
+                    if cancel_checker():
+                        winproc.matar_arbol(proc)
+                        return
+            threading.Thread(target=vigilar_cancelacion, daemon=True).start()
         for line in proc.stdout:
             lin = line.strip()
             if not lin or _es_ruido_progreso(lin):
@@ -638,6 +646,7 @@ def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None):
                 log(lin)
         return proc.wait()
     finally:
+        fin_monitor.set()
         with _estado_lock:
             if current_subprocess is not None and current_subprocess.poll() is not None:
                 current_subprocess = None
@@ -1598,6 +1607,9 @@ def smart_cast_sample(job_id, person):
 def run_smart_split_thread(data):
     """Requiere haber llamado antes a _intentar_iniciar_trabajo()."""
     _escribir_progreso_smart("Iniciando descargas...|0")
+    evento = data.get('_cancel_event')
+    def cancelado():
+        return _cancelado() or bool(evento and evento.is_set())
     try:
         from editor_controls import inicio_segundos
         inicio_edicion = inicio_segundos(data.get('skip_intro_seconds', 0))
@@ -1621,13 +1633,13 @@ def run_smart_split_thread(data):
             log("Descargando video para Smart Split...")
             dl_dir = data.get('custom_output_dir', '') or paths.data_path("videos_descargados")
             dl_quality = str(data.get('download_quality', 'best')).strip() or 'best'
-            source = yt_downloader.download_video(source, output_dir=dl_dir, quality=dl_quality, cancel_checker=lambda: cancel_requested)
+            source = yt_downloader.download_video(source, output_dir=dl_dir, quality=dl_quality, cancel_checker=cancelado)
             if not source:
                 raise Exception("Error al descargar video")
         elif not source or not os.path.isfile(source):
             raise Exception("No encontré el video. Pega solo el enlace (https://...) o elige un archivo "
                             f"con la carpeta. Recibí: {source[:80]}")
-        if _cancelado():
+        if cancelado():
             raise Exception("Cancelado.")
 
         output_dir = data.get('custom_output_dir', '') or paths.data_path("videos_procesados")
@@ -1762,8 +1774,8 @@ def run_smart_split_thread(data):
 
         cfg = _escribir_config("config_smart", cfg_datos)
         codigo = _ejecutar_subproceso(_cmd_script("smart_editor.py", "--run-smart", "--config", cfg),
-                                      leer_smart, config_path=cfg)
-        if _cancelado():
+                                      leer_smart, config_path=cfg, cancel_checker=cancelado)
+        if cancelado():
             raise Exception("Cancelado.")
         result_paths = resultado["rutas"]
         if codigo != 0 or not result_paths:
@@ -1790,7 +1802,7 @@ def run_smart_split_thread(data):
                 _log_destinos(os.path.basename(clip_path), tiktok, youtube, facebook)
                 log(f"Descripción: {titulo}")
                 _subir(clip_path, titulo, tiktok, facebook, youtube)
-                if _cancelado():
+                if cancelado():
                     raise Exception("Cancelado.")
         log(">>> PROCESO SMART SPLIT COMPLETADO <<<")
         return result_paths, resultado["meta"]
@@ -2369,10 +2381,15 @@ def _remoto_hilo(jid, datos):
     try:
         rutas, meta = run_smart_split_thread(datos)  # libera el bloqueo de trabajo al terminar
         with _remoto_lock:
-            _remoto_trabajos[jid].update(estado="listo", rutas=rutas, meta=meta or [])
+            job = _remoto_trabajos.get(jid)
+            if job:
+                job.update(estado='cancelado' if job.get('cancel_event') and job['cancel_event'].is_set() else 'listo',
+                           rutas=rutas, meta=meta or [])
     except Exception as e:
         with _remoto_lock:
-            _remoto_trabajos[jid].update(estado="error", error=str(e)[:500])
+            job = _remoto_trabajos.get(jid)
+            if job:
+                job.update(estado='cancelado' if job.get('cancel_event') and job['cancel_event'].is_set() else 'error', error=str(e)[:500])
 
 
 @app.route("/api/bot/remoto/cortar", methods=["POST"])
@@ -2386,11 +2403,13 @@ def remoto_cortar():
     datos = {**(d.get("preset") or {}), "source": source, "download_quality": "best",
              "subir_tiktok": False, "subir_youtube": False, "subir_facebook": False, "_lanzar_error": True}
     jid = uuid.uuid4().hex[:12]
+    evento = threading.Event()
+    datos['_cancel_event'] = evento
     with _remoto_lock:
         # se olvidan los trabajos de hace más de un día
         for viejo in [k for k, v in _remoto_trabajos.items() if time.time() - v["creado"] > 86400]:
             _remoto_trabajos.pop(viejo, None)
-        _remoto_trabajos[jid] = {"estado": "cortando", "rutas": [], "meta": [], "error": "", "creado": time.time()}
+        _remoto_trabajos[jid] = {"estado": "cortando", "rutas": [], "meta": [], "error": "", "creado": time.time(), "cancel_event": evento}
     threading.Thread(target=_remoto_hilo, args=(jid, datos), daemon=True).start()
     return jsonify({"success": True, "id": jid})
 
@@ -2403,6 +2422,11 @@ def remoto_estado(jid):
     if not t:
         return jsonify({"success": False, "error": "Trabajo no encontrado (¿se reinició el servidor?)."}), 404
     if request.method == "DELETE":
+        if t.get('estado') in ('cortando', 'cancelando'):
+            t['cancel_event'].set()
+            with _remoto_lock:
+                _remoto_trabajos[jid]['estado'] = 'cancelando'
+            return jsonify({'success': True, 'estado': 'cancelando'})
         for r in t["rutas"]:
             try:
                 os.remove(r)

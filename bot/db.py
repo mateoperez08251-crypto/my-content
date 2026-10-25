@@ -367,6 +367,13 @@ class DB:
         return self._uno("SELECT COUNT(*) AS n FROM trabajos WHERE estado IN "
                          "('pendiente','descargando','cortando')" + filtro)["n"]
 
+    def esperando_remotos(self):
+        return self._uno("SELECT COUNT(*) AS n FROM trabajos WHERE estado='esperando_remoto'")['n']
+
+    def reanudar_remotos(self):
+        return self._q("UPDATE trabajos SET estado='pendiente',error='',proximo_intento=0,actualizado=? "
+                       "WHERE estado='esperando_remoto'", (time.time(),)).rowcount
+
     def subidas_pendientes(self):
         return self._todos("SELECT * FROM subidas WHERE estado='pendiente' ORDER BY id")
 
@@ -443,10 +450,22 @@ class DB:
         self._q(f"UPDATE subidas SET {sql} WHERE id=?", (*campos.values(), int(sid)))
 
     def subidas_recientes(self, limite=80):
-        return self._todos(
-            "SELECT s.*, c.nombre AS cuenta_nombre, c.plataforma AS plataforma "
-            "FROM subidas s LEFT JOIN cuentas c ON c.id=s.cuenta_id ORDER BY s.id DESC LIMIT ?",
-            (int(limite),))
+        rows = self._todos(
+            "SELECT s.*, c.nombre AS cuenta_nombre, c.plataforma AS plataforma, "
+            "t.titulo AS video_titulo, t.url AS video_url, t.canal AS canal, t.origen AS origen, "
+            "t.preset AS preset, t.opciones AS edicion_opciones, "
+            "h.inicio AS clip_inicio, h.fin AS clip_fin "
+            "FROM subidas s LEFT JOIN cuentas c ON c.id=s.cuenta_id "
+            "LEFT JOIN trabajos t ON t.id=s.trabajo_id "
+            "LEFT JOIN clip_historial h ON h.trabajo_id=s.trabajo_id AND h.cuenta_id=s.cuenta_id AND h.archivo=s.archivo "
+            "ORDER BY s.id DESC LIMIT ?", (int(limite),))
+        for row in rows:
+            try:
+                options = json.loads(row.pop('edicion_opciones') or '{}')
+            except (ValueError, TypeError):
+                options = {}
+            row['edicion'] = {k: options.get(k) for k in ('export_profile', 'upscale', 'style', 'show_subtitles', 'video_format')}
+        return rows
 
     def reintentar_subida(self, sid):
         self._q("UPDATE subidas SET estado='pendiente', intentos=0, proximo_intento=0, error='', "

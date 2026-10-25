@@ -48,6 +48,7 @@ CONFIG_DEFECTO = {
     "radar_desde": 0,        # la bandeja de Firebase solo cuenta lo detectado después de esto
     "remoto_url": "",        # servidor de cortes (Colab con GPU); vacío = cortar en esta PC
     "remoto_clave": "",
+    "remoto_respaldo_local": False,  # Sin GPU local: conservar la cola y esperar al servidor.
     "avisos_activos": True,
     "avisos_cola": True,
     "avisos_progreso": True,
@@ -114,6 +115,7 @@ class Motor:
         self._despertar = threading.Event()
         self._cola_lock = threading.RLock()
         self._subida_actual = None
+        self._edicion_actual = None
         self._sesiones_guard = threading.Lock()
         self._comprobando = set()
         self._hilo = None
@@ -182,6 +184,8 @@ class Motor:
         os.replace(tmp, self._cfg_ruta)
         previo = self.cfg
         self.cfg = nueva
+        if not nueva['remoto_url'] or nueva['remoto_respaldo_local']:
+            self.db.reanudar_remotos()
         self._despertar.set()
         if hasattr(self, '_avisos'):
             self._avisos.wake.set()
@@ -556,6 +560,25 @@ class Motor:
 
     # -- preparar (descargar + cortar) ----------------------------------
     def _procesar_trabajo(self, t):
+        evento = threading.Event()
+        with self._cola_lock:
+            if not self.db.trabajo(t['id']):
+                return
+            self._edicion_actual = (t['id'], evento)
+        try:
+            self._preparar_trabajo(t)
+        except remoto.CorteCancelado:
+            pass
+        finally:
+            with self._cola_lock:
+                if evento.is_set():
+                    self.actividad = 'Corte cancelado. El video fue retirado de la cola.'
+                self._edicion_actual = None
+
+    def _edicion_cancelada(self):
+        return self._stop.is_set() or bool(self._edicion_actual and self._edicion_actual[1].is_set())
+
+    def _preparar_trabajo(self, t):
         guardados = archivos.leer_preparados(self.carpeta_clips(t))
         if guardados:
             self._finalizar_clips(t, guardados)
@@ -570,6 +593,12 @@ class Motor:
                                        proximo_intento=time.time() + 120)
                 self.actividad = "El servidor de cortes está ocupado; espero"
                 return
+        if (t['cortar'] and not t.get('archivo_local') and self.cfg['remoto_url']
+                and not self.cfg['remoto_respaldo_local']):
+            self.db.marcar_trabajo(t['id'], 'esperando_remoto',
+                                   'Servidor de cortes desconectado. Trabajo guardado; se reanuda cuando vuelva la conexión.')
+            self.actividad = 'Esperando al servidor de cortes. Los clips guardados pueden seguir publicándose.'
+            return
         if not self.ocupar():
             self.db.marcar_trabajo(t["id"], "pendiente", "Esperando: hay otra tarea en la app.",
                                    proximo_intento=time.time() + 60)
@@ -592,6 +621,7 @@ class Motor:
                 opciones = json.loads(t.get('opciones') or '{}') or (self.cargar_preset(t['preset']) or {})
                 datos = {**opciones, "bot_unique": not bool(local),
                          "excluded_ranges": self.db.intervalos_usados(t['url'], None, t['id']) if not local else [],
+                         "_cancel_event": self._edicion_actual[1] if self._edicion_actual else None,
                          "source": local or t["url"],
                          "download_quality": "best", "subir_tiktok": False, "subir_youtube": False,
                          "subir_facebook": False, "_lanzar_error": True}
@@ -618,6 +648,8 @@ class Motor:
         except Exception as e:
             if liberar_al_fallar:
                 self.liberar()
+            if self._edicion_cancelada():
+                raise remoto.CorteCancelado('Corte cancelado.') from e
             intentos = t["intentos"] + 1
             if intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
@@ -630,6 +662,8 @@ class Motor:
             self.log(f"Falló preparar {nombre}: {e}")
             return
 
+        if self._edicion_cancelada() or not self.db.trabajo(t['id']):
+            raise remoto.CorteCancelado('Corte cancelado.')
         self._finalizar_clips(t, clips)
 
     def carpeta_clips(self, t):
@@ -675,16 +709,22 @@ class Motor:
         return remoto.Cliente(self.cfg["remoto_url"], self.cfg["remoto_clave"])
 
     def _remoto_caido(self, e):
-        self._remoto_caido_hasta = time.time() + 30 * 60
-        self._remoto_estado = f"Sin conexión ({e}). Corto en esta PC."
-        self.log(f"Servidor de cortes no responde: {e}. Corto en esta PC.")
+        self._remoto_caido_hasta = time.time() + 5 * 60
+        accion = 'Usaré el respaldo local.' if self.cfg['remoto_respaldo_local'] else 'Guardaré los trabajos hasta que vuelva.'
+        self._remoto_estado = f'Sin conexión ({e}). {accion}'
+        self.log(f'Servidor de cortes no responde: {e}. {accion}')
         if not self._remoto_avisado:
             self._remoto_avisado = True
-            self.avisar('sistema', f'colab:caido:{time.time_ns()}', 'No pude conectar con el servidor de cortes. ' + motivo_fallo(e) +
-                        '\nVoy a intentar editar los próximos trabajos en esta PC. Los clips que ya guardaste aquí no necesitan Colab para subir.', True)
+            self.avisar('sistema', f'colab:caido:{time.time_ns()}',
+                        'Se desconectó el servidor de cortes. ' + motivo_fallo(e) + '\n' + accion +
+                        ' Los clips guardados en esta PC siguen su turno de publicación. Revisaré la conexión cada 5 minutos.', True)
 
     def _remoto_volvio(self):
         self._remoto_caido_hasta = 0
+        cantidad_reanudada = self.db.reanudar_remotos()
+        if cantidad_reanudada:
+            self.log(f'Servidor recuperado: {cantidad_reanudada} trabajo(s) vuelven a la cola sin perder sus ajustes.')
+            self._despertar.set()
         if self._remoto_avisado:
             self._remoto_avisado = False
             self.avisar('sistema', f'colab:conectado:{time.time_ns()}', 'El servidor de cortes volvió a responder. Los próximos videos desde enlace podrán editarse ahí. Los segmentos de live se editan en tu PC.', True)
@@ -732,7 +772,7 @@ class Motor:
             if not jid:
                 jid = cli.iniciar(t['url'], datos)
                 self.db.marcar_trabajo(t['id'], 'cortando', remoto_id=jid, remoto_url=self.cfg['remoto_url'])
-            clips = cli.esperar_y_bajar(jid, carpeta, progreso, cancelar=self._stop.is_set)
+            clips = cli.esperar_y_bajar(jid, carpeta, progreso, cancelar=self._edicion_cancelada)
         except (remoto.FalloTrabajo, OSError, ValueError) as e:
             intentos = t["intentos"] + 1
             extra = {'remoto_id':'', 'remoto_url':''} if isinstance(e, remoto.FalloCorte) else {}
@@ -799,6 +839,10 @@ class Motor:
             if actual is not None and actual[0]['trabajo_id'] == int(tid):
                 resultado = self.borrar_subida(actual[0]['id'])
             anterior = self.db.trabajo(tid)
+            if self._edicion_actual and self._edicion_actual[0] == int(tid):
+                self._edicion_actual[1].set()
+                self.actividad = 'Cancelando el corte; deteniendo su procesamiento…'
+                resultado = {'estado': 'cancelando', 'mensaje': 'Cancelación solicitada. Se detendrá el corte y no se encolarán sus resultados.'}
             self.db.borrar_trabajo(tid)
             if anterior:
                 self._aviso_trabajo(anterior, 'borrado', 'Video retirado de la cola.', 'cola')
@@ -872,6 +916,8 @@ class Motor:
     def _motivo_espera(self):
         pendientes = self.db.subidas_pendientes()
         if not pendientes:
+            if self.db.esperando_remotos():
+                return 'Esperando al servidor de cortes. Los trabajos están guardados y se reanudarán al recuperar la conexión.'
             return 'En espera: no hay subidas pendientes.'
         motivos = []
         for subida in pendientes:
@@ -1206,6 +1252,7 @@ class Motor:
             s['archivo_existe'] = os.path.isfile(s['archivo'])
         plan = estimar(pendientes, cuentas, self.cfg, time.time(), self._libre_global)
         plan['por_preparar'] = self.db.por_preparar()
+        plan['esperando_remoto'] = self.db.esperando_remotos()
         plan['retenida'] = (not self.cfg['activo'] or self.cfg['modo_cola'] == 'solo_preparar' or
                             (self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True) > 0))
         guardados = self.db.archivos_preparados()
@@ -1216,6 +1263,14 @@ class Motor:
         por_cuenta = {c['id']: c for c in cuentas}
         ahora = time.time()
         for subida in recientes:
+            cuenta = por_cuenta.get(subida['cuenta_id']) or {}
+            subida['no_antes'] = max(subida.get('proximo_intento', 0), subida.get('programada_para', 0),
+                                    cuenta.get('proxima_libre', 0), self._libre_global)
+            try:
+                subida['bytes'] = os.path.getsize(subida['archivo'])
+                subida['archivo_existe'] = True
+            except OSError:
+                subida['bytes'], subida['archivo_existe'] = None, False
             if subida['estado'] == 'pendiente':
                 subida['espera'] = self._motivo_subida(subida, por_cuenta.get(subida['cuenta_id']), ahora)
         return {

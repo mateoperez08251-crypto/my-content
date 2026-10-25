@@ -468,6 +468,7 @@ class ServidorDeCortes(unittest.TestCase):
         self.local = os.path.join(self.tmp.name, "local.mp4")
         pathlib.Path(self.local).write_bytes(b"l")
         m = self._motor("http://127.0.0.1:9")  # nadie escucha
+        m.guardar_cfg({'remoto_respaldo_local': True})
         m._procesar_trabajo(m.db.siguiente_trabajo())
         self.assertEqual([pathlib.Path(s['archivo']).read_bytes() for s in m.db.subidas_recientes()], [b'l'])
         self.assertFalse(m._remoto_disponible())  # no lo reintenta en 30 min
