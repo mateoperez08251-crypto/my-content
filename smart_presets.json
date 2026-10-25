@@ -186,7 +186,7 @@
     "sub_fuente": "",
     "subtitle_scale": 80.0,
     "transcripcion": "groq",
-    "upscale": "ia",
+    "upscale": "off",
     "video_format": "vertical",
     "whisper_local": "large-v3"
   },
@@ -210,7 +210,7 @@
     "sub_fuente": "montserrat",
     "subtitle_scale": 80.0,
     "transcripcion": "groq",
-    "upscale": "ia",
+    "upscale": "hd",
     "video_format": "vertical",
     "whisper_local": "large-v3"
   },
@@ -234,7 +234,7 @@
     "sub_fuente": "montserrat",
     "subtitle_scale": 80.0,
     "transcripcion": "groq",
-    "upscale": "ia",
+    "upscale": "off",
     "video_format": "vertical_blur",
     "whisper_local": "large-v3"
   },
