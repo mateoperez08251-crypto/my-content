@@ -15,6 +15,18 @@ const card = ctx.tarjetaSubida({id:3,estado:'pendiente',texto:'Descripción comp
 assert(card.includes('Mi video &lt;script&gt;error&lt;/script&gt;'));
 for(const text of ['Cuenta A','01:00 – 02:00','Descripción completa','Pausa de la cuenta','Calidad máxima','Real-ESRGAN']) assert(card.includes(text));
 assert(card.includes('preload="none"'));assert(card.includes('controls'));assert(card.includes('No antes de'));
+assert(card.includes('<details class="publicacion-detalle">'));
+assert(!card.includes('<details class="publicacion-detalle" open'));
+assert(card.includes('Ver detalles'));
+const groups=ctx.gruposSubidas([{id:1,estado:'ok'},{id:2,estado:'subiendo'},{id:3,estado:'error'}]);
+assert.deepEqual(Array.from(groups.pendientes,s=>s.id),[2,3]);
+assert.deepEqual(Array.from(groups.publicadas,s=>s.id),[1]);
+assert(html.indexOf('id="historial-publicadas"') > html.indexOf('id="registro"'));
+const detailsA={open:false},detailsB={open:false},history={open:false};
+const nodes={subidas:{querySelectorAll:()=>[detailsA]},'subidas-publicadas':{querySelectorAll:()=>[detailsB]},'publicadas-desplegable':history};
+ctx.$=id=>nodes[id];ctx.expandirSubidas(true);
+assert(detailsA.open && detailsB.open && history.open);
+ctx.expandirSubidas(false);assert(!detailsA.open && !detailsB.open && !history.open);
 const unsafe = ctx.tarjetaSubida({id:4,estado:'ok',archivo:'x',url_publicada:'javascript:alert(1)',archivo_existe:false});
 assert(!unsafe.includes('href="javascript:'));assert(unsafe.includes('ya no está'));
 console.log('Subidas: tarjetas completas, vista previa sin descarga anticipada y enlaces seguros correctos');

@@ -69,9 +69,21 @@ a{color:var(--acento)}
 dialog.cookies-dialog{width:min(520px,calc(100% - 24px));max-height:90vh;color:var(--texto);padding:20px}
 dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 .subidas-seccion h2{font:600 18px Inter,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:8px}.subidas-seccion h2 small{font:400 12px Inter;color:var(--suave);margin-left:auto}
-.subidas-lista{display:grid;gap:18px;margin-top:18px}
-.publicacion{display:grid;grid-template-columns:180px minmax(0,1fr);gap:22px;background:var(--panel);border:1px solid var(--borde);border-radius:10px;padding:18px}
-.publicacion video{width:100%;max-height:310px;aspect-ratio:9/16;object-fit:contain;background:var(--bg);border-radius:6px}
+.subidas-controles button{flex:0 0 auto}
+.subidas-lista{display:grid;gap:10px;margin-top:14px}
+.publicacion{background:var(--panel);border:1px solid var(--borde);border-radius:10px;overflow:hidden}
+.publicacion-resumen{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:14px 16px;cursor:pointer;list-style:none}
+.publicacion-resumen::-webkit-details-marker{display:none}
+.publicacion-resumen:focus-visible{outline:2px solid var(--acento);outline-offset:-3px}
+.publicacion-resumen h3{font-size:14px;margin:0 0 5px}
+.publicacion-resumen-meta{font-size:12px;color:var(--suave)}
+.publicacion-resumen-estado{display:flex;gap:12px;align-items:center;white-space:nowrap}
+.publicacion-toggle{font-size:12px;color:var(--acento)}
+.publicacion-detalle:not([open]) .texto-contraer,.publicacion-detalle[open] .texto-expandir{display:none}
+.publicacion-cuerpo{display:grid;grid-template-columns:96px minmax(0,1fr);gap:18px;border-top:1px solid var(--borde);padding:14px 16px}
+.historial-subidas{margin-top:12px}
+.historial-subidas>summary{cursor:pointer;font-size:16px;font-weight:600;padding:12px 0}
+.publicacion video{width:100%;max-height:170px;aspect-ratio:9/16;object-fit:contain;background:var(--bg);border-radius:6px}
 .publicacion h3{font:600 17px/1.4 Inter,sans-serif;margin:0;overflow-wrap:anywhere}
 .publicacion-cabecera{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px}
 .publicacion-datos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px;margin:18px 0}
@@ -85,7 +97,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 .publicacion-origen{font-size:12px;color:var(--suave);overflow-wrap:anywhere}
 .publicacion-falta{color:var(--suave);padding:22px 10px;border:1px dashed var(--borde);border-radius:6px}
 .publicacion-vacia{padding:22px;color:var(--suave);border:1px dashed var(--borde);border-radius:8px}
-@media(max-width:650px){.publicacion{grid-template-columns:1fr;padding:14px;gap:14px}.publicacion video{max-height:260px;aspect-ratio:auto}.publicacion-datos{grid-template-columns:repeat(2,minmax(0,1fr))}.publicacion-cabecera{flex-wrap:wrap}.publicacion-acciones button{min-height:44px}}
+@media(max-width:650px){.publicacion-cuerpo{grid-template-columns:1fr;padding:12px;gap:12px}.publicacion-resumen{flex-wrap:wrap;padding:12px;gap:8px}.publicacion video{max-height:150px;width:100px;aspect-ratio:9/16}.publicacion-datos{grid-template-columns:repeat(2,minmax(0,1fr))}.publicacion-cabecera{flex-wrap:wrap}.publicacion-acciones button{min-height:44px}}
 .cookies-dialog h2{justify-content:space-between}
 .cookies-dialog button:disabled{opacity:.5;cursor:wait}
 #cookies-descarga-servidor{overflow-wrap:anywhere}
@@ -280,6 +292,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <div class="fila"><button id="lanzar-subidas" class="prim" onclick="lanzarSubidasGuardadas()">Lanzar subidas guardadas</button><span id="lanzar-subidas-estado" class="muted" aria-live="polite"></span></div>
     <p class="ayuda">Activa el bot en «Solo publicar clips guardados» y pone en marcha las publicaciones pendientes. El primer clip listo no espera la pausa de 60–120 min si esa cuenta no tiene una pausa anterior. Respeta el horario, la sesión, los límites y los reintentos. La tarea en curso termina antes. Para volver a editar, cambia el modo en el apartado 1.</p>
     <p class="muted">Cada tarjeta corresponde a un clip y una cuenta. La vista previa es el archivo guardado en esta PC. “Publicada” indica confirmación de la plataforma o revisión manual; el enlace aparece cuando la plataforma lo devuelve.</p>
+    <div class="fila subidas-controles" style="margin-top:10px"><button onclick="expandirSubidas(true)">Expandir todo</button><button onclick="expandirSubidas(false)">Contraer todo</button></div>
     <div id="subidas" class="subidas-lista" role="list" aria-label="Publicaciones por cuenta"></div>
   </section>
 
@@ -310,6 +323,12 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
   <section class="card">
     <h2><i class="ph-duotone ph-terminal-window"></i> Registro</h2>
     <div id="registro"></div>
+  </section>
+  <section class="ancho subidas-seccion" id="historial-publicadas" hidden>
+    <details class="historial-subidas" id="publicadas-desplegable">
+      <summary>Publicadas <span id="res-publicadas" class="muted"></span> · expandir / contraer</summary>
+      <div id="subidas-publicadas" class="subidas-lista" role="list" aria-label="Publicaciones completadas"></div>
+    </details>
   </section>
 </main>
 <dialog class="card cookies-dialog" id="cookies-descarga-modal" aria-labelledby="cookies-descarga-titulo">
@@ -392,9 +411,11 @@ function tarjetaSubida(s) {
   const mejora = {off:'Sin mejora adicional',ia:'Real-ESRGAN IA',hd:'Realzado HD',sharpen:'Nitidez'}[edicion.upscale] || 'No registrada';
   const tramo = s.clip_inicio != null && s.clip_fin != null ? `${tiempoClip(s.clip_inicio)} – ${tiempoClip(s.clip_fin)} (${Math.round(s.clip_fin-s.clip_inicio)} s)` : 'No registrado';
   const peso = s.bytes == null ? 'No disponible' : `${(s.bytes/1024/1024).toFixed(1)} MB`;
-  return `<div>${s.archivo_existe !== false ? `<video controls playsinline preload="none" src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
-    <div><div class="publicacion-cabecera"><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><span class="publicacion-estado">${est(s.estado === 'ok' ? 'publicada' : s.estado)}</span></div>
-    <div>${plat(s.plataforma)} ${esc({tiktok:"TikTok",youtube:"YouTube",facebook:"Facebook"}[s.plataforma] || "Plataforma no registrada")} · <b>${esc(s.cuenta_nombre || 'Cuenta eliminada')}</b> <span class="muted">· Publicación #${id}</span></div>
+  return `<details class="publicacion-detalle"><summary class="publicacion-resumen">
+    <div><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><div class="publicacion-resumen-meta">${esc(s.cuenta_nombre || 'Cuenta eliminada')} · ${esc(s.plataforma || '')} · ${tramo}</div></div>
+    <div class="publicacion-resumen-estado"><span class="publicacion-estado">${est(s.estado === 'ok' ? 'publicada' : s.estado)}</span><span class="publicacion-toggle"><span class="texto-expandir">Ver detalles ▾</span><span class="texto-contraer">Contraer ▴</span></span></div>
+    </summary><div class="publicacion-cuerpo"><div>${s.archivo_existe !== false ? `<video controls playsinline preload="none" src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
+    <div><div>${plat(s.plataforma)} ${esc({tiktok:"TikTok",youtube:"YouTube",facebook:"Facebook"}[s.plataforma] || "Plataforma no registrada")} · <b>${esc(s.cuenta_nombre || 'Cuenta eliminada')}</b> <span class="muted">· Publicación #${id}</span></div>
     <p class="publicacion-origen">${esc(s.origen || 'Origen no registrado')}${s.canal ? ' · '+esc(s.canal) : ''}${origen ? ` · <a href="${esc(origen)}" target="_blank" rel="noopener">Video original</a>` : ''}</p>
     <p class="publicacion-espera">${esc(s.espera || '')}</p><p class="publicacion-error err">${esc(s.error || '')}</p>
     <dl class="publicacion-datos"><div><dt>Parte del video original</dt><dd>${tramo}</dd></div><div><dt>Preset de esta cuenta</dt><dd>${esc(s.preset || 'Sin edición / no registrado')}</dd></div>
@@ -409,20 +430,37 @@ function tarjetaSubida(s) {
     ${s.estado === 'revisar' ? `<button onclick="accion('subidas',${id},'ok')" title="Sí se publicó">Sí se publicó</button>` : ''}
     ${!['ok','subiendo','cancelando'].includes(s.estado) ? `<button onclick="accion('subidas',${id},'reintentar')">Reintentar</button>` : ''}
     ${s.estado !== 'ok' ? `<button class="peligro" onclick="accion('subidas',${id},'borrar')" ${s.estado === 'cancelando' ? 'disabled' : ''}>${s.estado === 'subiendo' ? 'Cancelar subida' : 'Eliminar de la cola'}</button>` : ''}
-    ${s.captura ? `<a href="/api/bot/captura/${id}" target="_blank" rel="noopener">Ver captura del error</a>` : ''}</div></div>`;
+    ${s.captura ? `<a href="/api/bot/captura/${id}" target="_blank" rel="noopener">Ver captura del error</a>` : ''}</div></div></div></details>`;
+}
+function gruposSubidas(subidas) {
+  return {pendientes:subidas.filter(s=>s.estado !== 'ok'), publicadas:subidas.filter(s=>s.estado === 'ok')};
+}
+function expandirSubidas(expandir) {
+  for (const id of ['subidas','subidas-publicadas']) {
+    $(id)?.querySelectorAll('.publicacion-detalle').forEach(d=>{d.open=expandir;});
+  }
+  if ($('publicadas-desplegable')) $('publicadas-desplegable').open=expandir;
 }
 function pintarSubidas(subidas) {
-  const contenedor = $('subidas'), ids = new Set(subidas.map(s=>String(s.id)));
+  const grupos=gruposSubidas(subidas);
+  actualizarTarjetas($('subidas'),grupos.pendientes);
+  actualizarTarjetas($('subidas-publicadas'),grupos.publicadas);
+  if ($('historial-publicadas')) $('historial-publicadas').hidden=!grupos.publicadas.length;
+  if ($('res-publicadas')) $('res-publicadas').textContent=`(${grupos.publicadas.length})`;
+}
+function actualizarTarjetas(contenedor, subidas) {
+  if (!contenedor) return;
+  const ids = new Set(subidas.map(s=>String(s.id)));
   contenedor.querySelectorAll('[data-subida-id]').forEach(n=>{if(!ids.has(n.dataset.subidaId)) n.remove();});
   contenedor.querySelector('.publicacion-vacia')?.remove();
-  if (!subidas.length) { contenedor.innerHTML = '<p class="publicacion-vacia">Todavía no hay publicaciones. Añade un video para ver aquí sus clips, cuentas y estados.</p>'; return; }
+  if (!subidas.length) { contenedor.innerHTML = '<p class="publicacion-vacia">No hay publicaciones pendientes en esta lista.</p>'; return; }
   subidas.forEach((s,i)=>{
     let tarjeta = contenedor.querySelector(`[data-subida-id="${Number(s.id)}"]`);
     const contenido = tarjetaSubida(s);
-    if (!tarjeta) { tarjeta = document.createElement('article'); tarjeta.className='publicacion'; tarjeta.dataset.subidaId=String(s.id); tarjeta.setAttribute('role','listitem'); tarjeta.setAttribute('aria-labelledby',`subida-titulo-${s.id}`); }
+    if (!tarjeta) { tarjeta = document.createElement('article'); tarjeta.className='publicacion'; tarjeta.dataset.subidaId=String(s.id); tarjeta.setAttribute('role','listitem'); tarjeta.setAttribute('aria-labelledby',`subida-titulo-${s.id}`); tarjeta.addEventListener('toggle',e=>{if(e.target.matches('.publicacion-detalle') && !e.target.open) e.target.querySelector('video')?.pause();},true); }
     const video = tarjeta.querySelector('video');
     const interactuando = (video && !video.paused) || tarjeta.contains(document.activeElement);
-    if (tarjeta._contenido !== contenido && !interactuando) { tarjeta.innerHTML=contenido; tarjeta._contenido=contenido; }
+    if (tarjeta._contenido !== contenido && !interactuando) { const abierta=tarjeta.querySelector('.publicacion-detalle')?.open || false; tarjeta.innerHTML=contenido; tarjeta.querySelector('.publicacion-detalle').open=abierta; tarjeta._contenido=contenido; }
     else if (interactuando) {
       tarjeta.querySelector('.publicacion-estado').innerHTML=est(s.estado === 'ok' ? 'publicada' : s.estado);
       tarjeta.querySelector('.publicacion-espera').textContent=s.espera || '';
