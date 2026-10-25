@@ -30,7 +30,7 @@ class ColabQualityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             run = Mock()
             scope = dict(DATA=Path(folder), APP=Path(folder, 'repo'), run=run,
-                         app_env={'CONTENTAPP_VIDEO_PYTHON': 'gpu-python'}, stop_app=Mock(), print=Mock())
+                         app_env={'CONTENTAPP_VIDEO_PYTHON': 'gpu-python'}, PYTHON='base-python', stop_app=Mock(), print=Mock())
             code = self.cells()['extra-models'].replace('MODELO_MEJORA = "Real-ESRGAN x2"', 'MODELO_MEJORA = "Real-ESRGAN x4"', 1)
             exec(code, scope)
             self.assertIn('realesrgan_x4', run.call_args_list[0].args[0])

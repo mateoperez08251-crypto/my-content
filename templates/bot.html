@@ -44,7 +44,7 @@ th{text-align:left;color:var(--suave);font-weight:500;padding:6px 8px;border-bot
 td{padding:7px 8px;border-bottom:1px solid #181b22;vertical-align:top}
 td.acc{white-space:nowrap;text-align:right}
 .est{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
-.e-ok,.e-listo{color:var(--ok)} .e-error,.e-sin_login,.e-sin_destino{color:var(--mal)}
+.e-ok,.e-listo,.e-publicada{color:var(--ok)} .e-error,.e-sin_login,.e-sin_destino{color:var(--mal)}
 .e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#555} .e-revisar,.e-sin_comprobar,.e-cancelando{color:var(--aviso)}
 .plat{display:inline-flex;align-items:center;gap:4px}
 .muted{color:var(--suave);font-size:12px}
@@ -68,6 +68,24 @@ padding:10px 16px;border-radius:8px;display:none;z-index:9}
 a{color:var(--acento)}
 dialog.cookies-dialog{width:min(520px,calc(100% - 24px));max-height:90vh;color:var(--texto);padding:20px}
 dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
+.subidas-seccion h2{font:600 18px Inter,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:8px}.subidas-seccion h2 small{font:400 12px Inter;color:var(--suave);margin-left:auto}
+.subidas-lista{display:grid;gap:18px;margin-top:18px}
+.publicacion{display:grid;grid-template-columns:180px minmax(0,1fr);gap:22px;background:var(--panel);border:1px solid var(--borde);border-radius:10px;padding:18px}
+.publicacion video{width:100%;max-height:310px;aspect-ratio:9/16;object-fit:contain;background:var(--bg);border-radius:6px}
+.publicacion h3{font:600 17px/1.4 Inter,sans-serif;margin:0;overflow-wrap:anywhere}
+.publicacion-cabecera{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px}
+.publicacion-datos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px;margin:18px 0}
+.publicacion-datos dt{font-size:12px;color:var(--suave);margin-bottom:4px}
+.publicacion-datos dd{margin:0;font-size:13px;overflow-wrap:anywhere}
+.publicacion-texto{white-space:pre-wrap;overflow-wrap:anywhere;max-width:75ch;margin:6px 0 16px}
+.publicacion-espera{color:var(--aviso);margin:8px 0}
+.publicacion .err{max-width:75ch}
+.publicacion-acciones{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.publicacion-acciones button{min-height:36px}
+.publicacion-origen{font-size:12px;color:var(--suave);overflow-wrap:anywhere}
+.publicacion-falta{color:var(--suave);padding:22px 10px;border:1px dashed var(--borde);border-radius:6px}
+.publicacion-vacia{padding:22px;color:var(--suave);border:1px dashed var(--borde);border-radius:8px}
+@media(max-width:650px){.publicacion{grid-template-columns:1fr;padding:14px;gap:14px}.publicacion video{max-height:260px;aspect-ratio:auto}.publicacion-datos{grid-template-columns:repeat(2,minmax(0,1fr))}.publicacion-cabecera{flex-wrap:wrap}.publicacion-acciones button{min-height:44px}}
 .cookies-dialog h2{justify-content:space-between}
 .cookies-dialog button:disabled{opacity:.5;cursor:wait}
 #cookies-descarga-servidor{overflow-wrap:anywhere}
@@ -246,6 +264,8 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
          target="_blank" rel="noopener"><button><i class="ph ph-arrow-square-out"></i> Abrir Colab</button></a>
     </div>
     <div class="muted" id="remoto-estado" style="margin-top:4px"></div>
+    <label class="switch"><input type="checkbox" id="remoto_respaldo_local"> Intentar editar en esta PC si el servidor se desconecta</label>
+    <p class="muted">Déjalo desmarcado en equipos sin GPU NVIDIA: el bot guarda los trabajos, sigue subiendo clips ya preparados y comprueba la conexión cada 5 minutos. Reanuda la edición cuando vuelve el servidor. Si Colab elimina la sesión, inicia una nueva y actualiza el enlace; este control no puede volver a crear la máquina de Google.</p>
     <p class="ayuda">Colab: ejecuta las celdas 1–6 y la 6C para obtener la URL de Cloudflare, sin cuenta ni token. Pega la dirección https://….trycloudflare.com y la contraseña de la celda 4; pulsa Probar. Al reiniciar la celda 6, repite 6C y copia la URL nueva. El enlace del proxy de Google sirve para abrir la interfaz.</p>
     <div class="fila" style="margin-top:12px">
       <label class="switch"><input type="checkbox" id="radar_auto"> Radar de la PC → cola</label>
@@ -255,12 +275,12 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
   </section>
 
-  <section class="card ancho">
+  <section class="ancho subidas-seccion">
     <h2><i class="ph-duotone ph-upload-simple"></i> Subidas <small id="res-subidas"></small></h2>
     <div class="fila"><button id="lanzar-subidas" class="prim" onclick="lanzarSubidasGuardadas()">Lanzar subidas guardadas</button><span id="lanzar-subidas-estado" class="muted" aria-live="polite"></span></div>
     <p class="ayuda">Activa el bot en «Solo publicar clips guardados» y pone en marcha las publicaciones pendientes. El primer clip listo no espera la pausa de 60–120 min si esa cuenta no tiene una pausa anterior. Respeta el horario, la sesión, los límites y los reintentos. La tarea en curso termina antes. Para volver a editar, cambia el modo en el apartado 1.</p>
-    <div class="tabla-scroll"><table><thead><tr><th>#</th><th>Cuenta</th><th>Clip</th><th>Estado</th><th>Detalle</th><th></th></tr></thead>
-    <tbody id="subidas"></tbody></table></div>
+    <p class="muted">Cada tarjeta corresponde a un clip y una cuenta. La vista previa es el archivo guardado en esta PC. “Publicada” indica confirmación de la plataforma o revisión manual; el enlace aparece cuando la plataforma lo devuelve.</p>
+    <div id="subidas" class="subidas-lista" role="list" aria-label="Publicaciones por cuenta"></div>
   </section>
 
   <section class="card ancho" id="avisos-bot">
@@ -316,8 +336,8 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 
 <script>
 const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
-const NOMBRE_EST = {ok:'Listo',sin_login:'Sin sesión',sin_comprobar:'Sin comprobar',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
-  cortando:'Cortando',descargando:'Descargando',listo:'Preparado',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar',cancelando:'Cancelando…'};
+const NOMBRE_EST = {publicada:'Publicada',ok:'Listo',sin_login:'Sin sesión',sin_comprobar:'Sin comprobar',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
+  cortando:'Cortando',descargando:'Descargando',listo:'Preparado',esperando_remoto:'Esperando servidor',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar',cancelando:'Cancelando…'};
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
 let selLocal = new Set(), archivosLocales = [], enviandoLocales = false;
 let cookiesDescargaOcupado = false, cookiesDescargaDestino = null;
@@ -353,6 +373,66 @@ function chips(id, sel, cuentas = E.cuentas || [], bloqueado = false) {
     const i = +ch.dataset.id; sel.has(i) ? sel.delete(i) : sel.add(i); ch.classList.toggle('on'); });
 }
 
+function enlaceWeb(valor) {
+  try { const u = new URL(valor); return ['http:','https:'].includes(u.protocol) ? u.href : ''; }
+  catch (_) { return ''; }
+}
+function tiempoClip(valor) {
+  if (valor == null || !Number.isFinite(Number(valor))) return 'No registrado';
+  const n = Math.max(0, Math.floor(Number(valor)));
+  return `${Math.floor(n/3600) ? Math.floor(n/3600)+':' : ''}${String(Math.floor(n/60)%60).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;
+}
+function fechaSubida(valor) {
+  return Number(valor) > 0 ? new Date(Number(valor)*1000).toLocaleString('es') : 'No registrada';
+}
+function tarjetaSubida(s) {
+  const id = Number(s.id), origen = enlaceWeb(s.video_url), publicada = enlaceWeb(s.url_publicada);
+  const titulo = s.video_titulo || String(s.texto || '').split('\n')[0] || base(s.archivo);
+  const edicion = s.edicion || {}, perfil = {quality:'Calidad máxima · 1080p',balanced:'Equilibrada · 1080p',fast:'Rápida · 720p'}[edicion.export_profile] || 'No registrado';
+  const mejora = {off:'Sin mejora adicional',ia:'Real-ESRGAN IA',hd:'Realzado HD',sharpen:'Nitidez'}[edicion.upscale] || 'No registrada';
+  const tramo = s.clip_inicio != null && s.clip_fin != null ? `${tiempoClip(s.clip_inicio)} – ${tiempoClip(s.clip_fin)} (${Math.round(s.clip_fin-s.clip_inicio)} s)` : 'No registrado';
+  const peso = s.bytes == null ? 'No disponible' : `${(s.bytes/1024/1024).toFixed(1)} MB`;
+  return `<div>${s.archivo_existe !== false ? `<video controls playsinline preload="none" src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
+    <div><div class="publicacion-cabecera"><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><span class="publicacion-estado">${est(s.estado === 'ok' ? 'publicada' : s.estado)}</span></div>
+    <div>${plat(s.plataforma)} ${esc({tiktok:"TikTok",youtube:"YouTube",facebook:"Facebook"}[s.plataforma] || "Plataforma no registrada")} · <b>${esc(s.cuenta_nombre || 'Cuenta eliminada')}</b> <span class="muted">· Publicación #${id}</span></div>
+    <p class="publicacion-origen">${esc(s.origen || 'Origen no registrado')}${s.canal ? ' · '+esc(s.canal) : ''}${origen ? ` · <a href="${esc(origen)}" target="_blank" rel="noopener">Video original</a>` : ''}</p>
+    <p class="publicacion-espera">${esc(s.espera || '')}</p><p class="publicacion-error err">${esc(s.error || '')}</p>
+    <dl class="publicacion-datos"><div><dt>Parte del video original</dt><dd>${tramo}</dd></div><div><dt>Preset de esta cuenta</dt><dd>${esc(s.preset || 'Sin edición / no registrado')}</dd></div>
+    <div><dt>Perfil de exportación solicitado</dt><dd>${esc(perfil)}</dd></div><div><dt>Mejora solicitada</dt><dd>${esc(mejora)}</dd></div>
+    <div><dt>Subtítulos</dt><dd>${edicion.show_subtitles === false ? 'Desactivados' : edicion.style ? esc(edicion.style) : 'No registrados'}</dd></div>
+    <div><dt>Archivo guardado</dt><dd>${esc(base(s.archivo))} · ${peso}</dd></div>
+    <div><dt>Añadido a la cola</dt><dd>${fechaSubida(s.creado)}</dd></div><div><dt>Última actualización</dt><dd class="publicacion-fecha">${fechaSubida(s.actualizado)}</dd></div>
+    <div><dt>Intentos de subida</dt><dd>${Number(s.intentos)||0} de ${Number(E?.config?.max_intentos)||3}</dd></div>
+    <div><dt>Disponible para subir</dt><dd>${s.estado === 'ok' ? 'Publicación completada' : s.no_antes > Date.now()/1000 ? 'No antes de '+fechaSubida(s.no_antes) : 'Cuando tenga turno, dentro del horario'}</dd></div></dl>
+    <div class="muted">Texto de la publicación</div><p class="publicacion-texto">${esc(s.texto || 'Sin texto')}</p>
+    <div class="publicacion-acciones">${publicada ? `<a href="${esc(publicada)}" target="_blank" rel="noopener">Ver publicación</a>` : s.estado === 'ok' ? '<span class="muted">La plataforma no devolvió un enlace.</span>' : ''}
+    ${s.estado === 'revisar' ? `<button onclick="accion('subidas',${id},'ok')" title="Sí se publicó">Sí se publicó</button>` : ''}
+    ${!['ok','subiendo','cancelando'].includes(s.estado) ? `<button onclick="accion('subidas',${id},'reintentar')">Reintentar</button>` : ''}
+    ${s.estado !== 'ok' ? `<button class="peligro" onclick="accion('subidas',${id},'borrar')" ${s.estado === 'cancelando' ? 'disabled' : ''}>${s.estado === 'subiendo' ? 'Cancelar subida' : 'Eliminar de la cola'}</button>` : ''}
+    ${s.captura ? `<a href="/api/bot/captura/${id}" target="_blank" rel="noopener">Ver captura del error</a>` : ''}</div></div>`;
+}
+function pintarSubidas(subidas) {
+  const contenedor = $('subidas'), ids = new Set(subidas.map(s=>String(s.id)));
+  contenedor.querySelectorAll('[data-subida-id]').forEach(n=>{if(!ids.has(n.dataset.subidaId)) n.remove();});
+  contenedor.querySelector('.publicacion-vacia')?.remove();
+  if (!subidas.length) { contenedor.innerHTML = '<p class="publicacion-vacia">Todavía no hay publicaciones. Añade un video para ver aquí sus clips, cuentas y estados.</p>'; return; }
+  subidas.forEach((s,i)=>{
+    let tarjeta = contenedor.querySelector(`[data-subida-id="${Number(s.id)}"]`);
+    const contenido = tarjetaSubida(s);
+    if (!tarjeta) { tarjeta = document.createElement('article'); tarjeta.className='publicacion'; tarjeta.dataset.subidaId=String(s.id); tarjeta.setAttribute('role','listitem'); tarjeta.setAttribute('aria-labelledby',`subida-titulo-${s.id}`); }
+    const video = tarjeta.querySelector('video');
+    const interactuando = (video && !video.paused) || tarjeta.contains(document.activeElement);
+    if (tarjeta._contenido !== contenido && !interactuando) { tarjeta.innerHTML=contenido; tarjeta._contenido=contenido; }
+    else if (interactuando) {
+      tarjeta.querySelector('.publicacion-estado').innerHTML=est(s.estado === 'ok' ? 'publicada' : s.estado);
+      tarjeta.querySelector('.publicacion-espera').textContent=s.espera || '';
+      tarjeta.querySelector('.publicacion-error').textContent=s.error || '';
+      tarjeta.querySelector('.publicacion-fecha').textContent=fechaSubida(s.actualizado);
+    }
+    if (contenedor.children[i] !== tarjeta) contenedor.insertBefore(tarjeta,contenedor.children[i] || null);
+  });
+}
+
 function pintar() {
   const c = E.config;
   $('carpeta-datos').textContent = E.carpeta_datos ? `Cuentas y perfiles guardados en: ${E.carpeta_datos}` : '';
@@ -361,7 +441,7 @@ function pintar() {
   if (!editando) {
     for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','estimacion_subida_min','modo_cola','remoto_url','remoto_clave','navegador'])
       $(k).value = c[k];
-    for (const k of ['radar_auto','firebase_auto','headless']) $(k).checked = c[k];
+    for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) $(k).checked = c[k];
     for (const k of ['avisos_activos','avisos_cola','avisos_progreso','avisos_publicados','avisos_errores','avisos_lives','avisos_sistema']) $(k).checked = c[k] !== false;
     $('avisos_intervalo_min').value = c.avisos_intervalo_min ?? 5;
   }
@@ -391,16 +471,7 @@ function pintar() {
     <td class="acc"><button class="mini" onclick="editarRegla(${r.id})"><i class="ph ph-pencil"></i></button>
       <button class="mini peligro" onclick="borrarRegla(${r.id})"><i class="ph ph-trash"></i></button></td></tr>`
   ).join('') || '<tr><td colspan="4" class="muted">Sin reglas: lo del radar no tendrá destino. Crea al menos la regla *.</td></tr>';
-  $('subidas').innerHTML = E.subidas.map(s => `<tr>
-    <td class="muted">${s.id}</td><td>${plat(s.plataforma)} ${esc(s.cuenta_nombre || '¿borrada?')}</td>
-    <td title="${esc(s.texto)}"><a href="/api/bot/clip/${s.id}" target="_blank" rel="noopener">${base(s.archivo)}</a></td><td>${est(s.estado)}</td>
-    <td>${s.url_publicada ? `<a href="${esc(s.url_publicada)}" target="_blank">ver</a>` : ''}
-      ${s.espera ? `<div class="muted">${esc(s.espera)}</div>` : ''}
-      ${s.error ? `<div class="err">${esc(s.error)} ${s.captura ? `· <a href="/api/bot/captura/${s.id}" target="_blank">captura</a>` : ''}</div>` : ''}
-      ${s.estado === 'pendiente' && s.intentos ? `<span class="muted">intento ${s.intentos}</span>` : ''}</td>
-    <td class="acc">${s.estado === 'revisar' ? `<button class="mini" onclick="accion('subidas',${s.id},'ok')" title="Sí se publicó"><i class="ph ph-check"></i></button>` : ''}${!['ok','subiendo','cancelando'].includes(s.estado) ? `<button class="mini" onclick="accion('subidas',${s.id},'reintentar')" title="Reintentar ya"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
-      ${s.estado !== 'ok' ? `<button class="mini peligro" onclick="accion('subidas',${s.id},'borrar')" ${s.estado === 'cancelando' ? 'disabled' : ''} title="${s.estado === 'subiendo' ? 'Cancelar subida y retirar de la cola' : 'Eliminar de la cola'}"><i class="ph ph-trash"></i></button>` : ''}</td></tr>`
-  ).join('') || '<tr><td colspan="6" class="muted">Aún no hay subidas.</td></tr>';
+  pintarSubidas(E.subidas);
   $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
     <td>${t.origen === 'local' ? esc(t.titulo) : `<a href="${esc(t.url)}" target="_blank">${esc(t.titulo || t.url)}</a>`}<div class="muted">${esc(t.canal)}</div>
       ${t.error && t.estado !== 'omitido' ? `<div class="err">${esc(t.error)}</div>` : ''}</td>
@@ -721,7 +792,7 @@ async function guardarAjustes() {
   const d = {};
   for (const k of ['gap_min','gap_max','pausa_min','pausa_max','max_intentos','estimacion_subida_min']) d[k] = +$(k).value;
   for (const k of ['hora_inicio','hora_fin','preset','modo_cola','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
-  for (const k of ['radar_auto','firebase_auto','headless']) d[k] = $(k).checked;
+  for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) d[k] = $(k).checked;
   await api('/api/bot/config', d); editando = false; await cargar(); toast('Horario y modo guardados');
 }
 async function guardarAvisos() {
@@ -971,7 +1042,7 @@ const fechaPlan = t => t ? new Date(t * 1000).toLocaleString('es', {month:'short
 function pintarPlan() {
   const p = E.plan; if (!p) return;
   $('inventario').innerHTML = [[p.por_preparar,'videos por editar'],[p.clips_en_pc,'clips guardados en esta PC'],
-    [p.pendientes,'publicaciones pendientes'],[p.bloqueadas.length,'publicaciones bloqueadas']].map(([n,t])=>`<div class="metrica"><b>${n}</b>${t}</div>`).join('');
+    [p.esperando_remoto || 0,'videos esperando servidor'],[p.pendientes,'publicaciones pendientes'],[p.bloqueadas.length,'publicaciones bloqueadas']].map(([n,t])=>`<div class="metrica"><b>${n}</b>${t}</div>`).join('');
   $('carpeta-clips').textContent = `Clips nuevos: ${p.carpeta_clips}${p.clips_ausentes ? ` · Atención: faltan ${p.clips_ausentes} archivos de trabajos anteriores.` : ''}`;
   const a = p.escenarios?.min, b = p.escenarios?.max;
   let mensaje = p.limitada ? 'Más de 1000 publicaciones: se muestran los totales sin fecha estimada.' :

@@ -34,6 +34,60 @@ class PreparacionTests(unittest.TestCase):
     def encolar(self, n=1):
         return self.m.encolar(f'https://example.test/video-{n}', cuentas=[self.cid])
 
+    def test_caida_colab_conserva_edicion_y_no_bloquea_clips_guardados(self):
+        self.encolar(); self.m._paso()
+        tid = self.encolar(2)
+        opciones = self.m.db.trabajo(tid)['opciones']
+        self.m.guardar_cfg({'remoto_url': 'https://colab.example.test'})
+        with patch.object(self.m, '_cliente_remoto', side_effect=remoto.ServidorCaido('sin red')):
+            self.assertTrue(self.m._paso())
+        trabajo = self.m.db.trabajo(tid)
+        self.assertEqual(trabajo['estado'], 'esperando_remoto')
+        self.assertEqual(trabajo['intentos'], 0)
+        self.assertEqual(trabajo['opciones'], opciones)
+        self.assertEqual(self.split.call_count, 1)  # no intenta editar con la PC sin GPU
+        self.assertEqual(self.m.estado()['plan']['esperando_remoto'], 1)
+        with patch.object(self.m, '_procesar_subida') as subir:
+            self.assertTrue(self.m._paso())
+            subir.assert_called_once()
+        nuevo = self.motor()
+        self.assertEqual(nuevo.db.trabajo(tid)['estado'], 'esperando_remoto')
+
+    def test_recuperar_servidor_reanuda_sin_perder_ajustes_ni_id_remoto(self):
+        tid = self.encolar()
+        self.m.guardar_cfg({'remoto_url': 'https://colab.example.test'})
+        self.m.db.marcar_trabajo(tid, 'esperando_remoto', remoto_id='trabajo-gpu', remoto_url=self.m.cfg['remoto_url'])
+        cliente = Mock()
+        cliente.probar.return_value = {'ok': True, 'status': 'idle'}
+        with patch.object(self.m, '_cliente_remoto', return_value=cliente):
+            self.assertTrue(self.m._vigilar_remoto())
+        job = self.m.db.trabajo(tid)
+        self.assertEqual(job['estado'], 'pendiente')
+        self.assertEqual(job['remoto_id'], 'trabajo-gpu')
+        self.assertEqual(job['intentos'], 0)
+        with patch.object(self.m, '_preparar_remoto') as preparar:
+            self.assertTrue(self.m._paso())
+            self.assertEqual(preparar.call_args.args[0]['id'], tid)
+
+    def test_desconexion_repetida_no_agota_intentos_de_edicion(self):
+        tid = self.encolar()
+        self.m.guardar_cfg({'remoto_url': 'https://colab.example.test', 'max_intentos': 1})
+        with patch.object(self.m, '_cliente_remoto', side_effect=remoto.ServidorCaido('sin red')):
+            for _ in range(4):
+                self.m._remoto_caido_hasta = 0
+                self.m.db.reanudar_remotos()
+                self.m._procesar_trabajo(self.m.db.trabajo(tid))
+        self.assertEqual(self.m.db.trabajo(tid)['estado'], 'esperando_remoto')
+        self.assertEqual(self.m.db.trabajo(tid)['intentos'], 0)
+        self.split.assert_not_called()
+
+    def test_retirar_servidor_libera_trabajos_para_edicion_local_explicita(self):
+        tid = self.encolar()
+        self.m.guardar_cfg({'remoto_url': 'https://colab.example.test'})
+        self.m.db.marcar_trabajo(tid, 'esperando_remoto')
+        self.m.guardar_cfg({'remoto_url': ''})
+        self.assertEqual(self.m.db.trabajo(tid)['estado'], 'pendiente')
+
     def test_desmarcar_primer_clip_programa_pausa_desde_que_esta_listo(self):
         self.m.guardar_cfg({'gap_min': 60, 'gap_max': 60})
         tid = self.m.encolar('https://example.test/programado', cuentas=[self.cid], subir_ahora=False)

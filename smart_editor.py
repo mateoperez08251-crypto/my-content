@@ -395,6 +395,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         recorte = np.clip(f32, 0, 255).astype(np.uint8)
                     return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar) if overlay else recorte
 
+                from render_progress import ProgresoRender
                 render_w, render_h = final_w, final_h
                 if upscale == 'ia':
                     # Mejorar la imagen ANTES de dibujar texto: la IA no deforma las letras.
@@ -404,9 +405,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     clean_path = os.path.join(clean_dir, 'imagen.mp4')
                     subclip.transform(lambda get, t: process_frame(get, t, overlay=False)).write_videofile(
                         clean_path, audio=False, codec='libx264rgb', preset='ultrafast',
-                        ffmpeg_params=['-crf', '0'], fps=subclip.fps, logger=None)
+                        ffmpeg_params=['-crf', '0'], fps=subclip.fps,
+                        logger=ProgresoRender(write_progress, f'Preparando imagen para IA · clip {parte_num}', p0 + tramo * .35, p0 + tramo * .5))
                     _mejorar_calidad_video(clean_path, 'ia', final_w, final_h,
-                                          python_ia=upscale_python, modelo_ia=upscale_model)
+                        progress=lambda msg, pct: write_progress(f'Mejorando IA · clip {parte_num}: {msg}', int(p0 + tramo * (.5 + .25 * pct / 100))),
+                        python_ia=upscale_python, modelo_ia=upscale_model)
                     enhanced = resources.enter_context(VideoFileClip(clean_path))
                     processed_clip = enhanced.transform(lambda get, t: _componer(
                         get(t), st + t, subs if show_subtitles else None, gen_title, st, et,
@@ -433,7 +436,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 if idx == 0:
                     print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
                 processed_clip.write_videofile(out_name, audio_codec="aac", audio_bitrate="320k" if export_profile == "quality" else "192k", threads=max(2, os.cpu_count() or 2),
-                                               logger=None, fps=min(subclip.fps, 30) if export_profile == "fast" else subclip.fps, **opciones)
+                                               logger=ProgresoRender(write_progress, f'Exportando clip {parte_num} de {len(seleccion)}',
+                                                   p0 + tramo * (.75 if upscale == 'ia' else .35), p0 + tramo * .94),
+                                               fps=min(subclip.fps, 30) if export_profile == "fast" else subclip.fps, **opciones)
                 if denoise_audio:
                     _limpiar_audio(out_name)
                 eventos = [(g["inicio"] - st, "pop", 0.6) for g in subs.subs if g.get("emoji")] if efectos else []

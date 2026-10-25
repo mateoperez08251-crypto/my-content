@@ -96,6 +96,7 @@ def procesar(video, salida, ancho, alto, mejorar):
 if __name__ == '__main__':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
+        print('Cargando modelo Real-ESRGAN en CUDA...', flush=True)
         procesar(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), crear_mejorador(sys.argv[5]))
     except Exception as exc:
         print(f'ERROR IA: {exc}', flush=True)

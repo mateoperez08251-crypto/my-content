@@ -38,7 +38,11 @@ def mejorar(video, ancho, alto, python='', modelo='', progreso=None):
                 lineas = lineas[-12:]
                 print(linea.rstrip(), flush=True)
                 if progreso:
-                    progreso(linea.strip(), 0)
+                    import re
+                    match = re.search(r'(\d+)/(\d+) cuadros', linea)
+                    porcentaje = min(100, int(100 * int(match[1]) / max(1, int(match[2])))) if match else (
+                        100 if 'IA aplicado:' in linea else 0)
+                    progreso(linea.strip(), porcentaje)
             code = proc.wait()
         if code or not os.path.isfile(salida) or os.path.getsize(salida) == 0:
             raise RuntimeError('Real-ESRGAN no terminó: ' + ' | '.join(lineas)[-900:])

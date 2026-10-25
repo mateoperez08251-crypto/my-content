@@ -11,6 +11,10 @@ import requests
 from . import archivos
 
 
+class CorteCancelado(Exception):
+    pass
+
+
 class ServidorCaido(Exception):
     """No hay conexión (Colab apagado, enlace viejo, contraseña mala...)."""
 
@@ -122,7 +126,11 @@ class Cliente:
         fallos = 0
         while True:
             if cancelar and cancelar():
-                raise FalloTrabajo("Bot detenido.")
+                try:
+                    self.limpiar(jid)
+                except (ServidorCaido, requests.RequestException):
+                    pass
+                raise CorteCancelado('Corte cancelado desde la cola.')
             if time.time() > fin:
                 raise FalloTrabajo("El servidor tardó más de 4 horas.")
             try:
@@ -132,7 +140,7 @@ class Cliente:
                 fallos += 1  # cortes cortos del túnel: se toleran unos minutos
                 if fallos >= 18:
                     raise
-                time.sleep(cada_s)
+                self._esperar_cancelable(cada_s, cancelar)
                 continue
             d = self._json(r)
             if r.status_code == 404:
@@ -143,8 +151,9 @@ class Cliente:
                 break
             if progreso:
                 texto = (d.get("progreso") or "").split("|")
-                progreso(f"{texto[1]}%" if len(texto) > 1 and texto[1].lstrip("-").isdigit() else texto[0][:60])
-            time.sleep(cada_s)
+                etapa = texto[0][:220]
+                progreso(f"{texto[1]}% · {etapa}" if len(texto) > 1 and texto[1].lstrip("-").isdigit() else etapa)
+            self._esperar_cancelable(cada_s, cancelar)
 
         if not d.get("clips"):
             raise FalloTrabajo("El servidor no generó clips.")
@@ -176,6 +185,14 @@ class Cliente:
         metadata = {ruta: c for (ruta, _), c in zip(salida, d['clips'])}
         archivos.guardar_manifest(carpeta, salida, metadata)
         return salida
+
+    @staticmethod
+    def _esperar_cancelable(segundos, cancelar):
+        fin = time.monotonic() + segundos
+        while time.monotonic() < fin:
+            if cancelar and cancelar():
+                return
+            time.sleep(min(.2, max(0, fin - time.monotonic())))
 
     def limpiar(self, jid):
         self._pedir('DELETE', f'/api/bot/remoto/{jid}')

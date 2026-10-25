@@ -4,19 +4,17 @@ const path = require('node:path');
 const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '../templates/bot.html'), 'utf8');
 const tabla = {innerHTML:''};
-const ctx = {$:()=>tabla, E:{subidas:[]}, esc:String, est:String, plat:String, base:String};
+const ctx = {$:()=>tabla, E:{subidas:[],config:{max_intentos:3}}, URL, Date, esc:String, est:String, plat:String, base:String};
 vm.createContext(ctx);
-const pintar = html.slice(html.indexOf("$('subidas').innerHTML ="), html.indexOf("$('trabajos').innerHTML ="));
+vm.runInContext(html.slice(html.indexOf('function enlaceWeb('), html.indexOf('function pintarSubidas(')), ctx);
 function fila(estado) {
-  ctx.E.subidas = [{id:7, estado, texto:'Clip', archivo:'clip.mp4'}];
-  vm.runInContext(pintar, ctx);
-  return tabla.innerHTML;
+  return ctx.tarjetaSubida({id:7, estado, texto:'Clip', archivo:'clip.mp4'});
 }
-assert(fila('subiendo').includes('Cancelar subida y retirar de la cola'));
-assert(!fila('subiendo').includes('Reintentar ya'));
+assert(fila('subiendo').includes('Cancelar subida'));
+assert(!fila('subiendo').includes('Reintentar'));
 assert(fila('cancelando').includes('disabled'));
-assert(!fila('cancelando').includes('Reintentar ya'));
-assert(fila('pendiente').includes('Reintentar ya'));
+assert(!fila('cancelando').includes('Reintentar'));
+assert(fila('pendiente').includes('Reintentar'));
 assert(fila('revisar').includes('Sí se publicó'));
 
 const pasos = [];
