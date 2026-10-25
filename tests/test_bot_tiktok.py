@@ -89,6 +89,18 @@ class Confirmacion(unittest.TestCase):
         self.esperar()
         self.assertEqual(self.page.wait_for_timeout.call_count, 1)
 
+    def test_lectura_transitoria_no_pierde_confirmacion(self):
+        with mock.patch.object(tiktok, '_confirmaciones', side_effect=[
+                TimeoutError('toast detached'), {'Tu video se ha publicado'}]):
+            self.esperar()
+        self.assertEqual(self.page.wait_for_timeout.call_count, 1)
+
+    def test_timeouts_repetidos_agotan_plazo_sin_republicar(self):
+        with mock.patch.object(tiktok, '_confirmaciones', side_effect=TimeoutError('toast detached')):
+            with self.assertRaises(SinConfirmar):
+                self.esperar()
+        self.assertGreaterEqual(self.tiempo, 2)
+
     def test_confirmacion_del_dialogo_solo_una_vez(self):
         boton = mock.Mock()
         self.page.locator.return_value.get_by_role.return_value = boton
@@ -165,7 +177,7 @@ class LimitePublicacion(unittest.TestCase):
     def test_solo_un_clic_real_tras_validar_y_esperar_carga(self):
         self.assertEqual(self.subir(), "")
         self.assertEqual(self.boton.click.call_args_list,
-                         [mock.call(trial=True, timeout=15000), mock.call(timeout=15000)])
+                         [mock.call(trial=True, timeout=15000), mock.call(timeout=15000, no_wait_after=True)])
         self.h.clic.assert_not_called()
         self.h.escribir.assert_called_once_with(self.editor, self.texto)
         self.parches["_esperar_publicacion"].assert_called_once_with(self.page, set())
@@ -224,6 +236,12 @@ class LimitePublicacion(unittest.TestCase):
         with self.assertRaises(SinConfirmar):
             self.subir()
         self.assertEqual(self.boton.click.call_count, 2)  # prueba + un único clic real
+
+    def test_timeout_del_clic_comprueba_resultado_sin_repetir_publicar(self):
+        self.boton.click.side_effect = [None, TimeoutError('navigation timeout')]
+        self.assertEqual(self.subir(), '')
+        self.assertEqual(self.boton.click.call_count, 2)
+        self.parches['_esperar_publicacion'].assert_called_once()
 
     def test_errores_tras_publicar_nunca_son_reintentos_automaticos(self):
         for error in [RuntimeError("target closed"), SesionCerrada("login"),

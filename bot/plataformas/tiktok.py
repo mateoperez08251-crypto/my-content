@@ -99,20 +99,34 @@ def _esperar_publicacion(page, anteriores, timeout=180):
     confirmado_dialogo = False
     while True:
         _revisar(page)
-        if _confirmaciones(page) - anteriores:
-            return
-        if not confirmado_dialogo:
-            dialogos = page.locator('[role="dialog"]:visible, dialog[open]:visible')
-            boton = _unico(dialogos.get_by_role("button", name=_NOMBRE_CONFIRMAR),
-                           "confirmar Publicar ahora")
-            if boton is not None and boton.is_enabled():
-                # Solo el aviso, una vez. Nunca repetir el botón principal Publicar.
-                confirmado_dialogo = True
-                comprobar_cancelacion(page)
-                boton.click(timeout=15000)
+        try:
+            if _confirmaciones(page) - anteriores:
+                return
+            if not confirmado_dialogo:
+                dialogos = page.locator('[role="dialog"]:visible, dialog[open]:visible')
+                boton = _unico(dialogos.get_by_role("button", name=_NOMBRE_CONFIRMAR),
+                               "confirmar Publicar ahora")
+                if boton is not None and boton.is_enabled():
+                    # Solo el aviso, una vez. Nunca repetir el botón principal Publicar.
+                    confirmado_dialogo = True
+                    comprobar_cancelacion(page)
+                    boton.click(timeout=15000, no_wait_after=True)
+        except Exception as exc:
+            if not _lectura_transitoria(exc):
+                raise
+            # Un aviso puede desaparecer mientras lo leemos o cambiar la página.
+            # Agotar el plazo de confirmación; nunca volver a pulsar Publicar.
         if time.monotonic() >= fin:
             raise SinConfirmar("TikTok no mostró un aviso nuevo de publicación completada.")
         page.wait_for_timeout(500)
+
+
+def _lectura_transitoria(exc):
+    return type(exc).__name__ == 'TimeoutError' or (
+        type(exc).__name__ == 'Error' and
+        any(texto in str(exc).lower() for texto in (
+            'execution context was destroyed', 'cannot find context with specified id',
+            'element is not attached')))
 
 
 def subir(page, h, video, texto, url_subida=""):
@@ -161,7 +175,12 @@ def subir(page, h, video, texto, url_subida=""):
     try:
         # Desde aquí cualquier fallo puede ocurrir después de enviar la publicación.
         # Usar el clic del locator evita pulsar coordenadas que ya hayan cambiado.
-        publicar.click(timeout=15000)
+        try:
+            publicar.click(timeout=15000, no_wait_after=True)
+        except Exception as exc:
+            if not _lectura_transitoria(exc):
+                raise
+            h.informar('TikTok tardó al publicar; comprobando el resultado sin repetir el clic')
         _esperar_publicacion(page, anteriores)
     except (SinConfirmar, SubidaCancelada):
         raise
