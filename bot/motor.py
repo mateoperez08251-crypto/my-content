@@ -843,11 +843,24 @@ class Motor:
                 self._edicion_actual[1].set()
                 self.actividad = 'Cancelando el corte; deteniendo su procesamiento…'
                 resultado = {'estado': 'cancelando', 'mensaje': 'Cancelación solicitada. Se detendrá el corte y no se encolarán sus resultados.'}
+                if anterior and anterior.get('remoto_id') and anterior.get('remoto_url') == self.cfg['remoto_url']:
+                    threading.Thread(target=self._cancelar_corte_remoto,
+                                     args=(anterior['remoto_url'], self.cfg['remoto_clave'], anterior['remoto_id']),
+                                     daemon=True).start()
             self.db.borrar_trabajo(tid)
             if anterior:
                 self._aviso_trabajo(anterior, 'borrado', 'Video retirado de la cola.', 'cola')
         self._despertar.set()
         return resultado or {'mensaje': 'Video y subidas pendientes eliminados de la cola.'}
+
+    def _cancelar_corte_remoto(self, url, clave, jid):
+        cliente = remoto.Cliente(url, clave)
+        try:
+            cliente.limpiar(jid)
+        except Exception as exc:
+            self.log(f'No se pudo confirmar la cancelación en el servidor: {exc}. Sus resultados no se publicarán.')
+        finally:
+            cliente.s.close()
 
     def perfil(self, cuenta) -> str:
         return os.path.join(self.almacenamiento, "bot_perfiles", f"cuenta_{int(cuenta['id'])}")

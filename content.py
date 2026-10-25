@@ -618,6 +618,7 @@ def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None, cancel_check
     """Lanza un subproceso cancelable, reenvía su salida y devuelve el código de salida."""
     global current_subprocess
     fin_monitor = threading.Event()
+    proc = None
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -647,6 +648,8 @@ def _ejecutar_subproceso(cmd, al_leer_linea=None, config_path=None, cancel_check
         return proc.wait()
     finally:
         fin_monitor.set()
+        if proc is not None and proc.stdout is not None:
+            proc.stdout.close()
         with _estado_lock:
             if current_subprocess is not None and current_subprocess.poll() is not None:
                 current_subprocess = None

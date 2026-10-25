@@ -14,6 +14,25 @@ from bot.remoto import Cliente, CorteCancelado
 
 
 class CorteCancelacionTests(unittest.TestCase):
+    def test_delete_remote_edit_sends_cancellation_without_waiting_for_poll(self):
+        with tempfile.TemporaryDirectory() as folder:
+            m = Motor(folder, log=lambda _: None)
+            m.guardar_cfg({'remoto_url': 'https://example.test'})
+            cid = m.db.crear_cuenta('A', 'tiktok')
+            tid = m.encolar('https://youtu.be/video', cuentas=[cid])
+            m.db.marcar_trabajo(tid, 'cortando', remoto_id='job', remoto_url=m.cfg['remoto_url'])
+            m._edicion_actual = (tid, threading.Event())
+            request_sent = threading.Event()
+            cliente = Mock()
+            cliente.limpiar.side_effect = lambda _: request_sent.set()
+            with patch('bot.motor.remoto.Cliente', return_value=cliente):
+                m.borrar_trabajo(tid)
+                self.assertTrue(request_sent.wait(2))
+            self.assertTrue(m._edicion_actual[1].is_set())
+            cliente.limpiar.assert_called_once_with('job')
+            self.assertIsNone(m.db.trabajo(tid))
+            m.db._con.close()
+
     def test_delete_running_local_edit_sets_event_and_never_enqueues_outputs(self):
         with tempfile.TemporaryDirectory() as folder:
             started = threading.Event()
