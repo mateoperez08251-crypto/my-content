@@ -2348,7 +2348,7 @@ def bot_cuenta_editar(cid):
         return _bot_respuesta(lambda: _bot().db.borrar_cuenta(cid))
     return _bot_respuesta(lambda: _bot().guardar_cuenta(cid, {
         k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
-                                          "intervalo_horas", "hora_inicio", "hora_fin")}))
+                                          "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin")}))
 
 
 @app.route("/api/bot/cuentas/<int:cid>/cerrar", methods=["POST"])

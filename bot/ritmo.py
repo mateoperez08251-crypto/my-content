@@ -5,6 +5,8 @@ import re
 
 def validar(campos):
     datos = dict(campos)
+    if 'intervalo_unidad' in datos and datos['intervalo_unidad'] not in ('minutos', 'horas'):
+        raise ValueError('Elige minutos u horas para el intervalo.')
     if 'intervalo_horas' in datos:
         valor = datos['intervalo_horas']
         try:

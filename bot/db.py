@@ -109,6 +109,8 @@ class DB:
             for campo, tipo in [('intervalo_horas', 'REAL'), ('hora_inicio', 'TEXT'), ('hora_fin', 'TEXT')]:
                 if campo not in cuentas:
                     self._con.execute(f'ALTER TABLE cuentas ADD COLUMN {campo} {tipo}')
+            if 'intervalo_unidad' not in cuentas:
+                self._con.execute("ALTER TABLE cuentas ADD COLUMN intervalo_unidad TEXT NOT NULL DEFAULT 'horas'")
             subidas = {r[1] for r in self._con.execute('PRAGMA table_info(subidas)')}
             if 'programada_para' not in subidas:
                 self._con.execute('ALTER TABLE subidas ADD COLUMN programada_para REAL NOT NULL DEFAULT 0')
@@ -172,7 +174,7 @@ class DB:
     def editar_cuenta(self, cid, **campos):
         from .ritmo import validar
         permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre", "preset_corte",
-                      "intervalo_horas", "hora_inicio", "hora_fin"}
+                      "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin"}
         sets = {k: v for k, v in campos.items() if k in permitidos}
         sets = validar(sets)
         # Un cambio de intervalo se cuenta desde la última publicación, sin borrar su historial.
