@@ -215,7 +215,7 @@ class LimitePublicar(unittest.TestCase):
              patch.object(tiktok, '_confirmaciones', return_value=set()):
             with self.assertRaises(SubidaCancelada):
                 tiktok.subir(self.page, self.h, 'clip.mp4', 'Texto')
-        boton.click.assert_called_once_with(trial=True, timeout=15000)
+        boton.click.assert_called_once_with(trial=True, timeout=10000, no_wait_after=True)
         self.assertFalse(self.control.publicando)
 
     def test_youtube_comprueba_cancelacion_antes_de_publicar(self):
@@ -260,3 +260,4 @@ class LimitePublicar(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

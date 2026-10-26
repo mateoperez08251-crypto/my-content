@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from firebase_radar.functions.canales import canal
 
 LOCK = threading.RLock()
@@ -53,6 +54,15 @@ def combinar(anterior, cambios):
         for valor in cfg['channels']:
             if canal(valor, plataforma) is None:
                 raise ErrorConfig('Hay un canal ambiguo o inválido. Usa la URL exacta del perfil; para @usuario elige una sola plataforma. No pegues enlaces de videos ni búsquedas.')
+    # La fecha de seguimiento pertenece al canal, no al último reinicio de la PC.
+    def identidad(valor, config):
+        ref = canal(valor, config.get('radar_platform'))
+        return ref.url if ref else valor.casefold()
+    antes = normalizar(anterior)
+    conocidos = {identidad(c, antes) for c in antes.get('channels', [])}
+    fechas = anterior.get('radar_desde_canales') or {}
+    cfg['radar_desde_canales'] = {identidad(c, cfg): fechas.get(identidad(c, cfg), 0)
+                                if identidad(c, cfg) in conocidos else time.time() for c in cfg['channels']}
     return cfg
 
 
@@ -97,3 +107,4 @@ def guardar(ruta, data):
             if temp and os.path.exists(temp):
                 os.unlink(temp)
     return cfg
+

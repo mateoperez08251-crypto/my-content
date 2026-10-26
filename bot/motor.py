@@ -467,17 +467,26 @@ class Motor:
         """Lo llama el radar local con cada publicación nueva."""
         if not self.cfg["radar_auto"]:
             return None
+        return self._encolar_detectado(item, 'radar')
+
+    def _encolar_detectado(self, item, origen):
         url = item.get("link") or item.get("url")
         clave = f"{item.get('platform', 'youtube')}:{item.get('id')}"
-        canal = item.get("channel", "")
-        if self._es_viejo(item) or self._lote_inicial(canal):
-            # Al añadir un canal, el radar ve TODOS sus videos recientes como "nuevos".
-            # Solo se sube el más nuevo; el resto queda anotado para no subirlo nunca.
-            tid = self.db.encolar_trabajo(url, "radar", clave=clave, canal=canal, titulo=item.get("title", ""))
+        canal = item.get("source_channel") or item.get("channel", "")
+        anterior = self.db.trabajo_por_clave(clave)
+        if anterior and (anterior['estado'] == 'sin_destino' or
+                         (anterior['estado'] == 'omitido' and not self._es_viejo(item))):
+            regla = self.destino_para(canal, item.get('platform'), item.get('channel_id', ''))
+            if anterior['estado'] == 'omitido' or (regla and regla.get('cuentas')):
+                self.db.reabrir_radar(clave)
+        if self._es_viejo(item):
+            # Los videos anteriores al inicio del seguimiento se anotan sin publicarlos.
+            # Las publicaciones nuevas de una misma ronda se conservan todas.
+            tid = self.db.encolar_trabajo(url, origen, clave=clave, canal=canal, titulo=item.get("title", ""))
             if tid:
                 self.db.marcar_trabajo(tid, "omitido", "Video anterior: solo se sube lo nuevo.")
             return None
-        return self.encolar(url, origen="radar", clave=clave, canal=canal, titulo=item.get("title", ""),
+        return self.encolar(url, origen=origen, clave=clave, canal=canal, titulo=item.get("title", ""),
                             plataforma_origen=item.get('platform'), channel_id=item.get('channel_id', ''))
 
     def encolar_archivo(self, stream, nombre, clave, cuentas, plataforma, texto=''):
@@ -508,17 +517,13 @@ class Motor:
 
     def _es_viejo(self, item):
         pub = item.get("published") or ""
-        if not pub or not self.cfg["radar_desde"]:
+        desde = max(self.cfg["radar_desde"], item.get('seguir_desde', 0) or 0)
+        if not pub or not desde:
             return False
         try:
-            return datetime.fromisoformat(pub.replace("Z", "+00:00")).timestamp() < self.cfg["radar_desde"] - 3600
+            return datetime.fromisoformat(pub.replace("Z", "+00:00")).timestamp() < desde - 3600
         except ValueError:
             return False
-
-    def _lote_inicial(self, canal):
-        r = self.db._uno("SELECT MIN(creado) AS primero, COUNT(*) AS n FROM trabajos "
-                         "WHERE canal=? AND origen IN ('radar','firebase')", (canal,))
-        return bool(r and r["n"] and time.time() - r["primero"] < 300)
 
     def revisar_firebase(self):
         db = self.firebase()
@@ -527,7 +532,7 @@ class Motor:
         try:
             from google.cloud import firestore  # type: ignore
             docs = db.collection("inbox").order_by(
-                "detected_at", direction=firestore.Query.DESCENDING).limit(25).stream()
+                "detected_at", direction=firestore.Query.ASCENDING).stream()
         except Exception as e:
             self.log(f"No pude leer la bandeja de Firebase: {e}")
             return 0
@@ -546,22 +551,18 @@ class Motor:
             d = doc.to_dict() or {}
             if not permitido(d, radar_cfg):
                 continue
-            dt = d.get("detected_at")
-            try:
-                if dt and dt.timestamp() < self.cfg["radar_desde"]:
-                    continue
-            except Exception:
-                pass
+            d['id'] = d.get('id') or doc.id
+            from firebase_radar.functions.canales import canal as referencia
+            ref = referencia(d.get('source_channel'), d.get('platform'))
+            d['seguir_desde'] = radar_cfg.get('radar_desde_canales', {}).get(ref.url, 0) if ref else 0
             url = d.get("url") or d.get("link")
             if not url:
                 continue
             try:
-                if self.encolar(url, origen="firebase", clave=f"youtube:{doc.id}",
-                                canal=d.get("source_channel", ""), titulo=d.get("title", ""),
-                                plataforma_origen=d.get('platform'), channel_id=d.get('channel_id', '')):
+                if self._encolar_detectado(d, 'firebase'):
                     nuevos += 1
-            except ValueError:
-                pass
+            except Exception:
+                self.log('No pude encolar un video de Firebase. Se conserva para la próxima revisión; revisa reglas y presets.')
         return nuevos
 
     # -- preparar (descargar + cortar) ----------------------------------
@@ -899,7 +900,8 @@ class Motor:
             return f"Fuera de horario de esta cuenta ({inicio}–{fin}, hora de esta PC)."
         if self.db.subidas_ok_hoy(c['id']) >= c['limite_dia']:
             return 'La cuenta alcanzó su límite diario. Espera al siguiente día con horario.'
-        limite = max(s.get('proximo_intento', 0), self._libre_global, c['proxima_libre'])
+        limite = max(s.get('proximo_intento', 0), self._libre_global,
+                     0 if s.get('adelantada') else c['proxima_libre'])
         if limite > ahora:
             if limite == s.get('proximo_intento', 0):
                 motivo = 'Reintento del clip'
@@ -917,7 +919,7 @@ class Motor:
         cuentas = {c["id"]: c for c in self.db.cuentas()}
         for s in self.db.subidas_listas():
             c = cuentas.get(s["cuenta_id"])
-            if not c or c["proxima_libre"] > ahora or navegador.ocupado(self.perfil(c)):
+            if not c or (c["proxima_libre"] > ahora and not s.get('adelantada')) or navegador.ocupado(self.perfil(c)):
                 continue
             if not _en_horario(*horario(c, self.cfg)):
                 continue
@@ -941,6 +943,30 @@ class Motor:
                 motivos.append(motivo)
         return ' · '.join(motivos[:3])
 
+    def gestionar_subida(self, sid, accion, datos=None):
+        datos = datos or {}
+        with self._cola_lock:
+            if accion == 'texto':
+                self.db.editar_texto_subida(sid, datos.get('texto'), datos.get('version'))
+                mensaje = 'Texto guardado para esta publicación.'
+            elif accion == 'ahora':
+                self.db.adelantar_subida(sid)
+                mensaje = ('Clip adelantado para un solo turno. Se mantienen la frecuencia de la cuenta, '
+                           'el horario, la sesión, los reintentos y el límite diario. El bot debe estar activo en modo de publicación.')
+            elif accion in ('arriba', 'abajo'):
+                self.db.mover_subida(sid, accion)
+                mensaje = 'Orden de la cola guardado.'
+            else:
+                raise ValueError('Acción no válida.')
+        self.despertar()
+        return {'mensaje': mensaje}
+
+    def borrar_lote_subidas(self, ids):
+        with self._cola_lock:
+            resultado = self.db.borrar_lote(ids)
+        self.despertar()
+        return resultado
+
     def _procesar_subida(self, s):
         # La selección y el clic en Borrar pueden cruzarse: releer bajo el mismo bloqueo.
         with self._cola_lock:
@@ -949,7 +975,7 @@ class Motor:
                 return
             control = ControlSubida()
             self._subida_actual = (s, control)
-            self.db.marcar_subida(s['id'], 'subiendo', intentos=s['intentos'] + 1)
+            self.db.marcar_subida(s['id'], 'subiendo', intentos=s['intentos'] + 1, adelantada=0)
         try:
             self._ejecutar_subida(s, control)
         except SubidaCancelada:
@@ -1273,13 +1299,21 @@ class Motor:
         plan['clips_en_pc'] = sum(os.path.isfile(r['archivo']) for r in guardados)
         plan['clips_ausentes'] = len(guardados) - plan['clips_en_pc']
         plan['carpeta_clips'] = os.path.join(self.carpeta, 'bot_clips')
-        recientes = self.db.subidas_recientes()
+        for cuenta in cuentas:
+            cola = [s for s in pendientes if s['cuenta_id'] == cuenta['id']]
+            cuenta['pendientes'] = len(cola)
+            proxima = plan.get('escenarios', {}).get('min', {}).get('proximas', {}).get(cuenta['id'])
+            cuenta['proxima_estimada'] = proxima.get('inicio') if proxima and not plan['retenida'] else None
+            siguiente = next((s for s in cola if proxima and s['id'] == proxima['id']), cola[0] if cola else None)
+            cuenta['siguiente'] = siguiente
+            cuenta['espera'] = self._motivo_subida(siguiente, cuenta) if siguiente else 'Sin clips pendientes.'
+        recientes = self.db.subidas_recientes(toda_cola=True)
         por_cuenta = {c['id']: c for c in cuentas}
         ahora = time.time()
         for subida in recientes:
             cuenta = por_cuenta.get(subida['cuenta_id']) or {}
             subida['no_antes'] = max(subida.get('proximo_intento', 0),
-                                    cuenta.get('proxima_libre', 0), self._libre_global)
+                                    0 if subida.get('adelantada') else cuenta.get('proxima_libre', 0), self._libre_global)
             try:
                 subida['bytes'] = os.path.getsize(subida['archivo'])
                 subida['archivo_existe'] = True
@@ -1332,6 +1366,7 @@ def desde_radar(item: dict):
             return _motor.desde_radar(item)
         except Exception as e:
             _motor.log(f"No pude encolar lo del radar: {e}")
+            raise
     return None
 
 

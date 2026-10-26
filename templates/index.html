@@ -2313,12 +2313,13 @@
 
                     <div class="grid-2-col" style="margin-top: 15px;">
                         <div class="form-group">
-                            <label>Frecuencia en la Nube</label>
+                            <label for="radar_interval">Revisar canales en esta PC</label>
                             <select id="radar_interval" class="form-control" style="background: #111;">
                                 <option value="instant">Casi en Tiempo Real (2 min)</option>
+                                <option value="5" selected>Cada 5 minutos</option>
                                 <option value="15">Cada 15 minutos</option>
-                                <option value="60" selected>Cada 1 hora</option>
-                                <option value="1440">Resumen Diario</option>
+                                <option value="60">Cada 1 hora</option>
+                                <option value="1440">Cada 24 horas</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -2333,7 +2334,7 @@
                     </div>
 
                     <div class="form-group" style="margin-top: 20px;">
-                        <label>Opciones del Radar en la Nube</label>
+                        <label>Detección y avisos del Radar</label>
                         <div class="checkbox-grid">
                             <label class="checkbox-item"><input type="checkbox" id="radar_cloud" checked> Ejecutar en la
                                 Nube 24/7</label>
@@ -2341,8 +2342,7 @@
                                 Correo</label>
                             <label class="checkbox-item"><input type="checkbox" id="radar_whatsapp_notify"> Enviar
                                 WhatsApp (CallMeBot)</label>
-                            <label class="checkbox-item"><input type="checkbox" id="radar_auto_dl"> Autodescargar a
-                                Drive</label>
+                            <label class="checkbox-item"><input type="checkbox" id="radar_auto_dl" disabled> Descarga a Drive (no disponible)</label>
                             <label class="checkbox-item"><input type="checkbox" id="radar_inbox" checked> Mostrar en
                                 Bandeja Local</label>
                         </div>
@@ -2362,6 +2362,12 @@
                     </div>
                     </fieldset>
                 </form>
+                <section style="margin-top:20px;border-top:1px solid #444;padding-top:16px" aria-labelledby="radar-seguimiento-titulo">
+                    <h3 id="radar-seguimiento-titulo">Estado del Radar y de sus entregas</h3>
+                    <p>La PC debe estar encendida para editar. Seguir un canal detecta sus videos; configura sus cuentas de destino en <a href="/bot">Bot → Reglas</a>. La nube revisa cada 30 minutos si está desplegada; la frecuencia elegida arriba corresponde a esta PC.</p>
+                    <button type="button" id="radar-revisar" class="btn" onclick="revisarRadarAhora()">Revisar ahora</button>
+                    <div id="radar-diagnostico" aria-live="polite">Cargando estado…</div>
+                </section>
             </div>
 
             <div
@@ -5086,3 +5092,4 @@
 </body>
 
 </html>
+

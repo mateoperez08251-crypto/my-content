@@ -84,6 +84,18 @@ class Persistencia(unittest.TestCase):
             with self.subTest(data=data), self.assertRaises(config.ErrorConfig):
                 config.normalizar(data)
 
+    def test_fecha_por_canal_no_se_reinicia_al_guardar_otras_opciones(self):
+        url = 'https://www.youtube.com/@nuevo'
+        with patch.object(config.time, 'time', return_value=1000):
+            cfg = config.combinar({}, {'channels': [url], 'radar_platform': 'youtube'})
+        with patch.object(config.time, 'time', return_value=2000):
+            otro = config.combinar(cfg, {'radar_email_notify': True})
+        self.assertEqual(otro['radar_desde_canales'][url], 1000)
+        vacio = config.combinar(otro, {'channels': []})
+        with patch.object(config.time, 'time', return_value=3000):
+            nuevo = config.combinar(vacio, {'channels': [url]})
+        self.assertEqual(nuevo['radar_desde_canales'][url], 3000)
+
 
 class Rutas(unittest.TestCase):
     def setUp(self):
@@ -146,3 +158,4 @@ class Rutas(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

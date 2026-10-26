@@ -220,12 +220,12 @@ class Cola(unittest.TestCase):
         self.assertIsNone(self.m.desde_radar(item))
         self.assertEqual(self.m.db.trabajos_recientes()[0]["estado"], "pendiente")
 
-    def test_canal_nuevo_solo_sube_el_ultimo(self):
+    def test_canal_nuevo_conserva_todas_las_publicaciones_recientes(self):
         self.m.db.guardar_regla("*", [self.tk])
         for i in range(5):  # la primera ronda del radar trae todo lo reciente del canal
             self.m.desde_radar({"id": f"v{i}", "platform": "tiktok", "link": f"https://x/{i}", "channel": "@c"})
         estados = [t["estado"] for t in reversed(self.m.db.trabajos_recientes())]
-        self.assertEqual(estados, ["pendiente"] + ["omitido"] * 4)
+        self.assertEqual(estados, ["pendiente"] * 5)
 
     def test_video_viejo_no_entra(self):
         self.m.db.guardar_regla("*", [self.tk])
@@ -491,4 +491,5 @@ class ServidorDeCortes(unittest.TestCase):
         self.assertIn("volvió", avisos[1])
         self.assertTrue(m._remoto_disponible())
         m.db._con.close()
+
 

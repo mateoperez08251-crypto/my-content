@@ -10,7 +10,7 @@ function page(fetch) {
     'radar_whatsapp_notify','radar_auto_dl','radar_inbox','radar-fields','radar-save',
     'radar_cloud_status','radar_cloud_status_text','radarStatusIndicator','radarModal'];
   const elements = Object.fromEntries(ids.map(id => [id, {value:'',checked:false,disabled:false,style:{},textContent:'',innerHTML:''}]));
-  const ctx = {fetch,document:{getElementById:id=>elements[id]},appendLog:()=>{}};
+  const ctx = {fetch,document:{getElementById:id=>elements[id]},appendLog:()=>{},clearTimeout:()=>{},setTimeout:()=>1};
   vm.createContext(ctx); vm.runInContext(code, ctx);
   return {ctx,elements};
 }
@@ -88,3 +88,4 @@ async function main() {
   console.log('Radar: recuperación tras reinicio, añadir sin perder, vaciar, errores y concurrencia correctos');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});
+

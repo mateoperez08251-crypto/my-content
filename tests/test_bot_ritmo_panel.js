@@ -6,7 +6,7 @@ for (const [,js] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) new F
 assert(!html.includes('id="url-subir-ahora"'));
 assert(!html.includes('id="gap_min"'));
 const sent = [];
-const elements = {'plan-cuentas':{},inventario:{},'carpeta-clips':{},'plan-cola':{}};
+const elements = {'texto-dialog':{addEventListener:()=>{}},'plan-cuentas':{},inventario:{},'carpeta-clips':{},'plan-cola':{}};
 const ctx = {api:async(url,body)=>sent.push({url,body}), cargar:async()=>{},toast:()=>{},
   $:id=>elements[id],esc:String,fechaPlan:String,document:{activeElement:null},
   E:{plan:{por_preparar:0,clips_en_pc:0,pendientes:0,bloqueadas:[],por_cuenta:{}},
@@ -16,8 +16,8 @@ vm.createContext(ctx);
 vm.runInContext(html.slice(html.indexOf('function pintarPlan()'),html.indexOf("document.querySelectorAll('#editor-preset", html.indexOf('function pintarPlan()'))),ctx);
 (async()=>{
   ctx.pintarPlan();
-  assert.match(elements['plan-cuentas'].innerHTML,/value="2"/);
-  assert.match(elements['plan-cuentas'].innerHTML,/value="4"/);
+  assert.match(elements['plan-cuentas'].innerHTML,/2 h/);
+  assert.match(elements['plan-cuentas'].innerHTML,/4 h/);
   await ctx.guardarRitmo(2,'intervalo_horas',{value:'0.5',checkValidity:()=>true});
   assert.equal(sent[0].url,'/api/bot/cuentas/2');
   assert.equal(sent[0].body.intervalo_horas,0.5);

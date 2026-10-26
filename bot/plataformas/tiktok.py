@@ -129,6 +129,32 @@ def _lectura_transitoria(exc):
             'element is not attached')))
 
 
+def _preparar_publicar(page, publicar, h):
+    """Reintentar solo la comprobación sin clic real cuando Studio cambia el botón."""
+    for intento in range(6):
+        _revisar(page)
+        try:
+            publicar.scroll_into_view_if_needed(timeout=5000)
+            # La prueba no envía la publicación ni debe esperar una navegación.
+            publicar.click(trial=True, timeout=10000, no_wait_after=True)
+            return publicar
+        except Exception as exc:
+            if not _lectura_transitoria(exc):
+                raise
+            if intento == 5:
+                break
+            h.informar(f"TikTok aún no deja pulsar Publicar; comprobando de nuevo ({intento + 2}/6)")
+            comprobar_cancelacion(page)
+            page.wait_for_timeout(1000)
+            # React puede sustituir el botón durante la carga o al cerrar avisos.
+            publicar = _buscar(page, _PUBLICAR, 'el botón Publicar', timeout=5,
+                               boton=_NOMBRE_PUBLICAR)
+            esperar_habilitado(publicar, timeout=15, page=page, revisar=lambda: _revisar(page))
+    raise ErrorSubida("TikTok no permitió pulsar Publicar tras varias comprobaciones. "
+                      "No se envió el video. Revisa si TikTok muestra un aviso o sigue procesando el archivo; "
+                      "el bot conservará el clip para reintentar.") from None
+
+
 def subir(page, h, video, texto, url_subida=""):
     if len(texto) > MAX_TEXTO:
         raise Rechazado(f"La descripción supera el límite configurado del bot ({MAX_TEXTO} "
@@ -165,7 +191,7 @@ def subir(page, h, video, texto, url_subida=""):
                        boton=_NOMBRE_PUBLICAR)
     esperar_habilitado(publicar, timeout=120, page=page, revisar=lambda: _revisar(page))
     # Verifica visibilidad, estabilidad y que ningún aviso tape el botón, sin pulsarlo.
-    publicar.click(trial=True, timeout=15000)
+    publicar = _preparar_publicar(page, publicar, h)
     _revisar(page)
     _comprobar_texto(editor, texto)
     anteriores = _confirmaciones(page)
@@ -189,4 +215,5 @@ def subir(page, h, video, texto, url_subida=""):
                            f"({type(exc).__name__}). Revisa la cuenta antes de reintentar.") from exc
     # La lista /content no es el enlace al video ni una prueba de publicación.
     return ""
+
 

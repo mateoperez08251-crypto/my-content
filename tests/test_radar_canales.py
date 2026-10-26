@@ -40,6 +40,9 @@ def local_radar():
                  and isinstance(n.value.func, ast.Name) and n.value.func.id == 'ensure_background')]
     scope = {'__name__': 'firebase_radar.prueba', '__package__': 'firebase_radar'}
     exec(compile(tree, 'local_radar', 'exec'), scope)
+    temp = tempfile.TemporaryDirectory()
+    scope['_test_temp'] = temp
+    scope['_seguimiento'] = lambda: scope['Seguimiento'](str(Path(temp.name, 'seguimiento.db')))
     return scope
 
 
@@ -84,6 +87,18 @@ class Identidad(unittest.TestCase):
         leer = Mock(return_value=(feed(), 'https://www.youtube.com/feeds/videos.xml'))
         self.assertEqual(c.youtube(A, leer)[0]['id'], VA)
         leer.assert_called_once_with('https://www.youtube.com/feeds/videos.xml?channel_id=' + A)
+
+    def test_no_pierde_publicaciones_entre_rondas_cloud(self):
+        for path in ('firebase_radar/main.py', 'firebase_radar/functions/main.py'):
+            node = next(n for n in ast.parse((ROOT / path).read_text()).body if isinstance(n, ast.FunctionDef) and n.name == 'fetch_youtube_rss')
+            response = Mock()
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=False)
+            response.read.return_value = feed(entries=[(VA, A), (VB, A)]).encode()
+            response.geturl.return_value = 'https://www.youtube.com/feeds/videos.xml'
+            scope = {'canales': c, 'urllib': SimpleNamespace(request=SimpleNamespace(Request=Mock(), urlopen=Mock(return_value=response)))}
+            exec(compile(ast.Module(body=[node], type_ignores=[]), path, 'exec'), scope)
+            self.assertEqual([i['id'] for i in scope['fetch_youtube_rss'](A)], [VA, VB])
 
     def test_no_acepta_redireccion_a_otro_perfil(self):
         leer = Mock(return_value=(pagina(), 'https://www.youtube.com/@otro'))
@@ -153,7 +168,7 @@ class Flujos(unittest.TestCase):
     def test_cambiar_lista_durante_consulta_descarta_resultado_viejo(self):
         scope = local_radar()
         cfg = {'channels': [URL], 'radar_channels': URL, 'radar_platform': 'youtube'}
-        config = Mock(side_effect=[cfg, {**cfg, 'radar_channels': 'https://youtube.com/@otro'}])
+        config = Mock(side_effect=lambda: cfg if config.call_count == 1 else {**cfg, 'radar_channels': 'https://youtube.com/@otro'})
         inbox = Mock()
         scope.update(_config=config, _load_state=lambda: {'seen': {}}, _save_state=Mock(), push_inbox=inbox,
                      _dispatch=lambda *args: c.leer_feed(feed(), A, c.canal(URL)), _log=Mock())
@@ -187,7 +202,7 @@ class Flujos(unittest.TestCase):
             request = SimpleNamespace(Request=Mock(), urlopen=Mock(return_value=response))
             scope = {'canales': c, 'urllib': SimpleNamespace(request=request)}
             exec(compile(ast.Module(body=[node], type_ignores=[]), path, 'exec'), scope)
-            self.assertEqual(scope['fetch_youtube_rss'](A)['id'], VA)
+            self.assertEqual(scope['fetch_youtube_rss'](A)[0]['id'], VA)
 
     def test_lector_firebase_ignora_legacy_y_canales_que_ya_no_se_siguen(self):
         import paths
@@ -196,7 +211,7 @@ class Flujos(unittest.TestCase):
         viejo = {**item, 'id': 'viejo', 'owner_verified': False}
         documentos = [SimpleNamespace(id=str(i), to_dict=lambda d=d: d) for i, d in enumerate([item, extra, viejo])]
         db = Mock()
-        db.collection.return_value.order_by.return_value.limit.return_value.stream.return_value = documentos
+        db.collection.return_value.order_by.return_value.stream.return_value = documentos
         with tempfile.TemporaryDirectory() as folder:
             cfgpath = str(Path(folder, 'radar_config.json'))
             radar_config.guardar(cfgpath, {'channels': [URL], 'radar_platform': 'youtube'})
@@ -204,7 +219,7 @@ class Flujos(unittest.TestCase):
             try:
                 cid = m.db.crear_cuenta('Destino', 'tiktok')
                 m.db.guardar_regla(URL, [cid])
-                cloud = SimpleNamespace(firestore=SimpleNamespace(Query=SimpleNamespace(DESCENDING='DESCENDING')))
+                cloud = SimpleNamespace(firestore=SimpleNamespace(Query=SimpleNamespace(ASCENDING='ASCENDING')))
                 with patch.dict(sys.modules, {'google.cloud': cloud}), patch.object(paths, 'data_path', return_value=cfgpath):
                     self.assertEqual(m.revisar_firebase(), 1)
                 trabajos = m.db.trabajos_recientes()
@@ -241,8 +256,8 @@ class Flujos(unittest.TestCase):
                 inbox.get.return_value.exists = False
                 db = Mock()
                 db.collection.side_effect = lambda name: SimpleNamespace(document=lambda _: config_ref if name == 'config' else inbox)
-                scope = {'db': db, 'get_db': lambda: db, 'canales': c, 'fetch_youtube_rss': Mock(return_value=dict(item)),
-                         'scheduler_fn': SimpleNamespace(ScheduledEvent=object), 'print': Mock(),
+                scope = {'db': db, 'get_db': lambda: db, 'canales': c, 'fetch_youtube_rss': Mock(return_value=[dict(item)]),
+                         'scheduler_fn': SimpleNamespace(ScheduledEvent=object), 'print': Mock(), 'notificar': Mock(),
                          'firestore': SimpleNamespace(SERVER_TIMESTAMP='ahora')}
                 exec(compile(ast.Module(body=[node], type_ignores=[]), path, 'exec'), scope)
                 scope['radar_monitor'](None)
@@ -259,3 +274,4 @@ class Flujos(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

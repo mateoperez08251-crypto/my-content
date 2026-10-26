@@ -17,7 +17,7 @@ function radarBloquear(bloqueado) {
 }
 
 function radarRellenar(data) {
-    const defaults = {radar_interval: '60', radar_platform: 'all'};
+    const defaults = {radar_interval: '5', radar_platform: 'all'};
     for (const key of RADAR_FIELDS) {
         document.getElementById(key).value = data[key] ??
             (key === 'radar_channels' && Array.isArray(data.channels) ? data.channels.join(', ') : defaults[key] ?? '');
@@ -64,6 +64,7 @@ async function cargarRadarConfig() {
 async function openRadarModal() {
     document.getElementById('radarModal').style.display = 'flex';
     await cargarRadarConfig();
+    await cargarEstadoRadar();
 }
 
 function iniciarRadarConfig() {
@@ -73,6 +74,8 @@ function iniciarRadarConfig() {
 function closeRadarModal() {
     if (radarSaving) return;
     document.getElementById('radarModal').style.display = 'none';
+    clearTimeout(radarTimer);
+    radarEstadoRequest++;
 }
 
 async function saveRadarConfig() {
@@ -102,4 +105,57 @@ async function saveRadarConfig() {
         radarSaving = false;
         radarBloquear(false);
     }
+}
+
+
+let radarTimer, radarEstadoRequest = 0;
+const radarEsc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const radarFecha = value => value ? new Date(value * 1000).toLocaleString() : 'Aún no se ha revisado';
+async function cargarEstadoRadar() {
+    const panel = document.getElementById('radar-diagnostico');
+    if (!panel) return;
+    clearTimeout(radarTimer);
+    const id = ++radarEstadoRequest;
+    try {
+        const response = await fetch('/api/radar/estado', {cache:'no-store'});
+        const data = await response.json();
+        if (id !== radarEstadoRequest) return;
+        if (!response.ok || !data.success) throw Error(data.message || 'No se pudo leer el estado.');
+        const b = data.bot || {}, s = data.servicio || {};
+        const aviso = !b.disponible ? 'El bot aún no ha arrancado; las detecciones esperan.' :
+            !b.automatico ? 'Radar automático desactivado en Bot. Los videos esperan sin editar.' :
+            !b.activo ? 'El bot está en pausa: recibe videos, pero no los edita.' :
+            b.modo === 'solo_subir' ? 'El bot solo publica clips guardados. Cambia su modo para editar los nuevos.' :
+            b.modo === 'solo_preparar' ? 'El bot edita y guarda. La publicación está en pausa por el modo elegido.' : 'Bot disponible para procesar videos.';
+        const canales = (data.canales || []).map(c => '<li><b>' + radarEsc(c.canal) + '</b><br>' +
+            radarEsc(c.estado) + ' · ' + radarEsc(radarFecha(c.revision)) + '<br>' + radarEsc(c.detalle) +
+            (c.destinos === 0 ? '<br><strong>Falta una regla con cuentas de destino en Bot.</strong>' : '') + '</li>').join('');
+        const eventos = (data.eventos || []).map(e => '<li><b>' + radarEsc(e.titulo) + '</b><br>' +
+            radarEsc(e.canal) + '<br>Entrega: ' + radarEsc(e.estado) +
+            (e.trabajo_estado ? ' · Bot: ' + radarEsc(e.trabajo_estado) : '') + '<br>' +
+            radarEsc(e.trabajo_error || e.detalle) + '<br>Avisos: ' +
+            radarEsc(Object.entries(e.tareas || {}).map(([k,v])=>k+': '+v).join(' · ')) + '</li>').join('');
+        panel.innerHTML = '<p>' + radarEsc(aviso) + '</p>' + (s.inicio > s.fin ? '<p>Revisando canales…</p>' : '') + '<p>Última ronda: ' + radarEsc(radarFecha(s.fin)) +
+            ' · Próxima revisión: ' + radarEsc(radarFecha(s.proxima)) + ' · ' + Number(data.pendientes || 0) +
+            ' entregas pendientes.</p>' + (s.error ? '<p>' + radarEsc(s.error) + '</p>' : '') +
+            '<ul>' + canales + '</ul><h4>Detecciones y entregas recientes</h4><ul>' +
+            (eventos || '<li>Todavía no hay detecciones registradas en esta PC.</li>') + '</ul>';
+    } catch (error) {
+        if (id === radarEstadoRequest) panel.textContent = error.message;
+    } finally {
+        if (id === radarEstadoRequest && document.getElementById('radarModal').style.display !== 'none')
+            radarTimer = setTimeout(cargarEstadoRadar, 10000);
+    }
+}
+async function revisarRadarAhora() {
+    const button = document.getElementById('radar-revisar');
+    button.disabled = true;
+    try {
+        const response = await fetch('/api/radar/revisar', {method:'POST'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw Error(data.message || 'No se pudo solicitar la revisión.');
+        radarEstado(data.message);
+        await cargarEstadoRadar();
+    } catch (error) { radarEstado(error.message, true); }
+    finally { button.disabled = false; }
 }

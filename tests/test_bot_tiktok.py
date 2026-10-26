@@ -177,7 +177,7 @@ class LimitePublicacion(unittest.TestCase):
     def test_solo_un_clic_real_tras_validar_y_esperar_carga(self):
         self.assertEqual(self.subir(), "")
         self.assertEqual(self.boton.click.call_args_list,
-                         [mock.call(trial=True, timeout=15000), mock.call(timeout=15000, no_wait_after=True)])
+                         [mock.call(trial=True, timeout=10000, no_wait_after=True), mock.call(timeout=15000, no_wait_after=True)])
         self.h.clic.assert_not_called()
         self.h.escribir.assert_called_once_with(self.editor, self.texto)
         self.parches["_esperar_publicacion"].assert_called_once_with(self.page, set())
@@ -229,7 +229,25 @@ class LimitePublicacion(unittest.TestCase):
         with self.assertRaises(ErrorSubida) as err:
             self.subir()
         self.assertNotIsInstance(err.exception, SinConfirmar)
-        self.boton.click.assert_called_once_with(trial=True, timeout=15000)
+        self.boton.click.assert_called_once_with(trial=True, timeout=10000, no_wait_after=True)
+
+    def test_timeout_de_prueba_como_la_captura_recupera_sin_publicar_dos_veces(self):
+        self.boton.click.side_effect = [TimeoutError('performing click action (trial run)'), None, None]
+        self.assertEqual(self.subir(), '')
+        reales = [c for c in self.boton.click.call_args_list if not c.kwargs.get('trial')]
+        self.assertEqual(len(reales), 1)
+        self.assertEqual(self.boton.scroll_into_view_if_needed.call_count, 2)
+        self.parches['_esperar_publicacion'].assert_called_once()
+
+    def test_pruebas_agotadas_no_envian_ni_marcan_publicacion_incierta(self):
+        self.boton.click.side_effect = TimeoutError('trial run bloqueado')
+        with self.assertRaises(ErrorSubida) as error:
+            self.subir()
+        self.assertNotIsInstance(error.exception, SinConfirmar)
+        self.assertIn('No se envió el video', str(error.exception))
+        self.assertEqual(self.boton.click.call_count, 6)
+        self.assertTrue(all(c.kwargs.get('trial') for c in self.boton.click.call_args_list))
+        self.parches['_esperar_publicacion'].assert_not_called()
 
     def test_desconexion_durante_clic_queda_para_revisar(self):
         self.boton.click.side_effect = [None, RuntimeError("target closed tras enviar")]
@@ -255,3 +273,4 @@ class LimitePublicacion(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
