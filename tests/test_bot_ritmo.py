@@ -83,10 +83,21 @@ class RitmoTests(unittest.TestCase):
     def test_invalidos_no_modifican_la_cuenta(self):
         original = self.m.db.cuenta(self.a)
         for datos in [dict(intervalo_horas=x) for x in [None, True, '', 'abc', -1, 169, float('nan'), float('inf')]] + [
-                dict(hora_inicio='24:00'), dict(hora_fin='9:00'), dict(hora_inicio=None)]:
+                dict(hora_inicio='24:00'), dict(hora_fin='9:00'), dict(hora_inicio=None),
+                dict(intervalo_unidad='dias'), dict(intervalo_unidad=None)]:
             with self.subTest(datos=datos), self.assertRaises(ValueError):
                 self.m.guardar_cuenta(self.a, datos)
             self.assertEqual(self.m.db.cuenta(self.a), original)
+
+    def test_unidad_persiste_sin_cambiar_la_pausa_ni_otras_cuentas(self):
+        self.m.db.editar_cuenta(self.a, proxima_libre=self.ahora + 7200)
+        self.m.guardar_cuenta(self.a, dict(intervalo_unidad='minutos'))
+        nuevo = self.motor()
+        cuenta = nuevo.db.cuenta(self.a)
+        self.assertEqual(cuenta['intervalo_unidad'], 'minutos')
+        self.assertEqual(cuenta['intervalo_horas'], 2)
+        self.assertEqual(cuenta['proxima_libre'], self.ahora + 7200)
+        self.assertEqual(nuevo.db.cuenta(self.b)['intervalo_unidad'], 'horas')
 
     def test_migrar_config_anterior_una_sola_vez(self):
         self.m.db._q('UPDATE cuentas SET intervalo_horas=NULL,hora_inicio=NULL,hora_fin=NULL WHERE id=?', (self.a,))

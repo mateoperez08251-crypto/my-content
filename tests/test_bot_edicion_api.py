@@ -31,10 +31,10 @@ class EdicionAPITests(unittest.TestCase):
 
     def test_ruta_conserva_intervalo_y_horario_solo_de_cuenta_elegida(self):
         self.request.method = 'POST'
-        self.request.get_json.return_value = {'intervalo_horas': 2.5, 'hora_inicio': '22:00',
+        self.request.get_json.return_value = {'intervalo_horas': 2.5, 'intervalo_unidad': 'minutos', 'hora_inicio': '22:00',
                                               'hora_fin': '06:00', 'proxima_libre': 0}
         self.namespace['bot_cuenta_editar'](7)
-        self.motor.guardar_cuenta.assert_called_once_with(7, {'intervalo_horas': 2.5,
+        self.motor.guardar_cuenta.assert_called_once_with(7, {'intervalo_horas': 2.5, 'intervalo_unidad': 'minutos',
             'hora_inicio': '22:00', 'hora_fin': '06:00'})
 
     def test_crear_cuenta_recibe_su_ritmo(self):

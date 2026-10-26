@@ -48,6 +48,7 @@ jobs:
           PY
       - run: node tests/test_bot_panel.js
       - run: node tests/test_bot_cola_panel.js
+      - run: node tests/test_bot_ritmo_panel.js
       - run: node tests/test_radar_panel.js
       - run: node tests/test_radar_estado_panel.js
 

@@ -260,7 +260,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 
   <section class="card ancho">
     <h2><i class="ph-duotone ph-sliders"></i> 3. Horario y ritmo de publicación</h2>
-    <p class="ayuda">Elige cada cuántas horas publica cada cuenta y su horario permitido. El bot espera y luego publica; debe seguir abierto para hacerlo. Solo se sube un clip a la vez. El intervalo empieza al terminar la subida y usa la hora de la PC.</p>
+    <p class="ayuda">Elige cada cuántos minutos u horas publica cada cuenta y su horario permitido. El bot espera y luego publica; debe seguir abierto para hacerlo. Solo se sube un clip a la vez. El intervalo empieza al terminar la subida y usa la hora de la PC.</p>
     <div class="ajustes">
       <div><label>Pausa entre cualquier publicación (min)</label><div class="fila rango"><div><label for="pausa_min">Mínima</label><input id="pausa_min" type="number" min="0" max="1440"></div><div><label for="pausa_max">Máxima</label><input id="pausa_max" type="number" min="0" max="1440"></div></div></div>
       <div><label for="max_intentos">Máximo de intentos por subida</label><input id="max_intentos" type="number" min="1" max="20"></div>
@@ -268,9 +268,9 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
       <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
         <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
     </div>
-    <p class="ayuda">Ejemplo: cuenta A cada 2 horas y cuenta B cada 4 horas. 0,5 horas son 30 minutos. Inicio y fin iguales permiten publicar las 24 horas. La pausa general también se respeta. La primera subida entra al estar lista si la cuenta no tiene una pausa pendiente.</p>
+    <p class="ayuda">Ejemplo: cuenta A cada 30 minutos y cuenta B cada 2 horas. Cambiar la unidad convierte el valor sin cambiar la espera. Inicio y fin iguales permiten publicar las 24 horas. La pausa general también se respeta. La primera subida entra al estar lista si la cuenta no tiene una pausa pendiente.</p>
     <div id="plan-cola" aria-live="polite"></div>
-    <div class="tabla-scroll"><table><thead><tr><th>Cuenta</th><th>Intervalo (horas)</th><th>Desde / hasta</th><th>Máximo al día</th><th>Hoy / quedan</th><th>Fin estimado</th></tr></thead><tbody id="plan-cuentas"></tbody></table></div>
+    <div class="tabla-scroll"><table><thead><tr><th>Cuenta</th><th>Intervalo</th><th>Desde / hasta</th><th>Máximo al día</th><th>Hoy / quedan</th><th>Fin estimado</th></tr></thead><tbody id="plan-cuentas"></tbody></table></div>
     <p class="ayuda">El cálculo usa los clips ya editados y los ajustes guardados. El rango compara pausas mínimas y máximas; no incluye edición pendiente, cortes de conexión, verificaciones ni reintentos futuros. Los videos sin editar todavía no tienen una cantidad exacta de partes.</p>
     <label style="margin-top:12px">Servidor de cortes — opcional. Los clips ya guardados no lo necesitan.</label>
     <div class="fila">
@@ -497,10 +497,13 @@ function actualizarTarjetas(contenedor, subidas) {
 function tarjetaCuenta(c) {
   const proxima = c.proxima_estimada, faltan = proxima ? Math.max(0,Math.ceil((proxima-Date.now()/1000)/60)) : null;
   const siguiente = c.siguiente;
+  const unidad = c.intervalo_unidad || 'horas';
+  const intervalo = Number(((c.intervalo_horas ?? 1) * (unidad === 'minutos' ? 60 : 1)).toFixed(8));
   return `<article class="cuenta-panel" id="cuenta-${c.id}"><h3>${plat(c.plataforma)} ${esc(c.nombre)}</h3>
     <p>${est(c.estado)} · ${c.activa ? 'Cuenta activa' : 'Cuenta pausada'} · ${c.hoy}/${c.limite_dia} publicadas hoy · ${c.pendientes || 0} pendientes</p>
     <div class="ajustes">
-      <div><label for="cuenta-horas-${c.id}">Publicar cada (horas)</label><input id="cuenta-horas-${c.id}" type="number" min="0" max="168" step="any" value="${c.intervalo_horas ?? 1}" onchange="guardarRitmo(${c.id},'intervalo_horas',this)"></div>
+      <div><label for="cuenta-intervalo-${c.id}">Publicar cada</label><input id="cuenta-intervalo-${c.id}" type="number" min="0" max="${unidad === 'minutos' ? 10080 : 168}" step="any" value="${intervalo}" data-unidad="${unidad}" onchange="guardarIntervalo(${c.id},this)"></div>
+      <div><label for="cuenta-unidad-${c.id}">Unidad del intervalo</label><select id="cuenta-unidad-${c.id}" onchange="cambiarUnidadIntervalo(${c.id},this)"><option value="minutos" ${unidad === 'minutos' ? 'selected' : ''}>Minutos</option><option value="horas" ${unidad === 'horas' ? 'selected' : ''}>Horas</option></select></div>
       <div><label for="cuenta-limite-${c.id}">Máximo diario</label><input id="cuenta-limite-${c.id}" type="number" min="1" max="1000" value="${c.limite_dia}" onchange="guardarLimite(${c.id},this.value)"></div>
       <div><label for="cuenta-inicio-${c.id}">Subir desde</label><input id="cuenta-inicio-${c.id}" type="time" value="${esc(c.hora_inicio || '08:00')}" onchange="guardarRitmo(${c.id},'hora_inicio',this)"></div>
       <div><label for="cuenta-fin-${c.id}">Hasta</label><input id="cuenta-fin-${c.id}" type="time" value="${esc(c.hora_fin || '23:30')}" onchange="guardarRitmo(${c.id},'hora_fin',this)"></div>
@@ -1142,7 +1145,7 @@ function pintarPlan() {
   $('plan-cola').innerHTML = `<p>${esc(mensaje)}</p><p class="muted">Hora de la PC del bot: ${esc(p.hora_pc)}. Fechas estimadas mostradas en la zona horaria de este navegador.</p>` +
     (p.bloqueadas.length ? `<p class="err">${esc([...new Set(p.bloqueadas.map(s=>s.motivo))].join(' · '))}. Esas publicaciones no se incluyen en el fin estimado.</p>` : '');
   if (!document.activeElement?.closest('#plan-cuentas')) $('plan-cuentas').innerHTML = E.cuentas.map(c => `<tr><td>${esc(c.nombre)}<div class="muted">${esc(c.plataforma)}</div></td>
-    <td>${c.intervalo_horas ?? 1} h</td>
+    <td>${c.intervalo_unidad === 'minutos' ? Number(((c.intervalo_horas ?? 1)*60).toFixed(8))+' min' : (c.intervalo_horas ?? 1)+' h'}</td>
     <td>${esc(c.hora_inicio || '08:00')}–${esc(c.hora_fin || '23:30')}</td>
     <td>${c.limite_dia} · <a href="#cuenta-${c.id}">Ajustar cuenta</a></td>
     <td>${c.hoy} hoy · ${Math.max(0,c.limite_dia-c.hoy)} disponibles<br><span class="muted">${p.por_cuenta?.[c.id] || 0} por publicar</span></td>
@@ -1154,6 +1157,32 @@ async function guardarRitmo(id, campo, input) {
     await api(`/api/bot/cuentas/${id}`, {[campo]: campo === 'intervalo_horas' ? Number(input.value) : input.value});
     toast('Horario de la cuenta guardado.'); await cargar();
   } catch(e) { toast(e.message,true); }
+}
+async function guardarIntervalo(id, input) {
+  if (!input.value || !input.checkValidity()) return toast('Introduce un intervalo válido.',true);
+  const horas = Number(input.value) / (input.dataset.unidad === 'minutos' ? 60 : 1);
+  try {
+    await api(`/api/bot/cuentas/${id}`, {intervalo_horas:horas});
+    toast('Intervalo de esta cuenta guardado.'); await cargar();
+  } catch(e) { toast(e.message,true); }
+}
+async function cambiarUnidadIntervalo(id, select) {
+  const input = $('cuenta-intervalo-'+id), anterior = input.dataset.unidad;
+  if (!input.value || !input.checkValidity()) { select.value=anterior; return toast('Corrige primero el intervalo.',true); }
+  const valorAnterior = input.value, maxAnterior = input.max;
+  const horas = Number(input.value) / (anterior === 'minutos' ? 60 : 1);
+  input.value = String(Number((horas * (select.value === 'minutos' ? 60 : 1)).toFixed(8)));
+  input.max = select.value === 'minutos' ? '10080' : '168';
+  input.dataset.unidad = select.value;
+  select.disabled = true;
+  try {
+    // Cambiar la unidad solo cambia la presentación, sin reiniciar la pausa.
+    await api(`/api/bot/cuentas/${id}`, {intervalo_unidad:select.value});
+    toast('Unidad guardada para esta cuenta.'); await cargar();
+  } catch(e) {
+    select.value=anterior; input.value=valorAnterior; input.max=maxAnterior; input.dataset.unidad=anterior;
+    toast(e.message,true);
+  } finally { select.disabled=false; }
 }
 async function guardarLimite(id, valor) {
   try { await api(`/api/bot/cuentas/${id}`, {limite_dia:Number(valor)}); await cargar(); }
