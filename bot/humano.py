@@ -101,10 +101,56 @@ class Humano:
             # comprobarlo evita concatenar el título al nombre del archivo.
             locator.fill('', timeout=15000)
             comprobar_cancelacion(self.page)
-            previo = locator.evaluate("el => ('value' in el ? el.value : el.innerText)") or ''
-            if previo.strip():
+            if not self._esperar_editor_vacio(locator):
+                # Algunos editores restauran el nombre del archivo al recibir
+                # fill(''). Selección limitada al campo + tecla real para que
+                # su estado interno procese el borrado, sin Ctrl+A en la página.
+                for _ in range(2):
+                    comprobar_cancelacion(self.page)
+                    seleccionado = locator.evaluate("""el => {
+                        el.focus();
+                        if (document.activeElement !== el && !el.contains(document.activeElement)) return false;
+                        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+                            el.select();
+                            return el.selectionStart === 0 && el.selectionEnd === el.value.length;
+                        }
+                        if (!el.isContentEditable) return false;
+                        const range = document.createRange();
+                        range.selectNodeContents(el);
+                        const selection = window.getSelection();
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                        return selection.rangeCount === 1 && el.contains(selection.anchorNode)
+                            && el.contains(selection.focusNode);
+                    }""")
+                    if not seleccionado:
+                        break
+                    comprobar_cancelacion(self.page)
+                    locator.press('Backspace', timeout=5000)
+                    if self._esperar_editor_vacio(locator):
+                        break
+            if not self._editor_vacio(locator):
                 raise RuntimeError('El editor no quedó vacío; no se añadirá texto sobre el título anterior.')
         # fill enfoca el input/contenteditable y emite input con el texto completo.
         # Evita perder letras, saltos y emojis por un clic aleatorio fuera del editor.
         locator.fill(texto, timeout=15000)
         self.pausa(0.6, 1.4)
+
+    def _editor_vacio(self, locator):
+        comprobar_cancelacion(self.page)
+        previo = locator.evaluate("el => ('value' in el ? el.value : el.innerText)") or ''
+        return not previo.replace('\u200b', '').replace('\ufeff', '').strip()
+
+    def _esperar_editor_vacio(self, locator):
+        # Dar tiempo a que el editor aplique su estado; comprobar también que
+        # el borrado persista tras el evento, no solo durante el cambio del DOM.
+        vacias = 0
+        for _ in range(4):
+            self._dormir(0.15)
+            if self._editor_vacio(locator):
+                vacias += 1
+                if vacias >= 2:
+                    return True
+            else:
+                vacias = 0
+        return False
