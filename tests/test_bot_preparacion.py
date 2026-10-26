@@ -88,24 +88,14 @@ class PreparacionTests(unittest.TestCase):
         self.m.guardar_cfg({'remoto_url': ''})
         self.assertEqual(self.m.db.trabajo(tid)['estado'], 'pendiente')
 
-    def test_desmarcar_primer_clip_programa_pausa_desde_que_esta_listo(self):
-        self.m.guardar_cfg({'gap_min': 60, 'gap_max': 60})
+    def test_opcion_antigua_no_programa_una_demora_inicial(self):
         tid = self.m.encolar('https://example.test/programado', cuentas=[self.cid], subir_ahora=False)
-        antes = time.time()
         self.m._procesar_trabajo(self.m.db.trabajo(tid))
         subida = self.m.db.subidas_pendientes()[0]
-        self.assertGreaterEqual(subida['programada_para'], antes + 3600)
-        self.assertLessEqual(subida['programada_para'], time.time() + 3600)
-        self.assertIsNone(self.m._siguiente_subida())
-        self.assertIn('Primera subida programada', self.m.estado()['subidas'][0]['espera'])
+        self.assertEqual(subida['programada_para'], 0)
+        self.assertEqual(self.m._siguiente_subida()['id'], subida['id'])
         nuevo = self.motor()
-        self.assertFalse(nuevo.db.trabajo(tid)['subir_ahora'])
-        self.assertEqual(nuevo.db.subida(subida['id'])['programada_para'], subida['programada_para'])
-        nuevo.db.reintentar_subida(subida['id'])
-        nuevo.lanzar_subidas_guardadas()
-        self.assertIsNone(nuevo._siguiente_subida())
-        with patch('bot.motor.time.time', return_value=subida['programada_para'] + 1):
-            self.assertEqual(nuevo._siguiente_subida()['id'], subida['id'])
+        self.assertEqual(nuevo._siguiente_subida()['id'], subida['id'])
 
     def test_marcado_no_anade_pausa_inicial_y_otra_url_respeta_pausa_cuenta(self):
         self.encolar(); self.m._paso()
@@ -344,3 +334,4 @@ class PreparacionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

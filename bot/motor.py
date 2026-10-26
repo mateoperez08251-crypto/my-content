@@ -19,6 +19,7 @@ from firebase_radar.functions.canales import coincide, permitido
 
 from . import archivos, locales, navegador, remoto
 from .planificacion import estimar
+from .ritmo import horario, intervalo
 from .presets import NOMBRE_CALIDAD, snapshot
 from .db import DB
 from .cancelacion import ControlSubida, SubidaCancelada
@@ -101,6 +102,11 @@ class Motor:
         self._cfg_ruta = os.path.join(self.almacenamiento, "bot_config.json")
         self._cfg_lock = threading.RLock()
         self.cfg = self._leer_cfg()
+        # Migrar una sola vez los ajustes generales de las versiones anteriores.
+        self.db._q("UPDATE cuentas SET intervalo_horas=COALESCE(intervalo_horas, ?), "
+                   "hora_inicio=COALESCE(hora_inicio, ?), hora_fin=COALESCE(hora_fin, ?)",
+                   (self.cfg['gap_max'] / 60, self.cfg['hora_inicio'], self.cfg['hora_fin']))
+        self.db._q("UPDATE subidas SET programada_para=0 WHERE estado='pendiente' AND programada_para!=0")
         self.smart_split = smart_split      # data -> (rutas, meta)
         self.descargar = descargar          # url -> ruta
         self.ocupar = ocupar or (lambda: True)
@@ -220,11 +226,9 @@ class Motor:
             return 'El bot está en pausa; no empezará otra tarea. La que está en curso puede terminar.'
         if self.cfg['modo_cola'] == 'solo_preparar':
             return 'Solo editar y guardar: no voy a publicar hasta que cambies el modo.'
-        horario = ('todo el día' if self.cfg['hora_inicio'] == self.cfg['hora_fin'] else
-                   f"de {self.cfg['hora_inicio']} a {self.cfg['hora_fin']}")
         prefijo = ('Primero termino los videos pendientes de edición. '
                    if self.cfg['modo_cola'] == 'preparar_primero' else '')
-        return prefijo + f'Las subidas siguen su turno {horario}, con las pausas de cada cuenta.'
+        return prefijo + 'Las subidas esperan el intervalo y el horario elegidos en cada cuenta.'
 
     def _resumen_arranque(self):
         preparar = self.db.por_preparar()
@@ -376,8 +380,8 @@ class Motor:
         self.actividad = self._motivo_espera()
         if self.actividad.startswith('Fuera de horario') and self.db.subidas_pendientes():
             self.avisar('sistema', f"horario:{datetime.now():%Y-%m-%d}:{self.cfg['hora_inicio']}:{self.cfg['hora_fin']}",
-                        f"Quedan {cantidad(len(self.db.subidas_pendientes()), 'subida')} en cola. Ahora estoy fuera del horario "
-                        f"{self.cfg['hora_inicio']}–{self.cfg['hora_fin']} (hora de tu PC). Al abrir el horario revisaré qué cuenta tiene turno.")
+                        f"Quedan {cantidad(len(self.db.subidas_pendientes()), 'subida')} en cola. "
+                        "Esperaré al horario permitido de cada cuenta (hora de tu PC).")
         for c in self.db.cuentas():
             if c['activa'] and self.db.subidas_ok_hoy(c['id']) >= c['limite_dia']:
                 self.avisar('sistema', f"limite:{c['id']}:{datetime.now():%Y-%m-%d}:{c['limite_dia']}",
@@ -411,9 +415,11 @@ class Motor:
                 snapshot(self.cargar_preset(nombre) or {})
             cambios = {**cambios, 'preset_corte': nombre}
         self.db.editar_cuenta(cid, **cambios)
+        self.despertar()
 
     def encolar(self, url, origen="manual", clave=None, canal="", titulo="", cuentas=None,
                 cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id='', devolver_ids=False, subir_ahora=True):
+        # Compatibilidad con clientes antiguos: este campo ya no añade una demora inicial.
         if type(subir_ahora) is not bool:
             raise ValueError("Elige si el primer clip debe subir al estar listo o esperar su pausa.")
         url = (url or "").strip()
@@ -677,24 +683,19 @@ class Motor:
             texto = self._texto(publicacion, t, i, len(clips))
             for cid in t["cuentas"]:
                 subidas.append((cid, ruta, texto))
-        programacion = {}
-        if not t.get('subir_ahora', True):
-            ahora = time.time()
-            programacion = {cid: ahora + random.uniform(self.cfg['gap_min'], self.cfg['gap_max']) * 60
-                            for cid in t['cuentas']}
         intervals = None
         if t['cortar'] and not t.get('archivo_local'):
             try:
                 intervals = archivos.leer_intervalos(self.carpeta_clips(t))
                 if any(ruta not in intervals for _, ruta, _ in subidas):
                     raise ValueError('Faltan los tiempos originales de los clips. Actualiza My Content/Colab antes de subirlos.')
-                self.db.finalizar_trabajo(t['id'], subidas, intervals, programacion=programacion)
+                self.db.finalizar_trabajo(t['id'], subidas, intervals)
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 self.db.marcar_trabajo(t['id'], 'error', str(exc))
                 self.log(f'Clips detenidos para evitar repetidos: {exc}')
                 return
         else:
-            self.db.finalizar_trabajo(t['id'], subidas, programacion=programacion)
+            self.db.finalizar_trabajo(t['id'], subidas)
         actual = self.db.trabajo(t['id'])
         if actual and actual['estado'] == 'listo':
             self._aviso_trabajo(t, 'listo', f"Ya guardé {cantidad(len(clips), 'clip')} en tu PC. "
@@ -893,15 +894,14 @@ class Motor:
             return 'El archivo del clip no está en esta PC.'
         if c.get('abierta', False) or navegador.ocupado(self.perfil(c)):
             return 'Cierra la ventana de sesión de esta cuenta.'
-        if not _en_horario(self.cfg['hora_inicio'], self.cfg['hora_fin']):
-            return f"Fuera de horario ({self.cfg['hora_inicio']}–{self.cfg['hora_fin']}, hora de esta PC)."
+        inicio, fin = horario(c, self.cfg)
+        if not _en_horario(inicio, fin):
+            return f"Fuera de horario de esta cuenta ({inicio}–{fin}, hora de esta PC)."
         if self.db.subidas_ok_hoy(c['id']) >= c['limite_dia']:
             return 'La cuenta alcanzó su límite diario. Espera al siguiente día con horario.'
-        limite = max(s.get('proximo_intento', 0), s.get('programada_para', 0), self._libre_global, c['proxima_libre'])
+        limite = max(s.get('proximo_intento', 0), self._libre_global, c['proxima_libre'])
         if limite > ahora:
-            if limite == s.get('programada_para', 0):
-                motivo = 'Primera subida programada al desmarcar subir al estar listo'
-            elif limite == s.get('proximo_intento', 0):
+            if limite == s.get('proximo_intento', 0):
                 motivo = 'Reintento del clip'
             elif limite == c['proxima_libre']:
                 motivo = 'Pausa de esta cuenta tras una publicación anterior o sin confirmar'
@@ -914,12 +914,12 @@ class Motor:
         ahora = time.time()
         if ahora < self._libre_global:
             return None
-        if not _en_horario(self.cfg["hora_inicio"], self.cfg["hora_fin"]):
-            return None
         cuentas = {c["id"]: c for c in self.db.cuentas()}
         for s in self.db.subidas_listas():
             c = cuentas.get(s["cuenta_id"])
-            if not c or max(c["proxima_libre"], s.get('programada_para', 0)) > ahora or navegador.ocupado(self.perfil(c)):
+            if not c or c["proxima_libre"] > ahora or navegador.ocupado(self.perfil(c)):
+                continue
+            if not _en_horario(*horario(c, self.cfg)):
                 continue
             if self.db.subidas_ok_hoy(c["id"]) >= c["limite_dia"]:
                 continue
@@ -1077,7 +1077,8 @@ class Motor:
             self._libre_global = ahora + random.uniform(1, 3) * 60
             self.guardar_cfg({'proxima_global': self._libre_global})
             return
-        gap = random.uniform(self.cfg["gap_min"], self.cfg["gap_max"]) * 60
+        cuenta = self.db.cuenta(cuenta['id']) or cuenta
+        gap = intervalo(cuenta, self.cfg)
         self.db.editar_cuenta(cuenta["id"], proxima_libre=ahora + gap)
         self._libre_global = ahora + random.uniform(self.cfg["pausa_min"], self.cfg["pausa_max"]) * 60
         self.guardar_cfg({'proxima_global': self._libre_global})
@@ -1277,7 +1278,7 @@ class Motor:
         ahora = time.time()
         for subida in recientes:
             cuenta = por_cuenta.get(subida['cuenta_id']) or {}
-            subida['no_antes'] = max(subida.get('proximo_intento', 0), subida.get('programada_para', 0),
+            subida['no_antes'] = max(subida.get('proximo_intento', 0),
                                     cuenta.get('proxima_libre', 0), self._libre_global)
             try:
                 subida['bytes'] = os.path.getsize(subida['archivo'])
@@ -1293,7 +1294,7 @@ class Motor:
             "plan": plan,
             "carpeta_datos": self.almacenamiento,
             "actividad": self.actividad,
-            "en_horario": _en_horario(self.cfg["hora_inicio"], self.cfg["hora_fin"]),
+            "en_horario": any(_en_horario(*horario(c, self.cfg)) for c in cuentas if c['activa']),
             "cuentas": cuentas,
             "reglas": self.db.reglas(),
             "trabajos": self.db.trabajos_recientes(),
@@ -1332,4 +1333,5 @@ def desde_radar(item: dict):
         except Exception as e:
             _motor.log(f"No pude encolar lo del radar: {e}")
     return None
+
 

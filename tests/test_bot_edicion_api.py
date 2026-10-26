@@ -25,9 +25,24 @@ class EdicionAPITests(unittest.TestCase):
         nodes=[]
         for node in ast.parse(source.read_text()).body:
             if isinstance(node,ast.FunctionDef) and node.name in {
-                '_presets_path','list_smart_presets','save_smart_preset','_bot_preset','bot_encolar','bot_lanzar_subidas','bot_cuenta_editar'}:
+                '_presets_path','list_smart_presets','save_smart_preset','_bot_preset','bot_encolar','bot_lanzar_subidas','bot_cuenta_editar','bot_cuenta_crear'}:
                 node.decorator_list=[]; nodes.append(node)
         exec(compile(ast.Module(body=nodes,type_ignores=[]),'content-routes','exec'),self.namespace)
+
+    def test_ruta_conserva_intervalo_y_horario_solo_de_cuenta_elegida(self):
+        self.request.method = 'POST'
+        self.request.get_json.return_value = {'intervalo_horas': 2.5, 'hora_inicio': '22:00',
+                                              'hora_fin': '06:00', 'proxima_libre': 0}
+        self.namespace['bot_cuenta_editar'](7)
+        self.motor.guardar_cuenta.assert_called_once_with(7, {'intervalo_horas': 2.5,
+            'hora_inicio': '22:00', 'hora_fin': '06:00'})
+
+    def test_crear_cuenta_recibe_su_ritmo(self):
+        self.request.get_json.return_value = {'nombre': 'A', 'plataforma': 'youtube',
+                                              'intervalo_horas': 3, 'hora_inicio': '09:00', 'hora_fin': '19:00'}
+        self.namespace['bot_cuenta_crear']()
+        self.motor.db.crear_cuenta.assert_called_once_with('A', 'youtube', 6, '',
+            intervalo_horas=3, hora_inicio='09:00', hora_fin='19:00')
 
     def test_edicion_guardada_se_recupera_completa(self):
         config={'clip_selection':'sequential','clip_duration':45,'num_clips':3,'style':'minimal',
@@ -104,3 +119,4 @@ class EdicionAPITests(unittest.TestCase):
 
 
 if __name__=='__main__': unittest.main()
+

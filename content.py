@@ -2269,7 +2269,9 @@ def bot_cookies_youtube():
 def bot_cuenta_crear():
     d = request.get_json(silent=True) or {}
     return _bot_respuesta(lambda: {"id": _bot().db.crear_cuenta(
-        d.get("nombre"), d.get("plataforma"), d.get("limite_dia", 6), d.get("url_subida", ""))})
+        d.get("nombre"), d.get("plataforma"), d.get("limite_dia", 6), d.get("url_subida", ""),
+        intervalo_horas=d.get("intervalo_horas", 1),
+        hora_inicio=d.get("hora_inicio", "08:00"), hora_fin=d.get("hora_fin", "23:30"))})
 
 
 @app.route('/api/bot/archivos', methods=['POST'])
@@ -2297,7 +2299,8 @@ def bot_cuenta_editar(cid):
     if request.method == "DELETE":
         return _bot_respuesta(lambda: _bot().db.borrar_cuenta(cid))
     return _bot_respuesta(lambda: _bot().guardar_cuenta(cid, {
-        k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte")}))
+        k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
+                                          "intervalo_horas", "hora_inicio", "hora_fin")}))
 
 
 @app.route("/api/bot/cuentas/<int:cid>/cerrar", methods=["POST"])
@@ -2826,4 +2829,5 @@ if __name__ == "__main__":
                 time.sleep(1)
         except KeyboardInterrupt:
             _salir_limpio()
+
 
