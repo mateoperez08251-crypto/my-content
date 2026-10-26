@@ -7,6 +7,10 @@ on:
       - 'smart_selection.py'
       - 'content.py'
       - 'bot/**'
+      - 'firebase_radar/**'
+      - 'radar_config.py'
+      - 'static/js/radar.js'
+      - 'templates/index.html'
       - 'templates/bot.html'
       - 'tests/**'
       - '.github/workflows/editor-inicio.yml'
@@ -24,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python -m pip install requests imageio-ffmpeg
+      - run: python -m pip install requests imageio-ffmpeg proglog
       - name: Sintaxis Python
         run: python -m py_compile editor_controls.py smart_editor.py content.py bot/presets.py bot/db.py bot/motor.py bot/remoto.py bot/live.py bot/avisos.py
       - name: Regresiones de inicio, presets, cola y Colab
@@ -34,9 +38,16 @@ jobs:
           import unittest
           sys.path.insert(0, 'tests')
           names = ['test_editor_controls', 'test_bot_edicion_api', 'test_bot_preparacion',
-                   'test_bot_edicion_cuentas', 'test_bot_remoto_archivos', 'test_live.Queue.test_inicio_del_preset_no_se_repite_en_cada_segmento']
+                   'test_bot_edicion_cuentas', 'test_bot_remoto_archivos', 'test_live.Queue.test_inicio_del_preset_no_se_repite_en_cada_segmento',
+                   'test_bot_ritmo', 'test_bot_planificacion', 'test_bot_cola_gestion',
+                   'test_bot_tiktok', 'test_bot_cancelacion',
+                   'test_radar_canales', 'test_radar_config', 'test_radar_entregas', 'test_radar_estado']
           suite = unittest.defaultTestLoader.loadTestsFromNames(names)
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           sys.exit(not result.wasSuccessful())
           PY
       - run: node tests/test_bot_panel.js
+      - run: node tests/test_bot_cola_panel.js
+      - run: node tests/test_radar_panel.js
+      - run: node tests/test_radar_estado_panel.js
+

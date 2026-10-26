@@ -32,11 +32,12 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
     final = None
     agenda = []
     por_cuenta = {}
+    proximas = {}
     while pendientes:
         candidatas = []
         for s in pendientes:
             cid = s['cuenta_id']
-            t = max(reloj, libres[cid], s['proximo_intento'])
+            t = max(reloj, 0 if s.get('adelantada') else libres[cid], s['proximo_intento'])
             for _ in range(3700):
                 t = siguiente_horario(t, *horario(cuentas[cid], cfg))
                 dt = datetime.fromtimestamp(t)
@@ -46,9 +47,10 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
             else:
                 return {'fin': None, 'agenda': agenda, 'por_cuenta': por_cuenta}
             candidatas.append((t, s['id'], s))
-        inicio, _, s = min(candidatas, key=lambda x: (x[0], x[1]))
+        inicio, _, s = min(candidatas, key=lambda x: (x[0], x[2].get('orden', 0), x[1]))
         final = inicio + minutos * 60
         cid = s['cuenta_id']
+        proximas.setdefault(cid, {'id': s['id'], 'inicio': inicio})
         usados[cid, datetime.fromtimestamp(final).date()] += 1
         libres[cid] = final + intervalo(cuentas[cid], cfg, extremo)
         reloj = final + pausa
@@ -56,7 +58,7 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
         if len(agenda) < 12:
             agenda.append({'id': s['id'], 'cuenta_id': cid, 'inicio': inicio, 'fin': final})
         pendientes.remove(s)
-    return {'fin': final, 'agenda': agenda, 'por_cuenta': por_cuenta}
+    return {'fin': final, 'agenda': agenda, 'por_cuenta': por_cuenta, 'proximas': proximas}
 
 
 def estimar(subidas, cuentas, cfg, ahora, libre_global=0):

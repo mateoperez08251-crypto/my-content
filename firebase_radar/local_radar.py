@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Radar de contenido agresivo.
+"""Radar de canales con detecciones y entregas persistentes.
 
-Monitorea canales de YouTube, TikTok e Instagram (los que se pueden sin login)
-y notifica cada publicación nueva por correo, WhatsApp (CallMeBot) y bandeja
-local. "Agresivo" = polling corto, varias fuentes paralelas, deduplicación
-persistente y reintentos.
-
-Lee /api/radar_config (Firebase o fallback local) y arranca un hilo que
-hace la ronda cada intervalo configurado. Si no hay Firebase, usa estado
-local en paths.data_path('radar_estado.json').
+La app inicia un único monitor después del bot. Las publicaciones verificadas
+se guardan antes de encolar o avisar; los fallos se muestran y se reintentan.
 """
 import json
 import os
@@ -19,6 +13,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from firebase_radar.seguimiento import Seguimiento
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
 
@@ -57,11 +52,18 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict):
-    try:
-        with open(_state_path(), "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False)
-    except OSError as exc:
-        _log(f"No se pudo guardar estado: {exc}")
+    ruta = _state_path()
+    temporal = ruta + '.tmp'
+    with open(temporal, 'w', encoding='utf-8') as stream:
+        json.dump(state, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporal, ruta)
+
+
+def _seguimiento():
+    ruta = paths.data_path('radar_seguimiento.db') if paths else 'radar_seguimiento.db'
+    return Seguimiento(ruta)
 
 
 def _config() -> dict:
@@ -75,8 +77,7 @@ def _config() -> dict:
     try:
         return radar_config.cargar(local, remoto if firebase else None)[0]
     except radar_config.ErrorConfig as exc:
-        _log(str(exc))
-        return {}
+        raise RuntimeError(str(exc)) from None
 
 
 # ----- YouTube ---------------------------------------------------------------
@@ -112,11 +113,11 @@ def fetch_youtube_rss(handle: str) -> list[dict]:
     try:
         items = canales.youtube(handle, _leer_publico)
         if not items:
-            _log(f'Sin videos con propietario confirmado para {handle}. Revisa el enlace del canal; no se enviarán recomendaciones.')
+            raise RuntimeError('Sin videos con propietario confirmado.')
         return items
     except Exception:
         _log(f'No pude comprobar el canal/feed de YouTube: {handle}. No envío videos sin verificar.')
-        return []
+        raise RuntimeError('No se pudo verificar el canal/feed de YouTube. Revisa su enlace y la conexión.') from None
 
 
 # ----- TikTok (sin API, scraping del HTML público) ---------------------------
@@ -144,7 +145,7 @@ def _fetch_social(handle, plataforma):
         return items
     except Exception:
         _log(f'No pude verificar las publicaciones de {handle} en {plataforma}.')
-        return []
+        raise RuntimeError('No se pudo verificar el perfil público; puede requerir iniciar sesión.') from None
 
 
 # ----- Notificaciones --------------------------------------------------------
@@ -185,57 +186,14 @@ def send_email(cfg: dict, subject: str, body: str) -> bool:
 
 
 def push_inbox(item: dict):
-    """Guarda el item en la bandeja local del content.py."""
-    try:
-        import content  # type: ignore
-        if hasattr(content, "_inbox_push"):
-            content._inbox_push({
-                "titulo": item["title"], "link": item["link"],
-                "plataforma": item["platform"], "canal": item["channel"],
-                "ts": datetime.now(timezone.utc).isoformat(),
-            })
-            return
-    except Exception:
-        pass
-    # fallback: archivo JSONL
-    try:
-        p = paths.data_path("radar_inbox.jsonl") if paths else "radar_inbox.jsonl"
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps({**item, "ts": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-
-
-def _auto_clip(item: dict, preset_name: str):
-    """Lanza Smart Split sobre el video nuevo con un preset guardado.
-    Requiere que content.py esté corriendo en el mismo proceso."""
-    try:
-        import content  # type: ignore
-    except Exception:
-        return
-    try:
-        presets = {}
-        try:
-            with open(content._presets_path(), "r", encoding="utf-8") as f:
-                presets = json.load(f)
-        except Exception:
-            pass
-        cfg = presets.get(preset_name) or presets.get("default") or {}
-        if not cfg:
-            _log(f"Auto-clip saltado: no hay preset '{preset_name}'.")
-            return
-        data = {**cfg, "source": item["link"]}
-        try:
-            if content._intentar_iniciar_trabajo():
-                _log(f"Auto-clip disparado para {item['link']} con preset '{preset_name}'.")
-                content.threading.Thread(target=content.run_smart_split_thread,
-                                         args=(data,), daemon=True).start()
-            else:
-                _log(f"Auto-clip pospuesto: hay otra tarea en curso ({item['link']}).")
-        except Exception as exc:
-            _log(f"Auto-clip falló: {exc}")
-    except Exception as exc:
-        _log(f"Auto-clip error: {exc}")
+    """No importar content: la app puede estar ejecutándose como __main__."""
+    p = paths.data_path("radar_inbox.jsonl") if paths else "radar_inbox.jsonl"
+    os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(json.dumps({**item, "ts": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    return True
 
 
 # ----- Loop principal --------------------------------------------------------
@@ -268,82 +226,155 @@ def radar_monitor():
         _ronda_lock.release()
 
 
-def _radar_monitor():
-    """Una ronda del radar. Devuelve el número de novedades encontradas."""
-    cfg = _config()
-    channels = [c.strip() for c in (cfg.get("radar_channels") or "").replace(";", ",").split(",") if c.strip()]
-    if not channels:
-        _log("Sin canales configurados.")
-        return 0
-    plats = _plataformas_a_consultar(cfg.get("radar_platform") or "all")
-    state = _load_state(); seen = state.get("seen", {}); nuevos = 0
-    for handle in channels:
-        items = _dispatch(handle, plats)
-        for it in items:
-            # Una búsqueda lenta pudo terminar después de cambiar la lista.
-            if not canales.permitido(it, _config()):
+def _entregar(store, cfg):
+    from bot import motor as bot_motor
+    for evento in store.pendientes():
+        item, tareas = evento['item'], evento['tareas']
+        if not canales.permitido(item, cfg):
+            store.guardar(evento, 'retirado', 'El canal ya no está en la lista activa.')
+            continue
+        estado, detalle, trabajo_id = 'completo', 'Entregas confirmadas.', evento['trabajo_id']
+        # Encolar primero: un servidor de avisos lento no debe impedir la edición.
+        if tareas['bot'] == 'pendiente':
+            motor = bot_motor.obtener()
+            if not motor or not motor.cfg.get('radar_auto'):
+                estado, detalle = 'esperando_bot', 'Activa Radar automático en Bot para editar estos videos.'
+            else:
+                try:
+                    bot_motor.desde_radar(item)
+                    job = motor.db.trabajo_por_clave(evento['clave'])
+                    if not job:
+                        raise RuntimeError('El bot no confirmó la entrada a la cola.')
+                    trabajo_id = job['id']
+                    if job['estado'] == 'sin_destino':
+                        estado, detalle = 'sin_destino', 'Falta una regla con cuentas de destino. Configúrala en Bot; reintentaré.'
+                    else:
+                        store.confirmar(evento, 'bot', 'omitido' if job['estado'] == 'omitido' else 'en_cola')
+                        detalle = job.get('error', '') if job['estado'] == 'omitido' else 'Recibido por el bot.'
+                except Exception:
+                    estado, detalle = 'error', 'No pude encolarlo. Se conserva para reintentar; revisa Bot y sus presets.'
+        for tarea in ('bandeja', 'correo', 'whatsapp'):
+            if tareas[tarea] != 'pendiente':
                 continue
-            key = f"{it['platform']}:{it['id']}"
-            if key in seen:
+            if tareas['bot'] == 'omitido':
+                store.confirmar(evento, tarea, 'omitido')
                 continue
-            seen[key] = int(time.time()); nuevos += 1
-            _log(f"NUEVO {it['platform']} {it['channel']}: {it['title'][:80]} → {it['link']}")
-            if cfg.get("radar_inbox", True):
-                push_inbox(it)
-            if cfg.get("radar_email_notify") and cfg.get("radar_email"):
-                send_email(cfg, f"[Radar] Nuevo en {it['channel']}",
-                           f"{it['title']}\n{it['link']}\nPlataforma: {it['platform']}")
-            if cfg.get("radar_whatsapp_notify") and cfg.get("radar_whatsapp_phone"):
-                send_whatsapp(cfg["radar_whatsapp_phone"], cfg.get("radar_whatsapp_apikey", ""),
-                              f"🔔 {it['channel']} publicó:\n{it['title']}\n{it['link']}")
-            # Bot de subida: si está encendido, él descarga, corta y sube (con reglas y reintentos)
-            bot_activo = False
+            # Desactivar avisos detiene también los reintentos que aún no se enviaron.
+            if tarea != 'bandeja' and not cfg.get('radar_' + ('email_notify' if tarea == 'correo' else 'whatsapp_notify')):
+                store.confirmar(evento, tarea, 'desactivado')
+                continue
             try:
-                from bot import motor as bot_motor  # pyrefly: ignore [missing-import]
-                m = bot_motor.obtener()
-                bot_activo = bool(m and m.cfg.get("radar_auto"))
-                if bot_activo:
-                    bot_motor.desde_radar(it)
-            except Exception as exc:
-                _log(f"Bot no disponible: {exc}")
-            # Auto-pipeline antiguo: solo si el bot no se encarga
-            if not bot_activo and cfg.get("radar_auto_clip") and it["platform"] == "youtube":
-                threading.Thread(target=_auto_clip, args=(it, cfg.get("radar_auto_preset", "default")),
-                                 daemon=True).start()
-    # Poda estado > 90 días para no crecer sin fin
-    corte = int(time.time()) - 90 * 86400
-    state["seen"] = {k: v for k, v in seen.items() if v > corte}
-    _save_state(state)
-    _log(f"Ronda terminada. Novedades: {nuevos}. Canales: {len(channels)}. Plataformas: {plats}.")
-    return nuevos
+                texto = f"{item['title']}\n{item['link']}\nCanal: {item['channel']}"
+                if tarea == 'bandeja':
+                    ok = push_inbox(item)
+                elif tarea == 'correo':
+                    ok = send_email(cfg, f"[Radar] Nuevo en {item['channel']}", texto)
+                else:
+                    ok = send_whatsapp(cfg.get('radar_whatsapp_phone', ''), cfg.get('radar_whatsapp_apikey', ''), texto)
+                if ok is False:
+                    raise RuntimeError('Entrega no confirmada')
+                store.confirmar(evento, tarea)
+            except Exception:
+                estado = 'error'
+                detalle = f"No se confirmó el aviso de {tarea}. Revisa sus ajustes; lo reintentaré."
+        store.guardar(evento, estado, detalle, trabajo_id, espera=60 if estado != 'completo' else 0)
+
+
+def _radar_monitor():
+    """Una ronda: guardar detecciones antes de entregar; reintentar lo pendiente."""
+    store = _seguimiento()
+    store.ronda(inicio=True)
+    cfg = {}
+    nuevos = 0
+    try:
+        cfg = _config()
+        channels = cfg.get('channels', [])
+        plats = _plataformas_a_consultar(cfg.get("radar_platform") or "all")
+        state = _load_state()
+        seen = state.get('seen', {})
+        for handle in channels:
+            try:
+                items = _dispatch(handle, plats)
+                validos = [it for it in items if canales.permitido(it, _config())]
+                if not validos:
+                    store.canal(handle, 'sin_resultados', 'No se pudieron confirmar publicaciones. Revisa el perfil y la conexión.')
+                    continue
+                # No depender del orden del feed para distinguir novedades.
+                for it in sorted(validos, key=lambda x: x.get('published', ''), reverse=True):
+                    it = {**it, 'seguir_desde': cfg.get('radar_desde_canales', {}).get(
+                        canales.canal(handle, cfg.get('radar_platform')).url, 0)}
+                    key = f"{it['platform']}:{it['id']}"
+                    nuevo = store.registrar(it, cfg, conocido=key in seen)
+                    if nuevo and key not in seen:
+                        nuevos += 1
+                        _log(f"NUEVO {it['channel']}: {it['title'][:80]}")
+                    seen[key] = int(time.time())
+                store.canal(handle, 'ok', 'Canal revisado; consulta las entregas debajo.', len(validos))
+            except Exception:
+                store.canal(handle, 'error', 'No se pudo consultar este canal. Se reintentará; los demás siguen.')
+                _log(f"No pude revisar {handle}. Los demás canales siguen.")
+        # El estado antiguo es compatibilidad; SQLite conserva las entregas pendientes.
+        corte = int(time.time()) - 90 * 86400
+        state['seen'] = {k: v for k, v in seen.items() if v > corte}
+        _save_state(state)
+        _entregar(store, _config())
+        store.ronda(intervalo=_interval_seconds(cfg))
+        return nuevos
+    except Exception:
+        store.ronda(intervalo=60, error='No se completó la ronda. Revisa configuración, permisos y espacio disponible.')
+        raise
+    finally:
+        store.close()
 
 
 def _interval_seconds(cfg: dict) -> int:
-    val = str(cfg.get("radar_interval", "60"))
+    val = str(cfg.get("radar_interval", "5"))
     if val == "instant": return 120  # 2 min = modo agresivo
     try: return max(60, int(val) * 60)
     except ValueError: return 3600
 
 
 _stop = threading.Event()
+_wake = threading.Event()
+
+
+def solicitar_revision():
+    store = _seguimiento()
+    try:
+        store.reintentar_ahora()
+    finally:
+        store.close()
+    ensure_background()
+    _wake.set()
+
 
 
 def start_background_loop():
-    """Hilo infinito: una ronda cada 'radar_interval'."""
+    """Una sola ronda de detección; las entregas pendientes se revisan cada minuto."""
+    siguiente = 0
     while not _stop.is_set():
+        if _wake.is_set():
+            siguiente = 0
+            _wake.clear()
         try:
             cfg = _config()
-            if cfg.get("radar_channels"):
+            if time.monotonic() >= siguiente:
                 radar_monitor()
-            wait = _interval_seconds(cfg)
-        except Exception as exc:
-            _log(f"Error en ronda: {exc}")
-            wait = 300
-        if _stop.wait(wait):
-            break
+                siguiente = time.monotonic() + _interval_seconds(cfg)
+            else:
+                store = _seguimiento()
+                try:
+                    _entregar(store, cfg)
+                finally:
+                    store.close()
+            wait = max(1, min(60, siguiente - time.monotonic()))
+        except Exception:
+            _log("No se completó la revisión. Reintentaré en un minuto.")
+            wait = 60
+        _wake.wait(wait)
 
 
-# content.py invoca radar_monitor() directamente; además iniciamos el loop en segundo plano
+# Un único monitor por proceso; guardar configuración solo lo despierta.
 _bg_started = False
 _bg_lock = threading.Lock()
 
@@ -357,10 +388,8 @@ def ensure_background():
         _bg_started = True
 
 
-# Al importar, levanta el loop
-ensure_background()
-
-
+# La app arranca el loop explícitamente después de iniciar el bot.
 if __name__ == "__main__":
     radar_monitor()
+
 

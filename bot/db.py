@@ -112,6 +112,9 @@ class DB:
             subidas = {r[1] for r in self._con.execute('PRAGMA table_info(subidas)')}
             if 'programada_para' not in subidas:
                 self._con.execute('ALTER TABLE subidas ADD COLUMN programada_para REAL NOT NULL DEFAULT 0')
+            for campo, definicion in [('orden', 'REAL NOT NULL DEFAULT 0'), ('adelantada', 'INTEGER NOT NULL DEFAULT 0')]:
+                if campo not in subidas:
+                    self._con.execute(f'ALTER TABLE subidas ADD COLUMN {campo} {definicion}')
             self._con.execute('CREATE INDEX IF NOT EXISTS ix_trabajos_grupo ON trabajos(grupo_clave)')
             self._con.commit()
 
@@ -265,6 +268,19 @@ class DB:
     def trabajo_por_clave(self, clave):
         return self._uno('SELECT * FROM trabajos WHERE clave=? OR grupo_clave=? ORDER BY id LIMIT 1', (clave, clave))
 
+    def reabrir_radar(self, clave):
+        """Solo recuperar entradas sin destino u omitidas; nunca trabajos con subidas."""
+        with self._lock, self._con:
+            filas = self._con.execute('SELECT id,estado FROM trabajos WHERE clave=? OR grupo_clave=?',
+                                      (clave, clave)).fetchall()
+            if not filas or any(r['estado'] not in ('sin_destino', 'omitido') for r in filas):
+                return False
+            ids = [r['id'] for r in filas]
+            if any(self._con.execute('SELECT 1 FROM subidas WHERE trabajo_id=?', (tid,)).fetchone() for tid in ids):
+                return False
+            self._con.executemany('DELETE FROM trabajos WHERE id=?', [(tid,) for tid in ids])
+            return True
+
     def encolar_local(self, clave, nombre, archivo, cuentas, plataforma, texto):
         """El archivo ya se guardó: trabajo listo y destinos se confirman juntos.
         Repetir una petición cuya respuesta se perdió no duplica publicaciones."""
@@ -389,7 +405,7 @@ class DB:
                        "WHERE estado='esperando_remoto'", (time.time(),)).rowcount
 
     def subidas_pendientes(self):
-        return self._todos("SELECT * FROM subidas WHERE estado='pendiente' ORDER BY id")
+        return self._todos("SELECT * FROM subidas WHERE estado='pendiente' ORDER BY orden,id")
 
     def archivos_preparados(self):
         return self._todos("SELECT archivo, COUNT(*) AS publicaciones FROM subidas GROUP BY archivo")
@@ -454,7 +470,47 @@ class DB:
         return self._todos(
             "SELECT s.* FROM subidas s JOIN cuentas c ON c.id=s.cuenta_id "
             "WHERE s.estado='pendiente' AND s.proximo_intento<=? AND c.activa=1 AND c.estado='ok' "
-            "ORDER BY s.id", (time.time(),))
+            "ORDER BY s.orden,s.id", (time.time(),))
+
+    def editar_texto_subida(self, sid, texto, version):
+        if not isinstance(texto, str) or len(texto) > 10000:
+            raise ValueError('El texto debe tener hasta 10000 caracteres.')
+        cur = self._q("UPDATE subidas SET texto=?,actualizado=? WHERE id=? AND estado='pendiente' AND actualizado=?",
+                      (texto, time.time(), int(sid), version))
+        if not cur.rowcount:
+            raise ValueError('El clip cambió o ya está subiendo. Actualiza la cola antes de editarlo.')
+
+    def adelantar_subida(self, sid):
+        with self._lock, self._con:
+            minimo = self._con.execute("SELECT MIN(orden) FROM subidas WHERE estado='pendiente'").fetchone()[0] or 0
+            cur = self._con.execute("UPDATE subidas SET adelantada=1,orden=?,actualizado=? WHERE id=? AND estado='pendiente'",
+                                    (minimo - 1, time.time(), int(sid)))
+            if not cur.rowcount:
+                raise ValueError('Solo puedes adelantar un clip pendiente.')
+
+    def mover_subida(self, sid, direccion):
+        if direccion not in ('arriba', 'abajo'):
+            raise ValueError('Elige arriba o abajo.')
+        with self._lock, self._con:
+            filas = self._con.execute("SELECT id FROM subidas WHERE estado='pendiente' ORDER BY orden,id").fetchall()
+            ids = [r[0] for r in filas]
+            if int(sid) not in ids:
+                raise ValueError('Solo puedes ordenar clips pendientes.')
+            pos = ids.index(int(sid))
+            otro = pos + (-1 if direccion == 'arriba' else 1)
+            if 0 <= otro < len(ids):
+                ids[pos], ids[otro] = ids[otro], ids[pos]
+                self._con.executemany('UPDATE subidas SET orden=? WHERE id=?', enumerate(ids))
+
+    def borrar_lote(self, ids):
+        if not isinstance(ids, list) or not 1 <= len(ids) <= 200 or any(type(i) is not int for i in ids):
+            raise ValueError('Selecciona entre 1 y 200 clips.')
+        borrados = 0
+        with self._lock, self._con:
+            for sid in set(ids):
+                borrados += self._con.execute("DELETE FROM subidas WHERE id=? AND estado IN ('pendiente','error')",
+                                               (sid,)).rowcount
+        return {'borrados': borrados, 'omitidos': len(set(ids)) - borrados}
 
     def marcar_subida(self, sid, estado, **extra):
         campos = {"estado": estado, "actualizado": time.time(), **extra}
@@ -463,7 +519,7 @@ class DB:
         sql = ", ".join(f"{k}=?" for k in campos)
         self._q(f"UPDATE subidas SET {sql} WHERE id=?", (*campos.values(), int(sid)))
 
-    def subidas_recientes(self, limite=80):
+    def subidas_recientes(self, limite=80, toda_cola=False):
         rows = self._todos(
             "SELECT s.*, c.nombre AS cuenta_nombre, c.plataforma AS plataforma, "
             "t.titulo AS video_titulo, t.url AS video_url, t.canal AS canal, t.origen AS origen, "
@@ -472,7 +528,8 @@ class DB:
             "FROM subidas s LEFT JOIN cuentas c ON c.id=s.cuenta_id "
             "LEFT JOIN trabajos t ON t.id=s.trabajo_id "
             "LEFT JOIN clip_historial h ON h.trabajo_id=s.trabajo_id AND h.cuenta_id=s.cuenta_id AND h.archivo=s.archivo "
-            "ORDER BY s.id DESC LIMIT ?", (int(limite),))
+            + ("WHERE s.estado!='ok' OR s.id IN (SELECT id FROM subidas WHERE estado='ok' ORDER BY id DESC LIMIT ?) ORDER BY s.id DESC"
+               if toda_cola else "ORDER BY s.id DESC LIMIT ?"), (int(limite),))
         for row in rows:
             try:
                 options = json.loads(row.pop('edicion_opciones') or '{}')

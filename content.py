@@ -1976,8 +1976,8 @@ def save_radar_config():
 
         def trigger_radar():
             try:
-                from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
-                radar_monitor()
+                from firebase_radar.local_radar import solicitar_revision
+                solicitar_revision()
             except Exception as e:
                 print("Error disparando radar:", e)
         threading.Thread(target=trigger_radar, daemon=True).start()
@@ -1993,6 +1993,45 @@ def save_radar_config():
         return jsonify({'success': False, 'message': str(exc)}), 400
     except Exception:
         return jsonify({'success': False, 'message': 'No se pudo completar el guardado del Radar. Reabre su configuración para comprobar la lista.'}), 500
+
+
+@app.route('/api/radar/estado', methods=['GET'])
+def radar_estado():
+    from firebase_radar.seguimiento import Seguimiento
+    from bot import motor as bot_motor
+    try:
+        cfg, _ = _leer_radar_config()
+        store = Seguimiento(paths.data_path('radar_seguimiento.db'))
+        try:
+            data = store.resumen(cfg.get('channels', []))
+        finally:
+            store.close()
+        motor = bot_motor.obtener()
+        data['bot'] = {'disponible': bool(motor), 'automatico': bool(motor and motor.cfg['radar_auto']),
+                       'activo': bool(motor and motor.cfg['activo']),
+                       'modo': motor.cfg['modo_cola'] if motor else ''}
+        if motor:
+            for evento in data['eventos']:
+                trabajo = motor.db.trabajo_por_clave(evento['clave'])
+                if trabajo:
+                    evento['trabajo_estado'] = trabajo['estado']
+                    evento['trabajo_error'] = trabajo.get('error', '')
+            for canal in data['canales']:
+                from firebase_radar.functions.canales import canal as referencia
+                ref = referencia(canal['canal'], cfg.get('radar_platform'))
+                cid = next((e['channel_id'] for e in data['eventos'] if e['canal'] == (ref.url if ref else canal['canal'])), '')
+                regla = motor.destino_para(canal['canal'], ref.plataforma if ref else None, cid)
+                canal['destinos'] = len((regla or {}).get('cuentas', []))
+        return jsonify({'success': True, **data})
+    except Exception:
+        return jsonify({'success': False, 'message': 'No se pudo leer el estado del Radar. Revisa configuración y almacenamiento.'}), 500
+
+
+@app.route('/api/radar/revisar', methods=['POST'])
+def radar_revisar():
+    from firebase_radar.local_radar import solicitar_revision
+    solicitar_revision()
+    return jsonify({'success': True, 'message': 'Revisión solicitada. Las entregas pendientes también se reintentarán.'})
 
 
 def _inbox_push(item: dict):
@@ -2063,8 +2102,9 @@ def delete_inbox_item():
 
 @app.route("/api/inbox", methods=["GET"])
 def get_inbox():
+    locales = _inbox_local()
     if not firebase_db:
-        return jsonify({"videos": _inbox_local()})
+        return jsonify({"videos": locales})
     try:
         docs = firebase_db.collection('inbox').order_by(
             'detected_at', direction=firestore.Query.DESCENDING).limit(10).stream()
@@ -2091,10 +2131,16 @@ def get_inbox():
                 "thumbnail": d.get('thumbnail', 'https://via.placeholder.com/150x84?text=Video'),
                 "url": d.get('url', ''),
                 "time_ago": time_ago,
+                "platform": d.get('platform', ''),
             })
-        return jsonify({"videos": videos})
+        unidos = {}
+        for video in locales + videos:
+            clave = video.get('url') or video.get('id')
+            if clave and clave not in unidos:
+                unidos[clave] = video
+        return jsonify({"videos": list(unidos.values())[:40]})
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({"videos": locales, "advertencia": "Firebase no respondió; se muestra la bandeja de esta PC."})
 
 
 # ---- Bot de subida (radar/URL -> descarga -> clips -> Chrome) ------------
@@ -2155,6 +2201,8 @@ def _iniciar_bot():
         ocupar=_intentar_iniciar_trabajo, liberar=_terminar_trabajo, log=log,
         notificar=_bot_notificar, firebase=lambda: firebase_db, cargar_preset=_bot_preset)
     motor.lives()  # Recuperar segmentos cerrados; nunca reinicia una captura sin petición.
+    from firebase_radar.local_radar import ensure_background
+    ensure_background()
     return motor
 
 
@@ -2352,7 +2400,9 @@ def bot_regla_borrar(rid):
 @app.route("/api/bot/subidas/<int:sid>/<accion>", methods=["POST"])
 def bot_subida_accion(sid, accion):
     def hacer():
-        if accion == "reintentar":
+        if accion in ('texto', 'ahora', 'arriba', 'abajo'):
+            return _bot().gestionar_subida(sid, accion, request.get_json(silent=True) or {})
+        elif accion == "reintentar":
             _bot().db.reintentar_subida(sid)
             _bot().despertar()
         elif accion == "borrar":
@@ -2363,6 +2413,12 @@ def bot_subida_accion(sid, accion):
         else:
             raise ValueError("Acción no válida.")
     return _bot_respuesta(hacer)
+
+
+@app.route('/api/bot/subidas/lote', methods=['POST'])
+def bot_subidas_lote():
+    d = request.get_json(silent=True) or {}
+    return _bot_respuesta(lambda: _bot().borrar_lote_subidas(d.get('ids')))
 
 
 @app.route("/api/bot/trabajos/<int:tid>/<accion>", methods=["POST"])
@@ -2644,13 +2700,6 @@ def _arrancar_servidor():
             and not os.environ.get("COLAB_RELEASE_TAG"):
         threading.Thread(target=_iniciar_bot, daemon=True, name="bot-arranque").start()
 
-        def _radar_servidor():
-            try:
-                import firebase_radar.local_radar  # noqa: F401  (al importarse arranca su ronda periódica)
-            except Exception as e:
-                print(f"[radar] no arrancó en modo servidor: {e}")
-
-        threading.Thread(target=_radar_servidor, daemon=True, name="radar").start()
     minutos = float(os.environ.get("CONTENTAPP_AUTOBORRAR_MIN") or 0)
     if minutos > 0:
         threading.Thread(target=_hilo_autoborrado, args=(minutos,), daemon=True, name="autoborrado").start()
@@ -2746,29 +2795,6 @@ if __name__ == "__main__":
                 print(f"[inbox] Purga automática: {borrados} items de Firebase con más de 3 días eliminados.")
         except Exception as e:
             print(f"[inbox] Error en purga automática de Firebase: {e}")
-
-    def start_radar():
-        try:
-            from firebase_radar.local_radar import radar_monitor  # pyrefly: ignore [missing-import]
-        except ImportError:
-            print(">> Módulo de Radar no encontrado. Omitiendo monitoreo en segundo plano.")
-            return
-        rondas = 0
-        while True:
-            try:
-                radar_monitor()
-            except Exception as e:
-                print("Error en el radar:", e)
-            # Cada 6 rondas (~3 horas) purgar Firebase inbox > 3 días
-            rondas += 1
-            if rondas % 6 == 0:
-                try:
-                    _purge_firebase_inbox()
-                except Exception as e:
-                    print(f"Error en purga del inbox: {e}")
-            time.sleep(1800)
-
-    threading.Thread(target=start_radar, daemon=True, name="radar").start()
 
     def _arrancar_bot():
         try:
