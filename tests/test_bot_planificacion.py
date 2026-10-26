@@ -24,11 +24,11 @@ class PlanificacionTests(unittest.TestCase):
         self.assertEqual([s['inicio'] for s in plan['agenda']],
                          [ts('23T08:00:00'),ts('23T09:03:00'),ts('23T10:06:00')])
 
-    def test_estimacion_respeta_primera_subida_programada(self):
+    def test_estimacion_ignora_programacion_inicial_antigua(self):
         subidas = [{'id': 1, 'cuenta_id': 1, 'proximo_intento': 0,
                     'programada_para': ts('23T09:00:00')}]
         plan = estimar(subidas, self.cuentas, self.cfg, ts('23T08:00:00'))
-        self.assertEqual(plan['escenarios']['min']['agenda'][0]['inicio'], ts('23T09:00:00'))
+        self.assertEqual(plan['escenarios']['min']['agenda'][0]['inicio'], ts('23T08:00:00'))
 
     def test_limite_diario_pasa_al_dia_siguiente(self):
         self.cuentas[0].update(limite_dia=2,hoy=1)
@@ -78,3 +78,4 @@ class PlanificacionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

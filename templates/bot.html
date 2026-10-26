@@ -190,13 +190,11 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     </div>
     <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
     <div class="chips" id="chips-url"></div>
-    <p class="muted" id="url-subir-ahora-ayuda">Marcado: el primer clip entra a la cola al terminar la edición. Desmarcado: espera la pausa configurada entre publicaciones, contada desde que se guardan los clips. Siempre se respetan el horario, el límite diario y cualquier pausa pendiente de esa cuenta, aunque añadas otra URL.</p>
     <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar edición de cada cuenta (o regla/general)</option></select>
     <p class="muted">Con “Cortar” activado se usa la edición de cada cuenta. Cada cuenta recibe fragmentos distintos, aunque use el mismo preset. Elegir un preset aquí lo aplica a todas las cuentas de estos enlaces. Los trabajos ya añadidos conservan sus ajustes.</p>
     <p class="muted">Con “Mejores momentos con IA”, cada clip lleva su título de la IA sin guiones bajos, seguido de su descripción y hashtags.</p>
     <div class="fila" style="margin-top:10px">
       <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
-      <label class="switch"><input type="checkbox" id="url-subir-ahora" checked aria-describedby="url-subir-ahora-ayuda"> Subir el primer clip al estar listo</label>
       <input id="texto-url" placeholder="Texto o hashtags fijos (opcional)">
       <button id="encolar-enlaces" class="prim" onclick="encolar()"><i class="ph ph-plus"></i> Añadir a la cola</button>
     </div>
@@ -252,20 +250,17 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
 
   <section class="card ancho">
     <h2><i class="ph-duotone ph-sliders"></i> 3. Horario y ritmo de publicación</h2>
-    <p class="ayuda">Una publicación es un clip en una cuenta. Solo se sube uno a la vez. Las pausas empiezan al terminar cada subida; se cumplen tanto la pausa general como la de esa cuenta. El horario usa la hora de la PC.</p>
+    <p class="ayuda">Elige cada cuántas horas publica cada cuenta y su horario permitido. El bot espera y luego publica; debe seguir abierto para hacerlo. Solo se sube un clip a la vez. El intervalo empieza al terminar la subida y usa la hora de la PC.</p>
     <div class="ajustes">
-      <div><label>Pausa de la misma cuenta (min)</label><div class="fila rango"><div><label for="gap_min">Mínima</label><input id="gap_min" type="number" min="0" max="1440"></div><div><label for="gap_max">Máxima</label><input id="gap_max" type="number" min="0" max="1440"></div></div></div>
       <div><label>Pausa entre cualquier publicación (min)</label><div class="fila rango"><div><label for="pausa_min">Mínima</label><input id="pausa_min" type="number" min="0" max="1440"></div><div><label for="pausa_max">Máxima</label><input id="pausa_max" type="number" min="0" max="1440"></div></div></div>
-      <div><label>Sube desde</label><input id="hora_inicio" type="time"></div>
-      <div><label>Hasta</label><input id="hora_fin" type="time"></div>
       <div><label for="max_intentos">Máximo de intentos por subida</label><input id="max_intentos" type="number" min="1" max="20"></div>
       <div><label for="estimacion_subida_min">Minutos para subir cada clip (estimación)</label><input id="estimacion_subida_min" type="number" min="0.1" max="180" step="0.5"></div>
       <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
         <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
     </div>
-    <p class="ayuda">Para una frecuencia fija, pon el mismo mínimo y máximo. Ejemplo: pausa de 60 minutos y subida de 3 minutos = unos 63 minutos entre inicios, por cuenta. Inicio y fin iguales permiten publicar las 24 horas.</p>
+    <p class="ayuda">Ejemplo: cuenta A cada 2 horas y cuenta B cada 4 horas. 0,5 horas son 30 minutos. Inicio y fin iguales permiten publicar las 24 horas. La pausa general también se respeta. La primera subida entra al estar lista si la cuenta no tiene una pausa pendiente.</p>
     <div id="plan-cola" aria-live="polite"></div>
-    <div class="tabla-scroll"><table><thead><tr><th>Cuenta</th><th>Máximo al día</th><th>Hoy / quedan</th><th>Fin estimado</th></tr></thead><tbody id="plan-cuentas"></tbody></table></div>
+    <div class="tabla-scroll"><table><thead><tr><th>Cuenta</th><th>Intervalo (horas)</th><th>Desde / hasta</th><th>Máximo al día</th><th>Hoy / quedan</th><th>Fin estimado</th></tr></thead><tbody id="plan-cuentas"></tbody></table></div>
     <p class="ayuda">El cálculo usa los clips ya editados y los ajustes guardados. El rango compara pausas mínimas y máximas; no incluye edición pendiente, cortes de conexión, verificaciones ni reintentos futuros. Los videos sin editar todavía no tienen una cantidad exacta de partes.</p>
     <label style="margin-top:12px">Servidor de cortes — opcional. Los clips ya guardados no lo necesitan.</label>
     <div class="fila">
@@ -290,7 +285,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
   <section class="ancho subidas-seccion">
     <h2><i class="ph-duotone ph-upload-simple"></i> Subidas <small id="res-subidas"></small></h2>
     <div class="fila"><button id="lanzar-subidas" class="prim" onclick="lanzarSubidasGuardadas()">Lanzar subidas guardadas</button><span id="lanzar-subidas-estado" class="muted" aria-live="polite"></span></div>
-    <p class="ayuda">Activa el bot en «Solo publicar clips guardados» y pone en marcha las publicaciones pendientes. El primer clip listo no espera la pausa de 60–120 min si esa cuenta no tiene una pausa anterior. Respeta el horario, la sesión, los límites y los reintentos. La tarea en curso termina antes. Para volver a editar, cambia el modo en el apartado 1.</p>
+    <p class="ayuda">Activa el bot en «Solo publicar clips guardados» y pone en marcha las publicaciones pendientes. El primer clip listo entra al turno si esa cuenta no tiene una pausa anterior. Respeta el horario, la sesión, los límites y los reintentos. La tarea en curso termina antes. Para volver a editar, cambia el modo en el apartado 1.</p>
     <p class="muted">Cada tarjeta corresponde a un clip y una cuenta. La vista previa es el archivo guardado en esta PC. “Publicada” indica confirmación de la plataforma o revisión manual; el enlace aparece cuando la plataforma lo devuelve.</p>
     <div class="fila subidas-controles" style="margin-top:10px"><button onclick="expandirSubidas(true)">Expandir todo</button><button onclick="expandirSubidas(false)">Contraer todo</button></div>
     <div id="subidas" class="subidas-lista" role="list" aria-label="Publicaciones por cuenta"></div>
@@ -477,7 +472,7 @@ function pintar() {
   $('activo').checked = c.activo;
   $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
   if (!editando) {
-    for (const k of ['gap_min','gap_max','pausa_min','pausa_max','hora_inicio','hora_fin','max_intentos','estimacion_subida_min','modo_cola','remoto_url','remoto_clave','navegador'])
+    for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min','modo_cola','remoto_url','remoto_clave','navegador'])
       $(k).value = c[k];
     for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) $(k).checked = c[k];
     for (const k of ['avisos_activos','avisos_cola','avisos_progreso','avisos_publicados','avisos_errores','avisos_lives','avisos_sistema']) $(k).checked = c[k] !== false;
@@ -492,7 +487,7 @@ function pintar() {
   $('cuentas').innerHTML = E.cuentas.map(x => `<tr>
     <td>${plat(x.plataforma)} ${esc(x.nombre)} ${x.activa ? '' : '<span class="muted">(pausada)</span>'}</td>
     <td>${x.comprobando || pruebasPendientes.has(x.id) ? '<span class="muted">Comprobando…</span>' : est(x.estado)} ${x.abierta ? '<span class="muted">Navegador abierto</span>' : ''}</td>
-    <td>${x.hoy}/${x.limite_dia}</td>
+    <td>${x.hoy}/${x.limite_dia}<div class="muted">Cada ${x.intervalo_horas ?? 1} h · ${esc(x.hora_inicio || '08:00')}–${esc(x.hora_fin || '23:30')}</div><a href="#plan-cuentas">Ajustar horas</a></td>
     <td class="acc">
       <button class="mini" onclick="cambiarCuentaEdicion('${x.id}', true)">Edición: ${esc(x.preset_corte || 'Regla/general')}</button>
       <button class="mini" onclick="login(${x.id})" ${loginPendientes.has(x.id) ? 'disabled' : ''} title="Abre el navegador para iniciar sesión"><i class="ph ph-sign-in"></i> ${loginPendientes.has(x.id) ? 'Iniciando…' : 'Sesión'}</button>
@@ -651,7 +646,7 @@ async function encolar() {
       await asegurarEdicion();
     }
     const result = await api('/api/bot/encolar', {url: $('urls').value, cuentas: [...selUrl], cortar: $('cortar').checked,
-      texto_fijo: $('texto-url').value, preset: $('url-preset').value, subir_ahora: $('url-subir-ahora').checked});
+      texto_fijo: $('texto-url').value, preset: $('url-preset').value});
     $('urls').value = ''; toast(`${result.ids.length} trabajo(s) añadido(s) a la cola`); cargar();
   } catch (e) { toast(e.message, true); }
   finally { button.disabled = false; }
@@ -828,8 +823,8 @@ async function probarRemoto() {
 }
 async function guardarAjustes() {
   const d = {};
-  for (const k of ['gap_min','gap_max','pausa_min','pausa_max','max_intentos','estimacion_subida_min']) d[k] = +$(k).value;
-  for (const k of ['hora_inicio','hora_fin','preset','modo_cola','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
+  for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min']) d[k] = +$(k).value;
+  for (const k of ['preset','modo_cola','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
   for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) d[k] = $(k).checked;
   await api('/api/bot/config', d); editando = false; await cargar(); toast('Horario y modo guardados');
 }
@@ -1089,9 +1084,18 @@ function pintarPlan() {
   $('plan-cola').innerHTML = `<p>${esc(mensaje)}</p><p class="muted">Hora de la PC del bot: ${esc(p.hora_pc)}. Fechas estimadas mostradas en la zona horaria de este navegador.</p>` +
     (p.bloqueadas.length ? `<p class="err">${esc([...new Set(p.bloqueadas.map(s=>s.motivo))].join(' · '))}. Esas publicaciones no se incluyen en el fin estimado.</p>` : '');
   if (!document.activeElement?.closest('#plan-cuentas')) $('plan-cuentas').innerHTML = E.cuentas.map(c => `<tr><td>${esc(c.nombre)}<div class="muted">${esc(c.plataforma)}</div></td>
+    <td><input id="intervalo-${c.id}" aria-label="Horas entre subidas de ${esc(c.nombre)}" type="number" min="0" max="168" step="any" value="${c.intervalo_horas ?? 1}" style="width:90px" onchange="guardarRitmo(${c.id},'intervalo_horas',this)"></td>
+    <td><input aria-label="Subir desde en ${esc(c.nombre)}" type="time" value="${esc(c.hora_inicio || '08:00')}" onchange="guardarRitmo(${c.id},'hora_inicio',this)"><input aria-label="Subir hasta en ${esc(c.nombre)}" type="time" value="${esc(c.hora_fin || '23:30')}" onchange="guardarRitmo(${c.id},'hora_fin',this)"></td>
     <td><input id="limite-${c.id}" aria-label="Máximo diario de ${esc(c.nombre)}" type="number" min="1" max="1000" value="${c.limite_dia}" style="width:80px" onfocus="this.dataset.editando='1'" onchange="guardarLimite(${c.id},this.value)"></td>
     <td>${c.hoy} hoy · ${Math.max(0,c.limite_dia-c.hoy)} disponibles<br><span class="muted">${p.por_cuenta?.[c.id] || 0} por publicar</span></td>
     <td>${c.activa && c.estado === 'ok' ? `${fechaPlan(a?.por_cuenta?.[c.id])} – ${fechaPlan(b?.por_cuenta?.[c.id])}` : 'Pausada o sin sesión'}</td></tr>`).join('');
+}
+async function guardarRitmo(id, campo, input) {
+  if (!input.value || !input.checkValidity()) { toast('Introduce un intervalo u horario válido.',true); return; }
+  try {
+    await api(`/api/bot/cuentas/${id}`, {[campo]: campo === 'intervalo_horas' ? Number(input.value) : input.value});
+    toast('Horario de la cuenta guardado.'); await cargar();
+  } catch(e) { toast(e.message,true); }
 }
 async function guardarLimite(id, valor) {
   try { await api(`/api/bot/cuentas/${id}`, {limite_dia:Number(valor)}); await cargar(); }
@@ -1115,4 +1119,5 @@ cargarPresets(); cargar(); setInterval(cargar, 4000);
 </script>
 </body>
 </html>
+
 

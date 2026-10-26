@@ -1,6 +1,7 @@
 """Estimación de la cola. No reserva horas ni publica contenido."""
 from collections import defaultdict
 from datetime import datetime, timedelta
+from .ritmo import horario, intervalo
 
 
 def siguiente_horario(instant, inicio, fin):
@@ -27,7 +28,7 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
         usados[cid, hoy] = c['hoy']
     reloj = max(ahora, libre_global)
     minutos = cfg.get('estimacion_subida_min', 3)
-    gap, pausa = cfg['gap_' + extremo] * 60, cfg['pausa_' + extremo] * 60
+    pausa = cfg['pausa_' + extremo] * 60
     final = None
     agenda = []
     por_cuenta = {}
@@ -35,9 +36,9 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
         candidatas = []
         for s in pendientes:
             cid = s['cuenta_id']
-            t = max(reloj, libres[cid], s['proximo_intento'], s.get('programada_para', 0))
+            t = max(reloj, libres[cid], s['proximo_intento'])
             for _ in range(3700):
-                t = siguiente_horario(t, cfg['hora_inicio'], cfg['hora_fin'])
+                t = siguiente_horario(t, *horario(cuentas[cid], cfg))
                 dt = datetime.fromtimestamp(t)
                 if usados[cid, dt.date()] < cuentas[cid]['limite_dia']:
                     break
@@ -49,7 +50,7 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
         final = inicio + minutos * 60
         cid = s['cuenta_id']
         usados[cid, datetime.fromtimestamp(final).date()] += 1
-        libres[cid] = final + gap
+        libres[cid] = final + intervalo(cuentas[cid], cfg, extremo)
         reloj = final + pausa
         por_cuenta[cid] = final
         if len(agenda) < 12:
@@ -82,3 +83,4 @@ def estimar(subidas, cuentas, cfg, ahora, libre_global=0):
             'por_cuenta': cantidades,
             'minutos_por_subida': cfg.get('estimacion_subida_min', 3),
             'hora_pc': datetime.fromtimestamp(ahora).astimezone().isoformat()}
+

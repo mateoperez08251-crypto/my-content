@@ -106,6 +106,9 @@ class DB:
             cuentas = {r[1] for r in self._con.execute('PRAGMA table_info(cuentas)')}
             if 'preset_corte' not in cuentas:
                 self._con.execute("ALTER TABLE cuentas ADD COLUMN preset_corte TEXT NOT NULL DEFAULT ''")
+            for campo, tipo in [('intervalo_horas', 'REAL'), ('hora_inicio', 'TEXT'), ('hora_fin', 'TEXT')]:
+                if campo not in cuentas:
+                    self._con.execute(f'ALTER TABLE cuentas ADD COLUMN {campo} {tipo}')
             subidas = {r[1] for r in self._con.execute('PRAGMA table_info(subidas)')}
             if 'programada_para' not in subidas:
                 self._con.execute('ALTER TABLE subidas ADD COLUMN programada_para REAL NOT NULL DEFAULT 0')
@@ -147,22 +150,33 @@ class DB:
     def cuenta(self, cid):
         return self._uno("SELECT * FROM cuentas WHERE id=?", (int(cid),))
 
-    def crear_cuenta(self, nombre, plataforma, limite_dia=6, url_subida=""):
+    def crear_cuenta(self, nombre, plataforma, limite_dia=6, url_subida="",
+                     intervalo_horas=1, hora_inicio="08:00", hora_fin="23:30"):
+        from .ritmo import validar
+        ritmo = validar(dict(intervalo_horas=intervalo_horas, hora_inicio=hora_inicio, hora_fin=hora_fin))
         plataforma = (plataforma or "").strip().lower()
         if plataforma not in PLATAFORMAS:
             raise ValueError(f"Plataforma no válida: {plataforma}")
         nombre = (nombre or "").strip()
         if not nombre:
             raise ValueError("Ponle un nombre a la cuenta.")
-        cur = self._q("INSERT INTO cuentas(nombre, plataforma, limite_dia, url_subida, creada) "
-                      "VALUES(?,?,?,?,?)",
+        cur = self._q("INSERT INTO cuentas(nombre, plataforma, limite_dia, url_subida, creada, intervalo_horas, hora_inicio, hora_fin) "
+                      "VALUES(?,?,?,?,?,?,?,?)",
                       (nombre, plataforma, max(1, int(limite_dia or 6)), (url_subida or "").strip(),
-                       time.time()))
+                       time.time(), ritmo['intervalo_horas'], ritmo['hora_inicio'], ritmo['hora_fin']))
         return cur.lastrowid
 
     def editar_cuenta(self, cid, **campos):
-        permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre", "preset_corte"}
+        from .ritmo import validar
+        permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre", "preset_corte",
+                      "intervalo_horas", "hora_inicio", "hora_fin"}
         sets = {k: v for k, v in campos.items() if k in permitidos}
+        sets = validar(sets)
+        # Un cambio de intervalo se cuenta desde la última publicación, sin borrar su historial.
+        if 'intervalo_horas' in sets and 'proxima_libre' not in sets:
+            ultima = self._uno("SELECT MAX(actualizado) AS t FROM subidas WHERE cuenta_id=? AND estado IN ('ok','revisar')",
+                               (int(cid),))
+            sets['proxima_libre'] = (ultima['t'] + sets['intervalo_horas'] * 3600) if ultima and ultima['t'] else 0
         if 'limite_dia' in sets:
             try:
                 valor = int(sets['limite_dia'])
@@ -329,7 +343,7 @@ class DB:
                                  'Revisa ese historial antes de volver a procesarlo para estas cuentas.') from None
         return result
 
-    def finalizar_trabajo(self, tid, subidas, intervalos=None, programacion=None):
+    def finalizar_trabajo(self, tid, subidas, intervalos=None):
         """Encolar todos los resultados y marcar listo en una sola transacción."""
         ahora = time.time()
         with self._lock, self._con:
@@ -353,7 +367,7 @@ class DB:
                     self._con.execute('INSERT OR IGNORE INTO clip_historial VALUES(?,?,?,?,?,?)',
                                       (identity, cid, start, end, tid, ruta))
             self._con.executemany('INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado,programada_para) VALUES(?,?,?,?,?,?,?)',
-                                  [(tid, cid, ruta, texto, ahora, ahora, (programacion or {}).get(cid, 0))
+                                  [(tid, cid, ruta, texto, ahora, ahora, 0)
                                    for cid, ruta, texto in subidas])
             self._con.execute("UPDATE trabajos SET estado='listo',error='',actualizado=? WHERE id=?", (ahora, tid))
 
@@ -493,3 +507,4 @@ def _fila(r):
             except ValueError:
                 d[k] = []
     return d
+
