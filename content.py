@@ -2400,7 +2400,7 @@ def bot_regla_borrar(rid):
 @app.route("/api/bot/subidas/<int:sid>/<accion>", methods=["POST"])
 def bot_subida_accion(sid, accion):
     def hacer():
-        if accion in ('texto', 'ahora', 'arriba', 'abajo'):
+        if accion in ('texto', 'ahora', 'arriba', 'abajo', 'calidad'):
             return _bot().gestionar_subida(sid, accion, request.get_json(silent=True) or {})
         elif accion == "reintentar":
             _bot().db.reintentar_subida(sid)
@@ -2506,7 +2506,7 @@ def remoto_estado(jid):
     por_archivo = {m.get("archivo"): m for m in t["meta"]}
     clips = [{"n": i, "nombre": os.path.basename(r), "bytes": os.path.getsize(r) if os.path.isfile(r) else 0,
               "publicacion": crear_publicacion(por_archivo.get(r) or {}),
-              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin')}}
+              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen')}}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
                     "progreso": progreso, "clips": clips})
@@ -2855,5 +2855,6 @@ if __name__ == "__main__":
                 time.sleep(1)
         except KeyboardInterrupt:
             _salir_limpio()
+
 
 

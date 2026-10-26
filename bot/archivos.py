@@ -12,7 +12,7 @@ def guardar_manifest(carpeta, clips, metadatos=None):
             raise ValueError('El servidor entregó un clip vacío.')
         registros.append({'nombre': os.path.basename(ruta), 'bytes': size, 'texto': texto})
         if metadatos and ruta in metadatos:
-            registros[-1].update({k: metadatos[ruta][k] for k in ('inicio', 'fin')
+            registros[-1].update({k: metadatos[ruta][k] for k in ('inicio', 'fin', 'calidad_origen')
                                  if k in metadatos[ruta]})
     if not registros:
         raise ValueError('No hay clips preparados.')
@@ -65,3 +65,17 @@ def leer_intervalos(carpeta):
     with open(os.path.join(carpeta, 'clips.json'), encoding='utf-8') as f:
         return {os.path.join(carpeta, r['nombre']): (float(r['inicio']), float(r['fin']))
                 for r in json.load(f) if 'inicio' in r and 'fin' in r}
+
+
+
+def leer_calidad_origen(carpeta, archivo):
+    try:
+        with open(os.path.join(carpeta, 'clips.json'), encoding='utf-8') as f:
+            for registro in json.load(f):
+                if registro.get('nombre') == os.path.basename(archivo):
+                    valor = registro.get('calidad_origen', {})
+                    return valor if isinstance(valor, dict) else {}
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return {}
+

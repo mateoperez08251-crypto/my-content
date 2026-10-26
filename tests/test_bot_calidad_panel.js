@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const html = fs.readFileSync(path.join(__dirname,'../templates/bot.html'),'utf8');
+for (const [,js] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) new Function(js);
+const ctx={}; vm.createContext(ctx);
+vm.runInContext(html.slice(html.indexOf('const esc ='),html.indexOf('const est =')),ctx);
+vm.runInContext(html.slice(html.indexOf('function datosCalidad('),html.indexOf('async function comprobarCalidad(')),ctx);
+const d=ctx.datosCalidad({calidad:{estado:'comprobado',ancho:1080,alto:1920,fps:29.97,bitrate_video:8100000,codec:'h264',advertencias:['Fuente <pequeña>'],origen:{ancho:1920,alto:1080,recorte_ancho:608,recorte_alto:1080,ampliacion:1.778}}});
+for (const texto of ['1080 × 1920','29.97 FPS','8.10 Mbps de video','Fuente &lt;pequeña&gt;','1.78×']) assert(d.includes(texto));
+assert(!ctx.datosCalidad({edicion:{export_profile:'quality'}}).includes('1080'));
+assert(ctx.datosCalidad({calidad:{estado:'comprobado',ancho:720,alto:1280,bitrate_total:3000000,bitrate_total_estimado:true}}).includes('totales estimados (incluye audio)'));
+assert(html.includes('comprobarCalidad(${id},this)'));
+console.log('Calidad: datos medidos, valores desconocidos y avisos seguros correctos');

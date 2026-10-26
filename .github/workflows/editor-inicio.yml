@@ -5,6 +5,10 @@ on:
       - 'editor_controls.py'
       - 'smart_editor.py'
       - 'smart_selection.py'
+      - 'calidad_video.py'
+      - 'gpu_video.py'
+      - 'yt_downloader.py'
+      - 'smart_upscale*.py'
       - 'content.py'
       - 'bot/**'
       - 'firebase_radar/**'
@@ -28,16 +32,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python -m pip install requests imageio-ffmpeg proglog
+      - run: python -m pip install requests imageio-ffmpeg proglog yt-dlp numpy opencv-python-headless
       - name: Sintaxis Python
-        run: python -m py_compile editor_controls.py smart_editor.py content.py bot/presets.py bot/db.py bot/motor.py bot/remoto.py bot/live.py bot/avisos.py
+        run: python -m py_compile calidad_video.py gpu_video.py yt_downloader.py smart_upscale.py smart_upscale_worker.py editor_controls.py smart_editor.py content.py bot/presets.py bot/db.py bot/motor.py bot/remoto.py bot/live.py bot/avisos.py
       - name: Regresiones de inicio, presets, cola y Colab
         run: |
           python - <<'PY'
           import sys
           import unittest
           sys.path.insert(0, 'tests')
-          names = ['test_editor_controls', 'test_bot_edicion_api', 'test_bot_preparacion',
+          names = ['test_calidad_video', 'test_calidad_descarga', 'test_editor_controls', 'test_bot_subidas_detalles', 'test_bot_edicion_api', 'test_bot_preparacion',
                    'test_bot_edicion_cuentas', 'test_bot_remoto_archivos', 'test_live.Queue.test_inicio_del_preset_no_se_repite_en_cada_segmento',
                    'test_bot_ritmo', 'test_bot_planificacion', 'test_bot_cola_gestion',
                    'test_bot_tiktok', 'test_bot_tiktok_lista', 'test_bot_cancelacion',
@@ -46,9 +50,11 @@ jobs:
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           sys.exit(not result.wasSuccessful())
           PY
+      - run: node tests/test_bot_calidad_panel.js
       - run: node tests/test_bot_panel.js
       - run: node tests/test_bot_cola_panel.js
       - run: node tests/test_bot_ritmo_panel.js
       - run: node tests/test_radar_panel.js
       - run: node tests/test_radar_estado_panel.js
+
 
