@@ -4,6 +4,7 @@ import re
 import time
 import unicodedata
 from ..cancelacion import SubidaCancelada, comprobar_cancelacion, iniciar_publicacion
+from . import tiktok_lista
 
 from .base import (ErrorSubida, Rechazado, SesionCerrada, SinConfirmar,
                    esperar_habilitado, hay_texto, primero)
@@ -94,14 +95,39 @@ def _confirmaciones(page):
     return textos
 
 
-def _esperar_publicacion(page, anteriores, timeout=180):
+def _capturar_publicaciones(page):
+    """Tomar referencia antes de subir; si no se puede, mantener la confirmación por aviso."""
+    try:
+        page.goto(tiktok_lista.URL, wait_until='domcontentloaded', timeout=30000)
+        for _ in range(20):
+            _revisar(page)
+            filas = tiktok_lista.leer(page)
+            if filas is not None:
+                return frozenset(vid for fila in filas if (vid := tiktok_lista.id_video(fila.get('url'))))
+            page.wait_for_timeout(500)
+    except SubidaCancelada:
+        raise
+    except Exception:
+        pass
+    return None
+
+
+def _esperar_publicacion(page, anteriores, timeout=180, *, texto='', publicaciones_antes=None, informar=None):
     fin = time.monotonic() + timeout
     confirmado_dialogo = False
+    aviso_lista = False
     while True:
         _revisar(page)
         try:
             if _confirmaciones(page) - anteriores:
-                return
+                return ''
+            if tiktok_lista.en_lista(page):
+                if informar and not aviso_lista:
+                    informar('TikTok abrió Publicaciones; comprobando el video nuevo y su estado')
+                    aviso_lista = True
+                enlace = tiktok_lista.coincidencia(tiktok_lista.leer(page), texto, publicaciones_antes)
+                if enlace:
+                    return enlace
             if not confirmado_dialogo:
                 dialogos = page.locator('[role="dialog"]:visible, dialog[open]:visible')
                 boton = _unico(dialogos.get_by_role("button", name=_NOMBRE_CONFIRMAR),
@@ -117,7 +143,8 @@ def _esperar_publicacion(page, anteriores, timeout=180):
             # Un aviso puede desaparecer mientras lo leemos o cambiar la página.
             # Agotar el plazo de confirmación; nunca volver a pulsar Publicar.
         if time.monotonic() >= fin:
-            raise SinConfirmar("TikTok no mostró un aviso nuevo de publicación completada.")
+            raise SinConfirmar("No pude confirmar el video nuevo ni con el aviso ni en Publicaciones de TikTok. "
+                               "No volveré a pulsar Publicar; revisa la cuenta.")
         page.wait_for_timeout(500)
 
 
@@ -159,6 +186,8 @@ def subir(page, h, video, texto, url_subida=""):
     if len(texto) > MAX_TEXTO:
         raise Rechazado(f"La descripción supera el límite configurado del bot ({MAX_TEXTO} "
                         "caracteres). Acórtala; no se ha publicado ni recortado el texto.")
+    h.informar("Comprobando las publicaciones anteriores de esta cuenta")
+    publicaciones_antes = _capturar_publicaciones(page)
     h.informar("Abriendo TikTok Studio")
     page.goto(url_subida or URL_SUBIDA, wait_until="domcontentloaded")
     _revisar(page)
@@ -207,13 +236,14 @@ def subir(page, h, video, texto, url_subida=""):
             if not _lectura_transitoria(exc):
                 raise
             h.informar('TikTok tardó al publicar; comprobando el resultado sin repetir el clic')
-        _esperar_publicacion(page, anteriores)
+        enlace = _esperar_publicacion(page, anteriores, texto=texto,
+                                      publicaciones_antes=publicaciones_antes, informar=h.informar)
     except (SinConfirmar, SubidaCancelada):
         raise
     except Exception as exc:
         raise SinConfirmar("Se intentó publicar, pero se perdió la confirmación de TikTok "
                            f"({type(exc).__name__}). Revisa la cuenta antes de reintentar.") from exc
-    # La lista /content no es el enlace al video ni una prueba de publicación.
-    return ""
+    # Devolver el enlace del video comprobado, nunca la URL genérica de la lista.
+    return enlace or ""
 
 

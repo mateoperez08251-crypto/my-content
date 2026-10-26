@@ -21,7 +21,7 @@ class PreparacionTests(unittest.TestCase):
         self.options = dict(CALIDAD)
         self.split = Mock(return_value=([str(self.original)], [{'archivo':str(self.original),'publicacion':'Parte 1','inicio':0,'fin':60}]))
         self.m = self.motor()
-        self.cid = self.m.db.crear_cuenta('Prueba', 'youtube')
+        self.cid = self.m.db.crear_cuenta('Prueba', 'youtube', hora_inicio='00:00', hora_fin='00:00')
         self.m.db.editar_cuenta(self.cid, estado='ok')
         self.m.guardar_cfg({'hora_inicio':'00:00','hora_fin':'00:00'})
 

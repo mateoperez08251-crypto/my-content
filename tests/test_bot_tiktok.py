@@ -157,13 +157,14 @@ class LimitePublicacion(unittest.TestCase):
         self.h.escribir.side_effect = lambda loc, texto: setattr(
             self.editor.inner_text, "return_value", texto)
         parches = {
+            "_capturar_publicaciones": mock.Mock(return_value=frozenset()),
             "primero": mock.Mock(return_value=self.entrada),
             "_buscar": mock.Mock(side_effect=lambda p, sels, *a, **kw:
                                  self.editor if sels is tiktok._EDITOR else self.boton),
             "esperar_habilitado": mock.Mock(),
             "_revisar": mock.Mock(),
             "_confirmaciones": mock.Mock(return_value=set()),
-            "_esperar_publicacion": mock.Mock(),
+            "_esperar_publicacion": mock.Mock(return_value=''),
         }
         self.parches = parches
         for nombre, reemplazo in parches.items():
@@ -180,8 +181,9 @@ class LimitePublicacion(unittest.TestCase):
                          [mock.call(trial=True, timeout=10000, no_wait_after=True), mock.call(timeout=15000, no_wait_after=True)])
         self.h.clic.assert_not_called()
         self.h.escribir.assert_called_once_with(self.editor, self.texto)
-        self.parches["_esperar_publicacion"].assert_called_once_with(self.page, set())
-        self.assertEqual(self.h.informar.call_count, 4)
+        self.parches["_esperar_publicacion"].assert_called_once_with(
+            self.page, set(), texto=self.texto, publicaciones_antes=frozenset(), informar=self.h.informar)
+        self.assertEqual(self.h.informar.call_count, 5)
 
     def test_texto_incorrecto_detiene_sin_publicar(self):
         self.h.escribir.side_effect = None
