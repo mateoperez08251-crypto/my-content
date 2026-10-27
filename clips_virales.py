@@ -491,7 +491,7 @@ def _sin_solapes(ajustados, num):
 def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print, moment_focus="general", context_before_seconds=0, moment_query=""):
     """Devuelve los `num` mejores clips (ordenados por potencial viral).
     `dur_max` es la duración que eligió el usuario y se usa como MÍNIMO de cada clip."""
-    from smart_moments import validar, instrucciones, pertinente, con_contexto, SinMomentos
+    from smart_moments import validar, instrucciones, pertinente, con_contexto, SinMomentos, AnalisisMomentosError, completar_criterio
     foco, contexto, tema = validar(moment_focus, context_before_seconds, moment_query)
     criterio = instrucciones(foco, contexto, tema)
     filtrado = foco != 'general' or bool(tema)
@@ -512,12 +512,18 @@ def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print, moment_focu
             texto, modelo = chat([{"role": "system", "content": sistema},
                                   {"role": "user", "content": usuario}], modelos, max_tokens=8000)
             avisar(f"Momentos analizados con {modelo}")
-            candidatos += list(_leer_json(texto).get("clips") or [])
+            respuesta = _leer_json(texto)
+            if not isinstance(respuesta, dict) or not isinstance(respuesta.get('clips'), list):
+                raise ValueError('La IA no devolvió una lista de clips válida.')
+            candidatos += respuesta['clips']
     except Exception as e:
         avisar(f"IA de momentos no disponible ({e}). " +
                ("No se sustituirá el enfoque elegido por clips generales." if filtrado else "Uso selección automática."))
+        if filtrado:
+            raise AnalisisMomentosError('No se pudo analizar humor/drama o el tema elegido. Revisa la conexión y la clave o cuota de Groq y reintenta; la descarga puede haber terminado correctamente.') from e
     usar_ia = bool(candidatos)
     if filtrado:
+        candidatos = completar_criterio(candidatos, frs, criterio, modelos, chat, _leer_json)
         candidatos = [c for c in candidatos if isinstance(c, dict) and pertinente(c, foco, tema)]
         if not candidatos:
             raise SinMomentos('No se encontraron momentos que cumplan el enfoque o tema elegido. Prueba otro criterio o momentos generales.')

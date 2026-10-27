@@ -2,7 +2,7 @@
 import json
 import unittest
 from unittest.mock import patch,Mock
-from smart_moments import validar, con_contexto, solicitado, CAPACIDAD, SinMomentos
+from smart_moments import validar, con_contexto, solicitado, CAPACIDAD, SinMomentos, AnalisisMomentosError
 import clips_virales as cv
 
 
@@ -56,8 +56,29 @@ class Momentos(unittest.TestCase):
              patch.object(cv,'_heuristica',side_effect=AssertionError('No rellenar')):
             with self.assertRaises(SinMomentos):cv.seleccionar(frases(),1,5,30,moment_focus='humor',avisar=lambda _:None)
         with patch.object(cv,'chat',side_effect=RuntimeError('sin conexión')):
-            with self.assertRaises(SinMomentos):cv.seleccionar(frases(),1,5,30,moment_focus='drama',avisar=lambda _:None)
+            with self.assertRaises(AnalisisMomentosError):cv.seleccionar(frases(),1,5,30,moment_focus='drama',avisar=lambda _:None)
         with self.assertRaises(SinMomentos):cv.seleccionar([],1,5,30,moment_focus='drama')
+
+    def test_respuesta_antigua_se_verifica_en_lugar_de_descartarse(self):
+        raw={'inicio':3,'fin':4,'puntuacion':90,'titulo':'Broma'}
+        responses=[(json.dumps({'clips':[raw]}),'fake'),
+            (json.dumps({'clips':[{'id':0,'tipo':'humor','relevante':True,'momento':3}]}),'fake'),
+            ('{"clips":[]}','fake')]
+        with patch.object(cv,'chat',side_effect=responses) as chat:
+            clips=cv.seleccionar(frases(),1,5,30,moment_focus='humor',context_before_seconds=8,avisar=lambda _:None)
+        self.assertEqual(len(clips),1)
+        self.assertEqual(clips[0]['momento'],3)
+        self.assertEqual(chat.call_count,3)
+
+    def test_respuesta_incompleta_o_invalida_es_fallo_de_analisis(self):
+        raw={'inicio':3,'fin':4,'titulo':'Broma'}
+        with patch.object(cv,'chat',side_effect=[(json.dumps({'clips':[raw]}),'fake'),('{"clips":[]}','fake')]):
+            with self.assertRaisesRegex(AnalisisMomentosError,'incompleta'):
+                cv.seleccionar(frases(),1,5,30,moment_focus='humor',avisar=lambda _:None)
+        with patch.object(cv,'chat',return_value=('{"clips":{}}','fake')):
+            with self.assertRaises(AnalisisMomentosError):cv.seleccionar(frases(),1,5,30,moment_focus='humor',avisar=lambda _:None)
+        with patch.object(cv,'chat',return_value=('{"clips":[]}','fake')):
+            with self.assertRaises(SinMomentos):cv.seleccionar(frases(),1,5,30,moment_focus='humor',avisar=lambda _:None)
 
     def test_generales_conserva_respaldo_sin_ia(self):
         with patch.object(cv,'chat',side_effect=RuntimeError('sin conexión')):
@@ -91,6 +112,24 @@ class Remoto(unittest.TestCase):
             self.assertEqual(cliente.iniciar('https://example.test/video',preset),'nuevo')
             self.assertEqual(pedir.call_args.kwargs['json']['preset'],preset)
         self.assertFalse(solicitado({**preset,'clip_selection':'sequential'}))
+
+    def test_api_remota_conserva_codigo_de_sin_momentos(self):
+        import ast,os,threading,tempfile
+        from pathlib import Path
+        from types import SimpleNamespace
+        source=ast.parse(Path('content.py').read_text())
+        nodes=[n for n in source.body if isinstance(n,ast.FunctionDef) and n.name in ('_remoto_hilo','remoto_estado')]
+        for n in nodes:n.decorator_list=[]
+        with tempfile.TemporaryDirectory() as folder:
+            scope=dict(os=os,_remoto_lock=threading.Lock(),_remoto_trabajos={'job':{'rutas':[],'meta':[],'error':''}},
+                run_smart_split_thread=Mock(side_effect=SinMomentos('No hubo coincidencias.')),
+                request=SimpleNamespace(method='GET'),jsonify=lambda value:value,SMART_PROGRESS=os.path.join(folder,'progress'))
+            exec(compile(ast.Module(body=nodes,type_ignores=[]),'content.py','exec'),scope)
+            scope['_remoto_hilo']('job',{})
+            response=scope['remoto_estado']('job')
+        self.assertEqual(response['estado'],'error')
+        self.assertEqual(response['error_code'],'sin_momentos')
+        self.assertEqual(response['error'],'No hubo coincidencias.')
 
     def test_preset_conserva_tema_y_contexto_por_cuenta(self):
         from bot.presets import snapshot

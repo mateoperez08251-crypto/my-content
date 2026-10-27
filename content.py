@@ -1756,8 +1756,11 @@ def run_smart_split_thread(data):
             if lin.startswith("RESULT_ERROR:"):
                 try:
                     fallo = json.loads(lin.split("RESULT_ERROR:", 1)[1])
-                    if isinstance(fallo, dict) and fallo.get('code') == 'clips_agotados':
-                        resultado['error'] = fallo['message']
+                    if isinstance(fallo, dict) and fallo.get('code') in ('clips_agotados', 'sin_momentos', 'analisis_momentos', 'edicion_fallida'):
+                        mensaje = fallo.get('message')
+                        if isinstance(mensaje, str) and mensaje.strip():
+                            resultado['error'] = mensaje[:1000]
+                            resultado['error_code'] = fallo['code']
                     if isinstance(fallo, dict) and fallo.get('code') == 'inicio_fuera_video':
                         from editor_controls import ERROR_INTERVALO
                         resultado['error'] = ERROR_INTERVALO
@@ -1785,7 +1788,13 @@ def run_smart_split_thread(data):
             raise Exception("Cancelado.")
         result_paths = resultado["rutas"]
         if codigo != 0 or not result_paths:
-            raise Exception(resultado.get('error') or "No se pudo generar el video Smart Split (revisa el log de arriba)")
+            from smart_moments import SinMomentos, AnalisisMomentosError
+            mensaje = resultado.get('error') or "No se pudo generar el video Smart Split (revisa el log de arriba)"
+            if resultado.get('error_code') == 'sin_momentos':
+                raise SinMomentos(mensaje)
+            if resultado.get('error_code') == 'analisis_momentos':
+                raise AnalisisMomentosError(mensaje)
+            raise RuntimeError(mensaje)
 
         log(f"¡Smart Split finalizado! Generados {len(result_paths)} clips.")
         show_notification("Smart Split Completado", f"Se han generado {len(result_paths)} clips con éxito.")
@@ -2461,7 +2470,7 @@ def _remoto_hilo(jid, datos):
         with _remoto_lock:
             job = _remoto_trabajos.get(jid)
             if job:
-                job.update(estado='cancelado' if job.get('cancel_event') and job['cancel_event'].is_set() else 'error', error=str(e)[:500])
+                job.update(estado='cancelado' if job.get('cancel_event') and job['cancel_event'].is_set() else 'error', error=str(e)[:1000], error_code=getattr(e, 'code', 'edicion_fallida'))
 
 
 @app.route("/api/bot/remoto/cortar", methods=["POST"])
@@ -2519,7 +2528,7 @@ def remoto_estado(jid):
               **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen')}}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
-                    "progreso": progreso, "clips": clips})
+                    "progreso": progreso, "clips": clips, "error_code": t.get("error_code", "")})
 
 
 @app.route("/api/bot/remoto/<jid>/clip/<int:n>", methods=["GET"])

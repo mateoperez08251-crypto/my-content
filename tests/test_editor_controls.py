@@ -190,6 +190,18 @@ class Editor(unittest.TestCase):
         self.assertEqual(meta[0]['momento_clave'],175)
         self.assertEqual(self.cv.seleccionar.call_count,2)
 
+    def test_cli_emite_error_de_seleccion_estructurado(self):
+        from smart_moments import SinMomentos, AnalisisMomentosError
+        cfg=Path(self.tmp.name,'cfg-error.json')
+        cfg.write_text(json.dumps({'source':'source.mp4','output_path':'out.mp4'}))
+        for error, code in [(SinMomentos('No hubo humor'),'sin_momentos'),(AnalisisMomentosError('Falló el análisis'),'analisis_momentos'),(RuntimeError('Falló FFmpeg'),'edicion_fallida')]:
+            self.ns['process_smart_split']=Mock(side_effect=error)
+            salida=io.StringIO()
+            with redirect_stdout(salida):self.assertEqual(self.ns['main'](['--config',str(cfg)]),1)
+            line=next(l for l in salida.getvalue().splitlines() if l.startswith('RESULT_ERROR:'))
+            value=json.loads(line.split(':',1)[1])
+            self.assertEqual(value,{'code':code,'message':str(error)})
+
     def test_cli_transmite_inicio_y_error_identificable(self):
         cfg = Path(self.tmp.name, 'cfg.json')
         cfg.write_text(json.dumps({'source': 'source.mp4', 'output_path': 'out.mp4', 'skip_intro_seconds': 150}))
@@ -242,6 +254,17 @@ class PuenteApp(unittest.TestCase):
         with self.assertRaisesRegex(Exception, 'El inicio elegido queda fuera'):
             self.ns['run_smart_split_thread'](self.data)
         self.ns['_terminar_trabajo'].assert_called_once()
+
+    def test_mensaje_de_seleccion_y_analisis_llega_a_cola_y_colab(self):
+        from smart_moments import SinMomentos, AnalisisMomentosError
+        for code, clase, mensaje in [('sin_momentos',SinMomentos,'No se encontraron momentos con ese enfoque.'),
+                                     ('analisis_momentos',AnalisisMomentosError,'No se pudo analizar humor/drama.'),
+                                     ('edicion_fallida',RuntimeError,'Falló FFmpeg al exportar.')]:
+            def ejecutar(cmd, leer, **kwargs):
+                leer('RESULT_ERROR:'+json.dumps({'code':code,'message':mensaje}));return 1
+            self.ns['_ejecutar_subproceso'].side_effect=ejecutar
+            with self.subTest(code=code), self.assertRaisesRegex(clase,mensaje):
+                self.ns['run_smart_split_thread'](self.data)
 
     def test_health_anuncia_soporte(self):
         self.assertIn(CAPACIDAD, self.ns['health']()['capabilities'])
