@@ -55,7 +55,9 @@ class ClipFalso:
         self.closed = False
 
     def subclipped(self, start, end):
-        return ClipFalso(end - start, self.renders, self.start + start)
+        result = ClipFalso(end - start, self.renders, self.start + start)
+        result.w, result.h, result.fps = self.w, self.h, self.fps
+        return result
 
     def transform(self, fn):
         fn(lambda t: 'frame', 0)
@@ -143,6 +145,26 @@ class Editor(unittest.TestCase):
             self.editar(clip_selection='ai')
         self.assertTrue(self.original.closed)
 
+    def test_fuente_muy_estrecha_ajusta_los_dos_lados_del_recorte(self):
+        self.original.w, self.original.h = 72, 160
+        encuadrar = self.ns['_encuadrar'] = Mock(return_value='frame')
+        _, meta = self.editar(video_format='vertical', encuadre='caras')
+        self.assertEqual(encuadrar.call_args.args[3], 90)
+        self.assertEqual(meta[0]['calidad_origen']['recorte_alto'], 128)
+
+    def test_filtros_antes_de_textos_y_sin_segunda_compresion(self):
+        for modo in ('hd', 'sharpen'):
+            eventos = []
+            self.renders.clear()
+            self.ns['_componer'] = lambda frame, *a: eventos.append('texto') or frame
+            self.ns['_mejorar_calidad_video'] = Mock(side_effect=AssertionError('Segunda compresión'))
+            with patch('calidad_video.filtrar_frame', side_effect=lambda frame, modo: eventos.append('filtro') or frame):
+                files, meta = self.editar(upscale=modo)
+            self.assertEqual(eventos, ['filtro', 'texto'] * len(files))
+            self.assertEqual(len(self.renders), len(files))
+            self.ns['_mejorar_calidad_video'].assert_not_called()
+            self.assertTrue(meta[0]['calidad_origen']['advertencias'])
+
     def test_cli_transmite_inicio_y_error_identificable(self):
         cfg = Path(self.tmp.name, 'cfg.json')
         cfg.write_text(json.dumps({'source': 'source.mp4', 'output_path': 'out.mp4', 'skip_intro_seconds': 150}))
@@ -202,3 +224,4 @@ class PuenteApp(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

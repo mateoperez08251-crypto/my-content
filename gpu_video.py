@@ -35,13 +35,14 @@ def opciones_moviepy(calidad="alta", preset_cpu="fast", bitrate=None):
     """kwargs para clip.write_videofile(): NVENC si hay GPU NVIDIA, si no libx264."""
     if hay_nvenc():
         cq = {"maxima": "16", "alta": "19", "media": "23"}.get(calidad, "21")
-        params = ["-rc", "vbr", "-cq", cq]
+        params = ["-rc", "vbr", "-cq", cq, "-pix_fmt", "yuv420p", "-profile:v", "high", "-movflags", "+faststart"]
         if not bitrate:
             params += ["-b:v", "0"]
         return {"codec": "h264_nvenc", "preset": "p7" if calidad == "maxima" else "p5", "bitrate": bitrate, "ffmpeg_params": params}
-    result = {"codec": "libx264", "preset": preset_cpu, "bitrate": bitrate}
-    if calidad == 'maxima':
-        result['ffmpeg_params'] = ['-crf', '16', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']
+    params = ['-pix_fmt', 'yuv420p', '-profile:v', 'high', '-movflags', '+faststart']
+    if not bitrate:
+        params = ['-crf', {"maxima": "16", "alta": "19", "media": "23"}.get(calidad, "21")] + params
+    result = {"codec": "libx264", "preset": preset_cpu, "bitrate": bitrate, "ffmpeg_params": params}
     return result
 
 
@@ -51,3 +52,4 @@ def args_ffmpeg(crf="17"):
         return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", str(int(crf) + 2),
                 "-b:v", "0", "-pix_fmt", "yuv420p"]
     return ["-c:v", "libx264", "-crf", str(crf), "-preset", "medium", "-pix_fmt", "yuv420p"]
+

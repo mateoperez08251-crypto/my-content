@@ -114,7 +114,7 @@ class DB:
             subidas = {r[1] for r in self._con.execute('PRAGMA table_info(subidas)')}
             if 'programada_para' not in subidas:
                 self._con.execute('ALTER TABLE subidas ADD COLUMN programada_para REAL NOT NULL DEFAULT 0')
-            for campo, definicion in [('orden', 'REAL NOT NULL DEFAULT 0'), ('adelantada', 'INTEGER NOT NULL DEFAULT 0')]:
+            for campo, definicion in [('orden', 'REAL NOT NULL DEFAULT 0'), ('adelantada', 'INTEGER NOT NULL DEFAULT 0'), ('calidad', "TEXT NOT NULL DEFAULT '{}'")]:
                 if campo not in subidas:
                     self._con.execute(f'ALTER TABLE subidas ADD COLUMN {campo} {definicion}')
             self._con.execute('CREATE INDEX IF NOT EXISTS ix_trabajos_grupo ON trabajos(grupo_clave)')
@@ -521,6 +521,11 @@ class DB:
         sql = ", ".join(f"{k}=?" for k in campos)
         self._q(f"UPDATE subidas SET {sql} WHERE id=?", (*campos.values(), int(sid)))
 
+    def guardar_calidad(self, sid, datos):
+        # Medir no cambia la versión del texto que el usuario está revisando.
+        self._q('UPDATE subidas SET calidad=? WHERE id=?',
+                (json.dumps(datos, ensure_ascii=False), int(sid)))
+
     def subidas_recientes(self, limite=80, toda_cola=False):
         rows = self._todos(
             "SELECT s.*, c.nombre AS cuenta_nombre, c.plataforma AS plataforma, "
@@ -565,5 +570,12 @@ def _fila(r):
                 d[k] = json.loads(d[k])
             except ValueError:
                 d[k] = []
+    if 'calidad' in d:
+        try:
+            valor = json.loads(d['calidad'])
+            d['calidad'] = valor if isinstance(valor, dict) else {}
+        except (ValueError, TypeError):
+            d['calidad'] = {}
     return d
+
 

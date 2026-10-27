@@ -33,13 +33,14 @@ class UpscaleTests(unittest.TestCase):
             source = str(Path(folder, 'source.mp4'))
             ColorClip((64, 96), (30, 70, 110), duration=1).write_videofile(source, fps=5, logger=None)
             observed = []
-            def ai(video, ancho, alto, *args):
+            def ai(video, ancho, alto, *args, **kwargs):
+                self.assertTrue(kwargs.get('intermedio'))
                 with VideoFileClip(video) as clean:
                     frame = clean.get_frame(0)
                     observed.append(frame)
                     self.assertLess(frame[:, :, 1].max(), 180)  # todavía sin el rótulo verde
                 output = str(Path(folder, 'enhanced.mp4'))
-                procesar(video, output, ancho, alto, lambda f: f)
+                procesar(video, output, ancho, alto, lambda f: f, intermedio=True)
                 os.replace(output, video)
                 return 'ia'
             layer = Image.new('RGBA', (100, 50), (0, 255, 0, 255))
@@ -107,3 +108,4 @@ class UpscaleTests(unittest.TestCase):
             result = gpu_video.opciones_moviepy('maxima')
             self.assertEqual(result['preset'], 'p7')
             self.assertIn('16', result['ffmpeg_params'])
+

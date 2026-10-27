@@ -20,7 +20,7 @@ def elegir_python(candidatos):
                        'o conecta una GPU en Colab. No se sustituirá IA por HD.')
 
 
-def mejorar(video, ancho, alto, python='', modelo='', progreso=None):
+def mejorar(video, ancho, alto, python='', modelo='', progreso=None, intermedio=False):
     import paths
     python = python or elegir_python([os.environ.get('CONTENTAPP_VIDEO_PYTHON') or sys.executable])
     worker = paths.res_path('smart_upscale_worker.py')
@@ -28,7 +28,10 @@ def mejorar(video, ancho, alto, python='', modelo='', progreso=None):
         modelo = paths.data_path('models', 'video_ai', 'RealESRGAN_x2plus.pth')
     salida = os.path.splitext(video)[0] + '_ia.mp4'
     try:
-        with subprocess.Popen([python, worker, video, salida, str(ancho), str(alto), modelo],
+        cmd = [python, worker, video, salida, str(ancho), str(alto), modelo]
+        if intermedio:
+            cmd.append("--intermedio")
+        with subprocess.Popen(cmd,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True, encoding='utf-8', errors='replace',
                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as proc:
@@ -51,3 +54,4 @@ def mejorar(video, ancho, alto, python='', modelo='', progreso=None):
         if os.path.exists(salida):
             os.remove(salida)
     return 'ia'
+

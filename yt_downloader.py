@@ -123,6 +123,7 @@ def _actualizar_yt_dlp():
 def _descargar_cli(url, formato, plantilla, cookies):
     """Reintento con el yt-dlp recién actualizado (en otro proceso, el de este ya está cargado)."""
     args = [sys.executable, "-m", "yt_dlp", url, "-f", formato, "-o", plantilla, "--merge-output-format", "mp4",
+            "-S", "res,fps,vbr,vcodec", "--format-sort-force",
             "--ffmpeg-location", _ffmpeg(), "--restrict-filenames", "--no-warnings", "--newline",
             "--print", "after_move:filepath"]
     if cookies:
@@ -144,25 +145,19 @@ def download_video(url, output_dir="videos_descargados", quality="best", cancel_
     os.makedirs(output_dir, exist_ok=True)
     print(f"Descargando video: {url} (Calidad: {quality})")
 
-    # YouTube solo ofrece >1080p en VP9/AV1: forzar avc1 topa la descarga a 1080.
-    # Preferimos AV1 > VP9 > AVC, con audio Opus (webm)/M4A/el mejor disponible, remuxeado a mp4.
+    # Elegir resolución y FPS antes que códec: AV1 a 720p no debe desplazar VP9 a 4K.
     if quality == "best":
-        formato = (
-            'bv*[vcodec^=av01]+ba/'
-            'bv*[vcodec^=vp9]+ba/'
-            'bv*[ext=mp4]+ba[ext=m4a]/'
-            'bv*+ba/b'
-        )
+        formato = 'bv*+ba/b'
     else:
-        formato = (
-            f'bv*[vcodec^=av01][height<={quality}]+ba/'
-            f'bv*[vcodec^=vp9][height<={quality}]+ba/'
-            f'bv*[ext=mp4][vcodec^=avc1][height<={quality}]+ba[ext=m4a]/'
-            f'bv*[height<={quality}]+ba/b[height<={quality}]/bv*+ba/b'
-        )
-    # Caché por video ID: si el mismo video ya está descargado (aunque cambie el título),
-    # yt-dlp lo detecta y no lo vuelve a bajar. El nombre final incluye el id al principio.
-    plantilla = os.path.join(output_dir, '%(id)s_%(title).130B.%(ext)s')
+        try:
+            altura = int(quality)
+        except (TypeError, ValueError):
+            raise DescargaError('Elige best o una altura válida en píxeles.') from None
+        if not 1 <= altura <= 8192:
+            raise DescargaError('La altura debe estar entre 1 y 8192 píxeles.')
+        formato = f'bv*[height<={altura}]+ba/b[height<={altura}]'
+    # Una versión de otro formato o resolución no debe reutilizar un archivo antiguo.
+    plantilla = os.path.join(output_dir, '%(id)s_%(format_id)s_%(height)sp_%(title).100B.%(ext)s')
 
     def progress_hook(d):
         if cancel_checker and cancel_checker():
@@ -171,6 +166,8 @@ def download_video(url, output_dir="videos_descargados", quality="best", cancel_
 
     base = dict(opciones_base(), **{
         'format': formato,
+        'format_sort': ['res', 'fps', 'vbr', 'vcodec'],
+        'format_sort_force': True,
         'outtmpl': plantilla,
         'merge_output_format': 'mp4',
         'restrictfilenames': True,
@@ -245,3 +242,4 @@ if __name__ == "__main__":
         download_video(sys.argv[1])
     else:
         print("Pasa una URL de YouTube como argumento.")
+

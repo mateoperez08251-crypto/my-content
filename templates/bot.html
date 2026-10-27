@@ -164,7 +164,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
       <div><label for="ed-whisper">Modelo Whisper local</label><select id="ed-whisper"><option value="large-v3">Large V3 · precisión</option><option value="turbo">Large V3 Turbo · rapidez</option><option value="auto">Automático</option></select></div>
       <div><label for="ed-formato">Formato</label><select id="ed-formato"><option value="vertical_blur">9:16 · video completo y fondo difuminado</option><option value="vertical">9:16 · seguir al hablante</option><option value="horizontal">16:9 · horizontal</option></select></div>
       <div><label for="ed-calidad">Exportación</label><select id="ed-calidad"><option value="quality">Calidad máxima · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p</option></select></div>
-      <div><label for="ed-upscale">Mejorar imagen</label><select id="ed-upscale"><option value="off">Sin ampliación adicional</option><option value="sharpen">Nitidez y reducción de ruido</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN · GPU; avisa y detiene si no puede aplicar IA</option></select></div>
+      <div><label for="ed-upscale">Mejorar imagen</label><select id="ed-upscale"><option value="off">Sin ampliación adicional</option><option value="sharpen">Nitidez suave</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN · GPU; avisa y detiene si no puede aplicar IA</option></select></div>
       <div><label for="ed-subs">Subtítulos</label><select id="ed-subs" onchange="vistaSubtitulos()"><option value="si">Activados</option><option value="no">Desactivados</option></select></div>
       <div><label for="ed-estilo">Estilo de subtítulos</label><select id="ed-estilo" onchange="vistaSubtitulos()">
         <option value="karaoke">Karaoke</option><option value="una_palabra">Una palabra</option><option value="pop_art">Pop Art</option><option value="resaltador">Resaltador</option><option value="bubblegum">Bubblegum</option><option value="caja_frase">Frase con fondo</option><option value="neon">Neón</option><option value="terror">Terror</option><option value="cuento">Cuento</option><option value="documental">Documental</option><option value="noticias">Noticias</option><option value="minimal">Minimal</option>
@@ -423,6 +423,25 @@ function tiempoClip(valor) {
 function fechaSubida(valor) {
   return Number(valor) > 0 ? new Date(Number(valor)*1000).toLocaleString('es') : 'No registrada';
 }
+function datosCalidad(s) {
+  const c = s.calidad || {};
+  const positivo = v => Number.isFinite(Number(v)) && Number(v) > 0;
+  const real = c.estado === 'comprobado';
+  const bitrate = positivo(c.bitrate_video) ? `${(c.bitrate_video/1e6).toFixed(2)} Mbps de video` :
+    positivo(c.bitrate_total) ? `${(c.bitrate_total/1e6).toFixed(2)} Mbps totales${c.bitrate_total_estimado ? ' estimados' : ''} (incluye audio)` : 'Bitrate no disponible';
+  const resumen = real ? `${c.ancho} × ${c.alto} · ${positivo(c.fps) ? Number(c.fps).toFixed(2)+' FPS' : 'FPS no disponibles'} · ${bitrate} · ${c.codec || 'Códec no disponible'}` : 'Archivo sin comprobar';
+  const o = c.origen || {};
+  const fuente = positivo(o.ancho) && positivo(o.alto) ? `<p class="muted">Fuente: ${Number(o.ancho)} × ${Number(o.alto)} · Recorte: ${Number(o.recorte_ancho)} × ${Number(o.recorte_alto)} · Ampliación: ${Number(o.ampliacion).toFixed(2)}×</p>` : '';
+  const avisos = [...(Array.isArray(c.advertencias) ? c.advertencias : []), ...(Array.isArray(o.advertencias) ? o.advertencias : [])];
+  return `<p>${esc(resumen)}</p>${fuente}${avisos.map(a=>`<p class="publicacion-error">${esc(a)}</p>`).join('')}`;
+}
+async function comprobarCalidad(id, boton) {
+  boton.disabled = true; boton.textContent = 'Comprobando archivo…';
+  try {
+    await api(`/api/bot/subidas/${id}/calidad`, {});
+    await cargar();
+  } finally { boton.disabled = false; boton.textContent = 'Comprobar archivo'; }
+}
 function tarjetaSubida(s) {
   const id = Number(s.id), origen = enlaceWeb(s.video_url), publicada = enlaceWeb(s.url_publicada);
   const titulo = s.video_titulo || String(s.texto || '').split('\n')[0] || base(s.archivo);
@@ -444,6 +463,7 @@ function tarjetaSubida(s) {
     <div><dt>Añadido a la cola</dt><dd>${fechaSubida(s.creado)}</dd></div><div><dt>Última actualización</dt><dd class="publicacion-fecha">${fechaSubida(s.actualizado)}</dd></div>
     <div><dt>Intentos de subida</dt><dd>${Number(s.intentos)||0} de ${Number(E?.config?.max_intentos)||3}</dd></div>
     <div><dt>Disponible para subir</dt><dd>${s.estado === 'ok' ? 'Publicación completada' : s.no_antes > Date.now()/1000 ? 'No antes de '+fechaSubida(s.no_antes) : 'Cuando tenga turno, dentro del horario'}</dd></div></dl>
+    <div class="calidad-real"><b>Calidad del archivo real</b><div class="calidad-datos">${datosCalidad(s)}</div>${s.archivo_existe !== false ? `<button onclick="comprobarCalidad(${id},this)">Comprobar archivo</button>` : ''}<p class="muted">Se comprueba automáticamente antes de subir. La plataforma puede volver a comprimir el video.</p></div>
     <div class="muted">Texto de la publicación</div><p class="publicacion-texto">${esc(s.texto || 'Sin texto')}</p>
     ${['pendiente','error'].includes(s.estado) ? `<label class="switch seleccion-clip"><input type="checkbox" data-seleccion-id="${id}" onchange="seleccionarClip(${id},this.checked)"> Seleccionar para retirar de la cola</label>` : ''}
     <div class="publicacion-acciones">${s.estado === 'pendiente' ? `<button onclick="revisarTexto(${id})">Revisar texto y video</button><button onclick="adelantarClip(${id})">Subir este ahora</button><button aria-label="Mover publicación ${id} arriba" onclick="accion('subidas',${id},'arriba')">↑</button><button aria-label="Mover publicación ${id} abajo" onclick="accion('subidas',${id},'abajo')">↓</button>` : ''}
@@ -489,6 +509,8 @@ function actualizarTarjetas(contenedor, subidas) {
       tarjeta.querySelector('.publicacion-espera').textContent=s.espera || '';
       tarjeta.querySelector('.publicacion-error').textContent=s.error || '';
       tarjeta.querySelector('.publicacion-fecha').textContent=fechaSubida(s.actualizado);
+      const calidad = tarjeta.querySelector('.calidad-datos');
+      if (calidad) calidad.innerHTML = datosCalidad(s);
     }
     if (contenedor.children[i] !== tarjeta) contenedor.insertBefore(tarjeta,contenedor.children[i] || null);
   });
@@ -1266,5 +1288,6 @@ cargarPresets(); cargar(); setInterval(cargar, 4000);
 </script>
 </body>
 </html>
+
 
 

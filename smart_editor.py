@@ -297,7 +297,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['titulo']}")
 
         orig_w, orig_h = clip.w, clip.h
-        fixed_crop_w = int(orig_h * 9 / 16) if (orig_w / orig_h) > (9 / 16) else orig_w
+        # El encuadre ajusta ambos lados cuando la fuente es más estrecha que 9:16.
+        fixed_crop_w = max(2, int(round(orig_h * 9 / 16)))
         from smart_speakers import validate_performance
         validate_performance(export_profile)
         final_w, final_h = (720, 1280) if export_profile == 'fast' else (1080, 1920)
@@ -316,6 +317,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         generated_files = []
         # la música se mezcla al final con ffmpeg (baja sola cuando hablan)
         encuadre = encuadre if encuadre in ENCUADRES else "caras"
+
+        from calidad_video import origen as calidad_del_origen
+        calidad_origen = calidad_del_origen(orig_w, orig_h, final_w, final_h, encuadre)
+        for aviso in calidad_origen['advertencias']:
+            write_progress('Calidad: ' + aviso, 25)
 
         palabras_abs = [{"start": w["start"] + base, "end": w["end"] + base} for w in words]
 
@@ -393,6 +399,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         f32[:, :, 0] += float(filter_strength)
                         f32[:, :, 2] += 0.5 * float(filter_strength)
                         recorte = np.clip(f32, 0, 255).astype(np.uint8)
+                    if upscale in ('hd', 'sharpen'):
+                        from calidad_video import filtrar_frame
+                        recorte = filtrar_frame(recorte, upscale)
                     return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar) if overlay else recorte
 
                 from render_progress import ProgresoRender
@@ -409,7 +418,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         logger=ProgresoRender(write_progress, f'Preparando imagen para IA · clip {parte_num}', p0 + tramo * .35, p0 + tramo * .5))
                     _mejorar_calidad_video(clean_path, 'ia', final_w, final_h,
                         progress=lambda msg, pct: write_progress(f'Mejorando IA · clip {parte_num}: {msg}', int(p0 + tramo * (.5 + .25 * pct / 100))),
-                        python_ia=upscale_python, modelo_ia=upscale_model)
+                        python_ia=upscale_python, modelo_ia=upscale_model, intermedio=True)
                     enhanced = resources.enter_context(VideoFileClip(clean_path))
                     processed_clip = enhanced.transform(lambda get, t: _componer(
                         get(t), st + t, subs if show_subtitles else None, gen_title, st, et,
@@ -450,14 +459,6 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                           eventos, subclip.duration, audio_mix)
                     except Exception as e:
                         raise RuntimeError(f"No se pudo aplicar la mezcla o normalización solicitada: {e}") from e
-                if upscale and upscale not in ("off", "ia"):
-                    write_progress(f"Mejorando calidad visual · clip {parte_num}...", p0 + int(tramo * 0.97))
-                    try:
-                        def _up_prog(msg, pct):
-                            write_progress(f"Clip {parte_num}: {msg}", p0 + int(tramo * 0.97))
-                        _mejorar_calidad_video(out_name, upscale, final_w, final_h, progress=_up_prog)
-                    except Exception as e:
-                        raise RuntimeError(f'No se pudo aplicar la mejora de imagen solicitada: {e}') from e
                 generated_files.append(out_name)
 
                 # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
@@ -478,7 +479,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                         "hashtags": info["hashtags"], "publicacion": publicacion,
                                         "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
                                         "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report,
-                                        "clip_selection": clip_selection})
+                                        "clip_selection": clip_selection, "calidad_origen": calidad_origen})
                 # processed_clip/subclip comparten el lector del clip padre: no se cierran aquí.
 
         write_progress("¡Proceso finalizado con éxito!", 100)
@@ -510,11 +511,11 @@ def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix):
     os.replace(tmp, video)
 
 
-def _mejorar_calidad_video(video, modo, final_w, final_h, progress=None, python_ia='', modelo_ia=''):
+def _mejorar_calidad_video(video, modo, final_w, final_h, progress=None, python_ia='', modelo_ia='', intermedio=False):
     """IA real o filtros explícitos; nunca sustituir IA por un filtro sin avisar."""
     if modo == 'ia':
         from smart_upscale import mejorar
-        return mejorar(video, final_w, final_h, python_ia, modelo_ia, progress)
+        return mejorar(video, final_w, final_h, python_ia, modelo_ia, progress, intermedio=intermedio)
     if modo not in ('hd', 'sharpen'):
         raise ValueError('Mejora de imagen no válida.')
     import uuid
@@ -610,3 +611,4 @@ if __name__ == "__main__":
     except Exception:
         pass
     sys.exit(main(sys.argv[1:]))
+

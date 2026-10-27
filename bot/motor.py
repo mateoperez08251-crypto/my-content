@@ -943,8 +943,29 @@ class Motor:
                 motivos.append(motivo)
         return ' · '.join(motivos[:3])
 
+    def calidad_subida(self, sid):
+        from calidad_video import inspeccionar
+        s = self.db.subida(sid)
+        if not s:
+            raise ValueError('La publicación ya no existe.')
+        anterior = s.get('calidad') or {}
+        try:
+            stat = os.stat(s['archivo'])
+            if anterior.get('huella') == [stat.st_size, stat.st_mtime_ns]:
+                return anterior
+        except OSError:
+            pass
+        datos = inspeccionar(s['archivo'])
+        t = self.db.trabajo(s['trabajo_id']) if s.get('trabajo_id') else None
+        if t:
+            datos['origen'] = archivos.leer_calidad_origen(self.carpeta_clips(t), s['archivo'])
+        self.db.guardar_calidad(sid, datos)
+        return datos
+
     def gestionar_subida(self, sid, accion, datos=None):
         datos = datos or {}
+        if accion == 'calidad':
+            return {'calidad': self.calidad_subida(sid), 'mensaje': 'Archivo comprobado.'}
         with self._cola_lock:
             if accion == 'texto':
                 self.db.editar_texto_subida(sid, datos.get('texto'), datos.get('version'))
@@ -1017,6 +1038,10 @@ class Motor:
             self.db.marcar_subida(s["id"], "error", error="El clip ya no existe en la PC.")
             self._aviso_subida(s, 'archivo_ausente', 'El archivo del clip ya no existe en la PC.', 'errores', True)
             return
+        calidad = self.calidad_subida(s['id'])
+        for aviso in calidad.get('advertencias', []) + calidad.get('origen', {}).get('advertencias', []):
+            self.log('Calidad: ' + aviso)
+        control.comprobar()
         self._actividad(f"Subiendo a {nombre}: {os.path.basename(s['archivo'])}")
         captura = ""
         confirmada = False
@@ -1315,10 +1340,14 @@ class Motor:
             subida['no_antes'] = max(subida.get('proximo_intento', 0),
                                     0 if subida.get('adelantada') else cuenta.get('proxima_libre', 0), self._libre_global)
             try:
-                subida['bytes'] = os.path.getsize(subida['archivo'])
+                stat = os.stat(subida['archivo'])
+                subida['bytes'] = stat.st_size
+                if subida.get('calidad', {}).get('huella') != [stat.st_size, stat.st_mtime_ns]:
+                    subida['calidad'] = {}
                 subida['archivo_existe'] = True
             except OSError:
                 subida['bytes'], subida['archivo_existe'] = None, False
+                subida['calidad'] = {}
             if subida['estado'] == 'pendiente':
                 subida['espera'] = self._motivo_subida(subida, por_cuenta.get(subida['cuenta_id']), ahora)
         return {
@@ -1368,5 +1397,6 @@ def desde_radar(item: dict):
             _motor.log(f"No pude encolar lo del radar: {e}")
             raise
     return None
+
 
 

@@ -46,7 +46,7 @@ def crear_mejorador(modelo):
     return mejorar
 
 
-def procesar(video, salida, ancho, alto, mejorar):
+def procesar(video, salida, ancho, alto, mejorar, intermedio=False):
     import cv2
     import imageio_ffmpeg
     captura = cv2.VideoCapture(video)
@@ -61,8 +61,9 @@ def procesar(video, salida, ancho, alto, mejorar):
     total = int(captura.get(cv2.CAP_PROP_FRAME_COUNT))
     cmd = [imageio_ffmpeg.get_ffmpeg_exe(), '-y', '-loglevel', 'error', '-f', 'rawvideo',
            '-pix_fmt', 'bgr24', '-s', f'{ancho}x{alto}', '-r', str(fps), '-i', '-', '-i', video,
-           '-map', '0:v:0', '-map', '1:a:0?', '-c:v', 'libx264', '-preset', 'slow', '-crf', '16',
-           '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', salida]
+           '-map', '0:v:0', '-map', '1:a:0?', '-c:v', 'libx264rgb' if intermedio else 'libx264',
+           '-preset', 'ultrafast' if intermedio else 'slow', '-crf', '0' if intermedio else '16',
+           '-pix_fmt', 'rgb24' if intermedio else 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', salida]
     procesados = 0
     try:
         # Un archivo evita que una tubería de errores llena bloquee al codificador.
@@ -97,7 +98,8 @@ if __name__ == '__main__':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
         print('Cargando modelo Real-ESRGAN en CUDA...', flush=True)
-        procesar(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), crear_mejorador(sys.argv[5]))
+        procesar(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), crear_mejorador(sys.argv[5]), intermedio='--intermedio' in sys.argv[6:])
     except Exception as exc:
         print(f'ERROR IA: {exc}', flush=True)
         sys.exit(1)
+
