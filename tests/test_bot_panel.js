@@ -37,6 +37,12 @@ function panel() {
 }
 async function main(){
   {
+    const {ctx,elements:e}=panel();
+    e['ed-enfoque'].value='humor'; e['ed-contexto'].value='8'; e['ed-tema'].value=' viaje ';
+    const cfg=ctx.ajustesEdicion();
+    assert.equal(cfg.moment_focus,'humor'); assert.equal(cfg.context_before_seconds,8); assert.equal(cfg.moment_query,'viaje');
+  }
+  {
     assert(!html.includes('id="url-subir-ahora"'));
     const {ctx,elements:e,sent}=panel();
     await ctx.encolar();

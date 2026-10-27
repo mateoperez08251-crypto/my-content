@@ -208,7 +208,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         dubbing_language="original", dubbing_voice="female", original_volume=1.0,
                         show_subtitles=True, normalize_audio=False,
                         speaker_dubbing=False, speaker_config=None, filter_strength=1.0, denoise_audio=False, export_profile="balanced",
-                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai", skip_intro_seconds=0, excluded_ranges=None, bot_unique=False, upscale_python="", upscale_model=""):
+                        preserve_background=False, upscale="off", video_format="vertical", background_volume=0.75, clip_selection="ai", skip_intro_seconds=0, excluded_ranges=None, bot_unique=False, upscale_python="", upscale_model="", moment_focus="general", context_before_seconds=0, moment_query=""):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import re
@@ -223,6 +223,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     validate_layout(video_format, preserve_background, background_volume)
     from smart_selection import validate_selection, sequential_parts, available_ranges, NoNewClips, ERROR_NUEVOS
     validate_selection(clip_selection, clip_duration)
+    from smart_moments import validar as validar_momentos, SinMomentos
+    moment_focus, context_before_seconds, moment_query = validar_momentos(moment_focus, context_before_seconds, moment_query)
+    seleccion_opciones = dict(moment_focus=moment_focus, context_before_seconds=context_before_seconds, moment_query=moment_query)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
     write_progress("Iniciando Smart Split...", 3)
     print("Iniciando Smart Split · cortes consecutivos sin selección IA" if clip_selection == "sequential"
@@ -266,7 +269,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             write_progress("Buscando los momentos más virales (IA)...", 22)
             frs = cv.frases(words, segmentos)
             seleccion = [] if bot_unique and excluded_ranges else cv.seleccionar(
-                frs, int(num_clips), float(clip_duration), total_duration, motor=motor_ia, avisar=print)
+                frs, int(num_clips), float(clip_duration), total_duration, motor=motor_ia, avisar=print, **seleccion_opciones)
         if bot_unique:
             from smart_selection import new_parts, available_ranges
             if clip_selection == 'sequential':
@@ -282,10 +285,16 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         f.update(i=i, start=f['start'] - a, end=f['end'] - a)
                     if not phrases:
                         continue
-                    for c in cv.seleccionar(phrases, int(num_clips), float(clip_duration), b - a,
-                                             motor=motor_ia, avisar=print):
+                    try:
+                        nuevos = cv.seleccionar(phrases, int(num_clips), float(clip_duration), b - a,
+                                               motor=motor_ia, avisar=print, **seleccion_opciones)
+                    except SinMomentos:
+                        continue
+                    for c in nuevos:
                         c['inicio'] += a
                         c['fin'] += a
+                        if c.get('momento_segundos') is not None:
+                            c['momento_segundos'] += a
                         if a <= c['inicio'] < c['fin'] <= b:
                             candidates.append(c)
                     if len(candidates) >= int(num_clips):
@@ -479,7 +488,10 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                         "hashtags": info["hashtags"], "publicacion": publicacion,
                                         "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
                                         "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report,
-                                        "clip_selection": clip_selection, "calidad_origen": calidad_origen})
+                                        "clip_selection": clip_selection, "calidad_origen": calidad_origen,
+                                        "moment_focus": moment_focus, "context_before_seconds": context_before_seconds,
+                                        "momento_clave": base + info['momento_segundos'] if info.get('momento_segundos') is not None else None,
+                                        "contexto_previo_real": info.get('contexto_previo_real')})
                 # processed_clip/subclip comparten el lector del clip padre: no se cierran aquí.
 
         write_progress("¡Proceso finalizado con éxito!", 100)
@@ -580,7 +592,9 @@ def main(argv):
                 cfg.get("video_format", "vertical"), cfg.get("background_volume", 0.75),
                 cfg.get("clip_selection", "ai"), skip_intro_seconds=cfg.get("skip_intro_seconds", 0),
                 excluded_ranges=cfg.get("excluded_ranges"), bot_unique=cfg.get("bot_unique", False),
-                upscale_python=cfg.get("upscale_python", ""), upscale_model=cfg.get("upscale_model", ""))
+                upscale_python=cfg.get("upscale_python", ""), upscale_model=cfg.get("upscale_model", ""),
+                moment_focus=cfg.get("moment_focus", "general"), context_before_seconds=cfg.get("context_before_seconds", 0),
+                moment_query=cfg.get("moment_query", ""))
         except InicioFueraDeVideo as e:
             print('RESULT_ERROR:' + json.dumps({'code': 'inicio_fuera_video'}))
             write_progress(f"Error: {e}", -1)

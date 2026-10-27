@@ -165,6 +165,31 @@ class Editor(unittest.TestCase):
             self.ns['_mejorar_calidad_video'].assert_not_called()
             self.assertTrue(meta[0]['calidad_origen']['advertencias'])
 
+    def test_metadatos_conservan_el_momento_de_cada_clip(self):
+        self.cv.seleccionar.return_value = [
+            dict(inicio=0,fin=10,titulo='Primero',descripcion='',hashtags=[],puntuacion=80,momento_segundos=5,contexto_previo_real=5),
+            dict(inicio=20,fin=30,titulo='Segundo',descripcion='',hashtags=[],puntuacion=90,momento_segundos=25,contexto_previo_real=4)]
+        _, meta = self.editar(clip_selection='ai',moment_focus='humor',context_before_seconds=8,num_clips=2)
+        self.assertEqual([c['momento_clave'] for c in meta],[155,175])
+        self.assertEqual([c['contexto_previo_real'] for c in meta],[5,4])
+
+    def test_enfoque_y_contexto_llegan_al_selector(self):
+        self.editar(clip_selection='ai', moment_focus='humor', context_before_seconds=8, moment_query='viaje')
+        args = self.cv.seleccionar.call_args.kwargs
+        self.assertEqual((args['moment_focus'], args['context_before_seconds'], args['moment_query']), ('humor', 8, 'viaje'))
+
+    def test_contexto_del_bot_solo_busca_tramos_libres_y_conserva_tiempo_absoluto(self):
+        from smart_moments import SinMomentos
+        self.cv.frases.return_value = [dict(i=0,start=0,end=6,text='Otra historia.'),
+                                      dict(i=1,start=20,end=30,text='La broma.')]
+        self.cv.seleccionar.side_effect = [SinMomentos('Sin humor aquí'),
+            [dict(inicio=0,fin=10,titulo='Broma',descripcion='Viaje',hashtags=[],puntuacion=90,momento_segundos=5)]]
+        _, meta = self.editar(clip_selection='ai', clip_duration=5, num_clips=1,
+            bot_unique=True, excluded_ranges=[(160,170)], moment_focus='humor', context_before_seconds=8)
+        self.assertEqual(meta[0]['inicio'],170)
+        self.assertEqual(meta[0]['momento_clave'],175)
+        self.assertEqual(self.cv.seleccionar.call_count,2)
+
     def test_cli_transmite_inicio_y_error_identificable(self):
         cfg = Path(self.tmp.name, 'cfg.json')
         cfg.write_text(json.dumps({'source': 'source.mp4', 'output_path': 'out.mp4', 'skip_intro_seconds': 150}))

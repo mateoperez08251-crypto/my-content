@@ -30,6 +30,11 @@ const start = html.indexOf('        function updateSmartSelectionMode()');
 const end = html.indexOf('        async function processSmartSplit()', start);
 vm.runInContext(html.slice(start, end), context);
 async function main() {
+  set('smart_moment_focus','humor_drama'); set('smart_context_before','12'); set('smart_moment_query','la anécdota');
+  const momentos=context.collectSmartSettings();
+  assert.equal(momentos.moment_focus,'humor_drama');
+  assert.equal(momentos.context_before_seconds,12);
+  assert.equal(momentos.moment_query,'la anécdota');
   context.useSmartLowResourceMode();
   const manual = context.collectSmartSettings();
   assert.equal(manual.clip_selection, 'sequential');
