@@ -1655,6 +1655,9 @@ def run_smart_split_thread(data):
             "output_path": output_path,
             "clip_duration": data.get('clip_duration', 60),
             "clip_selection": data.get("clip_selection", "ai"),
+            "moment_focus": data.get("moment_focus", "general"),
+            "context_before_seconds": data.get("context_before_seconds", 0),
+            "moment_query": data.get("moment_query", ""),
             "num_clips": data.get('num_clips', 1),
             "start_time": data.get('start_time', ''),
             "end_time": data.get('end_time', ''),
@@ -1829,6 +1832,8 @@ def smart_split_api():
     try:
         from smart_selection import validate_selection
         validate_selection(data.get('clip_selection', 'ai'), data.get('clip_duration', 60))
+        from smart_moments import validar as validar_momentos
+        validar_momentos(data.get('moment_focus', 'general'), data.get('context_before_seconds', 0), data.get('moment_query', ''))
         validate_layout(data.get('video_format', 'vertical'), data.get('preserve_background', False),
                         data.get('background_volume', 0.75))
         validate_performance(data.get('export_profile', 'balanced'), data.get('voice_steps', 10), data.get('voice_cast'))
@@ -1889,6 +1894,11 @@ def save_smart_preset():
     cfg = data.get("config") or {}
     if not name or len(name) > 100 or not isinstance(cfg, dict):
         return jsonify({"success": False, "error": "Nombre o config inválidos"}), 400
+    from smart_moments import validar as validar_momentos
+    try:
+        validar_momentos(cfg.get('moment_focus', 'general'), cfg.get('context_before_seconds', 0), cfg.get('moment_query', ''))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     if request.path == '/api/bot/preset':
         from bot.presets import snapshot
         try:
@@ -2582,9 +2592,10 @@ def get_logs():
 @app.route("/api/health", methods=["GET"])
 def health():
     from editor_controls import CAPACIDAD
+    from smart_moments import CAPACIDAD as MOMENTOS_CAPACIDAD
     mem = winproc.estado_memoria()
     return jsonify({"ok": True, "status": automation_status,
-                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1"],
+                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", MOMENTOS_CAPACIDAD],
                     "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
 
 

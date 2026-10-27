@@ -12,7 +12,7 @@ CALIDAD = {
     'export_profile': 'quality', 'download_quality': 'best', 'upscale': 'off',
     'dubbing_language': 'original', 'original_volume': 1, 'normalize_audio': True,
     'emojis': False, 'efectos': False, 'anti_copyright_filter': False,
-    'skip_intro_seconds': 0,
+    'skip_intro_seconds': 0, 'moment_focus': 'general', 'context_before_seconds': 8, 'moment_query': '',
 }
 
 
@@ -34,6 +34,9 @@ def snapshot(opciones):
                 'cast_id', 'voice_cast', 'python_motor', 'script_local', 'upscale_python', 'upscale_model',
                 'subir_tiktok', 'subir_youtube', 'subir_facebook', '_lanzar_error'):
         result.pop(key, None)
+    from smart_moments import validar
+    foco, contexto, tema = validar(result.get('moment_focus', 'general'), result.get('context_before_seconds', 0), result.get('moment_query', ''))
+    result.update(moment_focus=foco, context_before_seconds=contexto, moment_query=tema)
     mode = result.get('clip_selection', 'ai')
     if mode not in ('ai', 'sequential'):
         raise ValueError('Elige partes consecutivas o mejores momentos.')

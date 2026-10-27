@@ -361,12 +361,16 @@ def _ajustar(c, frs, dur_min, dur_max, total):
     """Convierte índices de frase en tiempos y garantiza frases completas y duración >= mínima."""
     i = max(0, min(int(c.get("inicio", 0)), len(frs) - 1))
     j = max(i, min(int(c.get("fin", i)), len(frs) - 1))
+    momento = c.get('momento')
+    if momento is not None:
+        if isinstance(momento, bool) or not isinstance(momento, int) or not i <= momento <= j:
+            raise ValueError('Índice del momento principal no válido.')
 
     def dur(a, b):
         return frs[b]["end"] - frs[a]["start"]
 
     # recortar si se pasa del máximo (quitando frases del final, sin bajar del mínimo)
-    while j > i and dur(i, j) > dur_max and dur(i, j - 1) >= dur_min:
+    while j > i and dur(i, j) > dur_max and dur(i, j - 1) >= dur_min and (momento is None or j > momento):
         j -= 1
     # alargar hasta el mínimo con las frases siguientes...
     while j < len(frs) - 1 and dur(i, j) < dur_min:
@@ -394,6 +398,7 @@ def _ajustar(c, frs, dur_min, dur_max, total):
         "hashtags": hashtags,
         "gancho": str(c.get("gancho", "")).strip(),
         "frases": (i, j),
+        **({'momento': momento} if momento is not None else {}),
     }
 
 
@@ -427,7 +432,7 @@ Responde SOLO JSON: {{"clips": [{{"id": <id>, "inicio": <índice>, "fin": <índi
 "puntuacion": <0-100>, "titulo": "...", "descripcion": "...", "hashtags": ["#..."]}}]}}"""
 
 
-def _revisar(elegidos, frs, dur_min, dur_max, modelos, avisar=print):
+def _revisar(elegidos, frs, dur_min, dur_max, modelos, avisar=print, criterio=""):
     """2.ª pasada: la IA relee cada candidato con su contexto y afina inicio, fin y nota."""
     bloques = []
     for k, c in enumerate(elegidos):
@@ -436,7 +441,7 @@ def _revisar(elegidos, frs, dur_min, dur_max, modelos, avisar=print):
         bloques.append(f"### Clip id {k} (ahora frases {a}-{b}, {c['fin'] - c['inicio']:.0f} s)\n"
                        + _lineas(frs[lo:hi + 1]))
     try:
-        texto, _ = chat([{"role": "system", "content": REVISOR.format(min_s=int(dur_min), max_s=int(dur_max))},
+        texto, _ = chat([{"role": "system", "content": REVISOR.format(min_s=int(dur_min), max_s=int(dur_max)) + criterio},
                          {"role": "user", "content": "\n\n".join(bloques)}], modelos, max_tokens=6000)
         revisados = {int(r.get("id")): r for r in _leer_json(texto).get("clips") or [] if "id" in r}
     except Exception as e:
@@ -449,7 +454,7 @@ def _revisar(elegidos, frs, dur_min, dur_max, modelos, avisar=print):
             salida.append(c)
             continue
         try:
-            nuevo = _ajustar({**c, **{x: r[x] for x in ("inicio", "fin", "puntuacion", "titulo", "descripcion",
+            nuevo = _ajustar({**c, "inicio": c["frases"][0], "fin": c["frases"][1], **{x: r[x] for x in ("inicio", "fin", "momento", "puntuacion", "titulo", "descripcion",
                                                          "hashtags") if r.get(x) not in (None, "", [])}},
                              frs, dur_min, dur_max, frs[-1]["end"] + 1)
             nuevo["fin"] = min(nuevo["fin"], c["fin"] + dur_max)  # por si el índice vino mal
@@ -483,10 +488,16 @@ def _sin_solapes(ajustados, num):
     return elegidos
 
 
-def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print):
+def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print, moment_focus="general", context_before_seconds=0, moment_query=""):
     """Devuelve los `num` mejores clips (ordenados por potencial viral).
     `dur_max` es la duración que eligió el usuario y se usa como MÍNIMO de cada clip."""
+    from smart_moments import validar, instrucciones, pertinente, con_contexto, SinMomentos
+    foco, contexto, tema = validar(moment_focus, context_before_seconds, moment_query)
+    criterio = instrucciones(foco, contexto, tema)
+    filtrado = foco != 'general' or bool(tema)
     dur_min, dur_max = _limites(dur_max, total)
+    if not frs and filtrado:
+        raise SinMomentos('No hay transcripción suficiente para buscar esos momentos.')
     if not frs:
         return [{"inicio": 0.0, "fin": min(total, dur_min), "puntuacion": 0, "titulo": "",
                  "descripcion": "", "hashtags": ["#fyp", "#viral"], "gancho": "", "frases": (0, 0)}]
@@ -495,7 +506,7 @@ def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print):
     candidatos = []
     try:
         for v in _ventanas(frs):
-            sistema = SISTEMA.format(min_s=int(dur_min), max_s=int(dur_max))
+            sistema = SISTEMA.format(min_s=int(dur_min), max_s=int(dur_max)) + criterio
             usuario = (f"Encuentra los {max(num * 3, 6)} mejores momentos virales (ordenados de mejor a "
                        f"peor). Recuerda: cada clip dura {int(dur_min)} s o más.\n\nTRANSCRIPCIÓN:\n{_lineas(v)}")
             texto, modelo = chat([{"role": "system", "content": sistema},
@@ -503,8 +514,13 @@ def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print):
             avisar(f"Momentos analizados con {modelo}")
             candidatos += list(_leer_json(texto).get("clips") or [])
     except Exception as e:
-        avisar(f"IA de momentos no disponible ({e}). Uso selección automática.")
+        avisar(f"IA de momentos no disponible ({e}). " +
+               ("No se sustituirá el enfoque elegido por clips generales." if filtrado else "Uso selección automática."))
     usar_ia = bool(candidatos)
+    if filtrado:
+        candidatos = [c for c in candidatos if isinstance(c, dict) and pertinente(c, foco, tema)]
+        if not candidatos:
+            raise SinMomentos('No se encontraron momentos que cumplan el enfoque o tema elegido. Prueba otro criterio o momentos generales.')
     if not candidatos:
         candidatos = _heuristica(frs, num, dur_min, dur_max, total)
 
@@ -517,9 +533,21 @@ def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print):
     elegidos = _sin_solapes(ajustados, max(num * 2, num + 2))
     if usar_ia and elegidos:
         avisar("Revisando cada clip con la IA (gancho, idea completa, duración)...")
-        elegidos = _revisar(elegidos, frs, dur_min, dur_max, modelos, avisar)
+        elegidos = _revisar(elegidos, frs, dur_min, dur_max, modelos, avisar, criterio=criterio)
         for c in elegidos:
             c["fin"] = min(c["fin"], total)
+    if criterio:
+        contextualizados = []
+        for c in elegidos:
+            try:
+                nuevo = con_contexto(c, frs, contexto, dur_max, total)
+                if nuevo['fin'] - nuevo['inicio'] <= dur_max + 1:
+                    contextualizados.append(nuevo)
+            except (ValueError, TypeError, KeyError):
+                continue
+        elegidos = contextualizados
+        if filtrado and not elegidos:
+            raise SinMomentos('No hay momentos completos con ese criterio y duración. Aumenta la duración o cambia el enfoque.')
     elegidos = _sin_solapes(elegidos, num)
     for c in elegidos:
         if not c["descripcion"]:

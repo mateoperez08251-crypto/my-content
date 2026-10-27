@@ -157,6 +157,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <div class="ajustes" id="editor-preset">
       <div><label for="ed-inicio">Empezar a editar desde</label><input id="ed-inicio" type="text" value="00:00" placeholder="02:30" aria-describedby="ed-inicio-ayuda"><p class="muted" id="ed-inicio-ayuda">Minutos:segundos (02:30), horas:minutos:segundos o segundos. 00:00 usa el inicio del video.</p></div>
       <div><label for="ed-modo">Cómo elegir las partes</label><select id="ed-modo" onchange="modoEdicion()"><option value="sequential">Partes consecutivas desde el inicio elegido</option><option value="ai">Elegir mejores momentos con IA</option></select></div>
+      <div id="ed-momentos"><label for="ed-enfoque">Qué momentos buscar</label><select id="ed-enfoque"><option value="general">Mejores momentos generales</option><option value="humor">Humor, bromas y risas en la transcripción</option><option value="drama">Drama, tensión e historias emotivas</option><option value="humor_drama">Humor y drama</option></select><label for="ed-contexto">Contexto antes del momento (s)</label><input id="ed-contexto" type="number" min="0" max="45" step="1" value="8"><label for="ed-tema">Tema o frase del diálogo (opcional)</label><input id="ed-tema" maxlength="300" placeholder="Ej.: la anécdota del viaje"><p class="muted">Incluye el planteamiento antes del remate y conserva el cierre. Se guía por la transcripción: la risa sin palabras puede no detectarse. Los clips válidos se aceptan automáticamente; la vista previa es opcional. El bot conserva los horarios y pausas de publicación.</p></div>
       <div><label for="ed-duracion">Segundos por parte</label><input id="ed-duracion" type="number" min="1" max="600" value="60" oninput="modoEdicion()"></div>
       <div><label for="ed-cantidad">Clips por video · solo en modo IA</label><input id="ed-cantidad" type="number" min="1" max="100" value="3"></div>
       <div><label for="ed-motor">Motor de edición</label><select id="ed-motor"><option value="pro">Pro · GPT-OSS 120B + Whisper Large V3</option><option value="equilibrado">Equilibrado · GPT-OSS 20B + Whisper Large V3</option><option value="ligero">Rápido · Llama 8B + Whisper Turbo</option></select></div>
@@ -1065,7 +1066,7 @@ async function heredarEdicionCuenta() {
 function seleccionarPreset() {
   presetBase = {...(presetsGuardados[$('preset').value] || {})};
   $('preset-nombre').value = $('preset').value;
-  const mapping = {'ed-modo':['clip_selection','ai'], 'ed-duracion':['clip_duration',60],
+  const mapping = {'ed-enfoque':['moment_focus','general'], 'ed-contexto':['context_before_seconds',8], 'ed-tema':['moment_query',''], 'ed-modo':['clip_selection','ai'], 'ed-duracion':['clip_duration',60],
     'ed-cantidad':['num_clips',1], 'ed-motor':['motor_ia','pro'], 'ed-transcripcion':['transcripcion','groq'],
     'ed-whisper':['whisper_local','large-v3'], 'ed-formato':['video_format','vertical'],
     'ed-calidad':['export_profile','quality'], 'ed-upscale':['upscale','off'],
@@ -1083,6 +1084,7 @@ function seleccionarPreset() {
 function modoEdicion() {
   const partes = $('ed-modo').value === 'sequential';
   $('ed-cantidad').disabled = partes;
+  $('ed-momentos').hidden = partes;
   const seconds = Number($('ed-duracion').value);
   $('ed-resumen').textContent = partes ?
     `Se divide el video desde el inicio elegido en partes de ${seconds || '…'} s. La última puede ser más corta.` :
@@ -1114,7 +1116,7 @@ function vistaSubtitulos() {
   $('sub-preview').alt = `Ejemplo de ${$('ed-estilo').selectedOptions[0]?.textContent || estilo}`;
 }
 function ajustesEdicion() {
-  const c = {...presetBase, clip_selection:$('ed-modo').value, clip_duration:Number($('ed-duracion').value),
+  const c = {...presetBase, moment_focus:$('ed-enfoque').value, context_before_seconds:Number($('ed-contexto').value), moment_query:$('ed-tema').value.trim(), clip_selection:$('ed-modo').value, clip_duration:Number($('ed-duracion').value),
     num_clips:Number($('ed-cantidad').value), motor_ia:$('ed-motor').value, transcripcion:$('ed-transcripcion').value,
     whisper_local:$('ed-whisper').value, video_format:$('ed-formato').value, export_profile:$('ed-calidad').value,
     upscale:$('ed-upscale').value, show_subtitles:$('ed-subs').value === 'si', style:$('ed-estilo').value,

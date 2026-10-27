@@ -2955,6 +2955,13 @@
                         <label style="display:flex;gap:8px;align-items:center">
                             <input type="checkbox" id="smart_best_moments" checked onchange="updateSmartSelectionMode()"> Buscar los mejores momentos con IA
                         </label>
+                        <div id="smart_moment_controls" style="margin:12px 0">
+                            <label for="smart_moment_focus">Qué momentos buscar</label>
+                            <select id="smart_moment_focus" class="form-control"><option value="general">Mejores momentos generales</option><option value="humor">Humor, bromas y risas en la transcripción</option><option value="drama">Drama, tensión e historias emotivas</option><option value="humor_drama">Humor y drama</option></select>
+                            <label for="smart_context_before">Contexto antes del momento (s)</label><input id="smart_context_before" class="form-control" type="number" min="0" max="45" step="1" value="8">
+                            <label for="smart_moment_query">Tema o frase del diálogo (opcional)</label><input id="smart_moment_query" class="form-control" maxlength="300" placeholder="Ej.: la anécdota del viaje">
+                            <small>Incluye el planteamiento antes del remate y conserva el cierre. Se guía por la transcripción; la risa sin palabras puede no detectarse. Selección aceptada automáticamente, sin confirmar la vista previa.</small>
+                        </div>
                         <small id="smart_selection_hint" style="display:block">Desactívalo para cortar todo el video en partes consecutivas. La última parte puede ser más corta y los cortes pueden caer a mitad de una frase. Sin subtítulos ni doblaje, tampoco se transcribe el audio.</small>
                         <label style="display:block; margin-bottom:5px; font-weight:bold; color:var(--accent-primary);">Motor de edición IA</label>
                         <select id="smart_motor_ia" class="form-control">
@@ -4048,6 +4055,7 @@
         function updateSmartSelectionMode() {
             const ai = document.getElementById('smart_best_moments').checked;
             document.getElementById('smart_split_clips').disabled = !ai;
+            document.getElementById('smart_moment_controls').hidden = !ai;
             document.getElementById('smart_duration_label').textContent = ai ? 'Duración mínima del clip (segs)' : 'Duración de cada parte (segs)';
             document.getElementById('smart_duration_hint').textContent = ai ?
                 'La IA alarga cada clip para terminar la idea y elige los mejores momentos.' :
@@ -4068,6 +4076,9 @@
         function collectSmartSettings() {
             return {
                 clip_selection: document.getElementById('smart_best_moments').checked ? 'ai' : 'sequential',
+                moment_focus: document.getElementById('smart_moment_focus').value || 'general',
+                context_before_seconds: Number(document.getElementById('smart_context_before').value),
+                moment_query: document.getElementById('smart_moment_query').value.trim(),
                 source: document.getElementById('smart_split_source').value,
                 style: window.selectedSubtitleStyle || 'una_palabra',
                 clip_duration: parseFloat(document.getElementById('smart_split_duration').value),

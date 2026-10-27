@@ -80,6 +80,12 @@ class Cliente:
         if preset.get('bot_unique'):
             if 'unique_clip_ranges_v1' not in (self.probar().get('capabilities') or []):
                 raise FalloTrabajo('Actualiza My Content en Colab y reinicia el servidor. Falta la protección de clips repetidos.')
+        from smart_moments import solicitado, validar, CAPACIDAD as MOMENTOS_CAPACIDAD
+        validar(preset.get('moment_focus', 'general'), preset.get('context_before_seconds', 0), preset.get('moment_query', ''))
+        if solicitado(preset):
+            capacidades = self.probar().get('capabilities')
+            if not isinstance(capacidades, list) or MOMENTOS_CAPACIDAD not in capacidades:
+                raise FalloTrabajo('Actualiza la libreta y ejecuta las celdas 2, 2B, 6 y 6C de Colab. Ese servidor aún no admite humor, drama y contexto previo; no se ignorarán tus ajustes.')
         r = self._pedir("POST", "/api/bot/remoto/cortar", json={"source": url_video, "preset": preset})
         if r.status_code == 409:
             raise ServidorOcupado()
