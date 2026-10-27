@@ -12,6 +12,15 @@ class ConexionCloudflareTests(unittest.TestCase):
         self.cliente = remoto.Cliente('https://sample.trycloudflare.com', 'clave-de-prueba')
         self.addCleanup(self.cliente.s.close)
 
+    def test_error_de_seleccion_remoto_conserva_codigo_y_mensaje(self):
+        response=Mock(status_code=200)
+        response.json.return_value={'estado':'error','error':'No se encontraron momentos.','error_code':'sin_momentos'}
+        with patch.object(self.cliente,'_pedir',return_value=response):
+            with self.assertRaises(remoto.FalloCorte) as fallo:
+                self.cliente.esperar_y_bajar('job','no-se-crea')
+        self.assertEqual(fallo.exception.code,'sin_momentos')
+        self.assertEqual(str(fallo.exception),'No se encontraron momentos.')
+
     def test_conexion_cloudflare_usa_clave_de_app(self):
         response = Mock(status_code=200)
         response.json.return_value = {'ok': True, 'status': 'idle'}
@@ -124,3 +133,4 @@ class TransferenciaTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

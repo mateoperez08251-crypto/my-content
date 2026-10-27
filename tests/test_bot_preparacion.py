@@ -34,6 +34,31 @@ class PreparacionTests(unittest.TestCase):
     def encolar(self, n=1):
         return self.m.encolar(f'https://example.test/video-{n}', cuentas=[self.cid])
 
+    def test_sin_momentos_no_repite_analisis_local(self):
+        from smart_moments import SinMomentos
+        tid=self.encolar()
+        self.split.side_effect=SinMomentos('No se encontraron momentos con ese enfoque.')
+        self.m._procesar_trabajo(self.m.db.trabajo(tid))
+        job=self.m.db.trabajo(tid)
+        self.assertEqual(job['estado'],'error')
+        self.assertEqual(job['intentos'],1)
+        self.assertEqual(job['proximo_intento'],0)
+        self.assertIn('No se encontraron momentos',job['error'])
+
+    def test_sin_momentos_remoto_no_repite_ni_conserva_job_fallido(self):
+        tid=self.encolar()
+        self.m.guardar_cfg({'remoto_url':'https://colab.example.test'})
+        cliente=Mock()
+        cliente.iniciar.return_value='job'
+        cliente.esperar_y_bajar.side_effect=remoto.FalloCorte('No se encontraron momentos.',code='sin_momentos')
+        with patch.object(self.m,'_cliente_remoto',return_value=cliente):
+            self.m._preparar_remoto(self.m.db.trabajo(tid))
+        job=self.m.db.trabajo(tid)
+        self.assertEqual(job['estado'],'error')
+        self.assertEqual(job['intentos'],1)
+        self.assertEqual(job['remoto_id'],'')
+        self.assertEqual(job['proximo_intento'],0)
+
     def test_caida_colab_conserva_edicion_y_no_bloquea_clips_guardados(self):
         self.encolar(); self.m._paso()
         tid = self.encolar(2)

@@ -33,6 +33,9 @@ class FalloTrabajo(Exception):
 
 class FalloCorte(FalloTrabajo):
     """La edición remota terminó con error; el reintento necesita un trabajo nuevo."""
+    def __init__(self, mensaje, code='edicion_fallida'):
+        super().__init__(mensaje)
+        self.code = code
 
 
 class Cliente:
@@ -152,7 +155,7 @@ class Cliente:
             if r.status_code == 404:
                 raise TrabajoPerdido("el servidor se reinició y perdió el trabajo")
             if d.get("estado") == "error":
-                raise FalloCorte(d.get("error") or "falló el corte")
+                raise FalloCorte(d.get("error") or "falló el corte", code=d.get('error_code') or 'edicion_fallida')
             if d.get("estado") == "listo":
                 break
             if progreso:

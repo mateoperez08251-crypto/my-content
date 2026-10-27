@@ -658,7 +658,7 @@ class Motor:
             if self._edicion_cancelada():
                 raise remoto.CorteCancelado('Corte cancelado.') from e
             intentos = t["intentos"] + 1
-            if intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
+            if getattr(e, 'code', '') == 'sin_momentos' or intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
                 self._aviso_trabajo(t, f'error:{intentos}', 'No pude prepararlo en la PC. ' + self._detalle_fallo(e, intentos), 'errores', True)
             else:
@@ -778,7 +778,7 @@ class Motor:
         except (remoto.FalloTrabajo, OSError, ValueError) as e:
             intentos = t["intentos"] + 1
             extra = {'remoto_id':'', 'remoto_url':''} if isinstance(e, remoto.FalloCorte) else {}
-            if intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
+            if getattr(e, 'code', '') == 'sin_momentos' or intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos, **extra)
                 self._aviso_trabajo(t, f'error:{intentos}', 'No pude terminar con el servidor de cortes. ' + self._detalle_fallo(e, intentos), 'errores', True)
             else:

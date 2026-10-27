@@ -601,8 +601,8 @@ def main(argv):
             return 1
         except Exception as e:
             from smart_selection import NoNewClips
-            if isinstance(e, NoNewClips):
-                print('RESULT_ERROR:' + json.dumps({'code': 'clips_agotados', 'message': str(e)}))
+            code = 'clips_agotados' if isinstance(e, NoNewClips) else getattr(e, 'code', 'edicion_fallida')
+            print('RESULT_ERROR:' + json.dumps({'code': code, 'message': str(e)[:1000]}, ensure_ascii=False))
             print(f"ERROR: {e}")
             write_progress(f"Error: {e}", -1)
             return 1
