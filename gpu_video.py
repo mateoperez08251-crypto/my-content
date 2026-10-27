@@ -41,7 +41,7 @@ def opciones_moviepy(calidad="alta", preset_cpu="fast", bitrate=None):
         return {"codec": "h264_nvenc", "preset": "p7" if calidad == "maxima" else "p5", "bitrate": bitrate, "ffmpeg_params": params}
     params = ['-pix_fmt', 'yuv420p', '-profile:v', 'high', '-movflags', '+faststart']
     if not bitrate:
-        params += ['-crf', {"maxima": "16", "alta": "19", "media": "23"}.get(calidad, "21")]
+        params = ['-crf', {"maxima": "16", "alta": "19", "media": "23"}.get(calidad, "21")] + params
     result = {"codec": "libx264", "preset": preset_cpu, "bitrate": bitrate, "ffmpeg_params": params}
     return result
 

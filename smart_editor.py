@@ -297,7 +297,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['titulo']}")
 
         orig_w, orig_h = clip.w, clip.h
-        fixed_crop_w = int(orig_h * 9 / 16) if (orig_w / orig_h) > (9 / 16) else orig_w
+        # El encuadre ajusta ambos lados cuando la fuente es más estrecha que 9:16.
+        fixed_crop_w = max(2, int(round(orig_h * 9 / 16)))
         from smart_speakers import validate_performance
         validate_performance(export_profile)
         final_w, final_h = (720, 1280) if export_profile == 'fast' else (1080, 1920)

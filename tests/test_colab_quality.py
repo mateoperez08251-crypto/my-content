@@ -22,6 +22,8 @@ class ColabQualityTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(base64.b64decode(payload))) as z:
             root = Path(__file__).resolve().parents[1]
             self.assertIn('smart_upscale_worker.py', z.namelist())
+            self.assertIn('calidad_video.py', z.namelist())
+            self.assertIn('yt_downloader.py', z.namelist())
             for name in z.namelist():
                 self.assertEqual(z.read(name), (root / name).read_bytes(), name)
                 self.assertNotIn('secrets', name)
@@ -42,3 +44,4 @@ class ColabQualityTests(unittest.TestCase):
         for c in json.loads(notebook.read_text(encoding='utf-8'))['cells']:
             if c['cell_type'] == 'code':
                 ast.parse(''.join(c['source']))
+
