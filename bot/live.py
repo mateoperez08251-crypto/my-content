@@ -140,7 +140,7 @@ def resolve_live(url):
     logger = QuietLogger()
     opts = dict(yt_downloader.opciones_base(), quiet=True, noplaylist=True,
                 socket_timeout=15, retries=1, extractor_retries=1, logger=logger, no_warnings=False,
-                format='best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]')
+                format='best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720]/bestvideo[height<=720]+bestaudio/worstvideo+bestaudio/worst')
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -159,22 +159,27 @@ def resolve_live(url):
         host = parsed.hostname or ''
         if parsed.scheme != 'https' or not (host.endswith('.googlevideo.com') or host in ('youtube.com','www.youtube.com')):
             raise LiveError('YouTube no devolvió una señal HTTPS compatible para capturar.')
-        # MP4 con copia evita cargar la CPU con una segunda codificación.
+        # MKV admite VP9/AV1 y Opus sin recodificar durante la captura.
         vcodec, acodec = item.get('vcodec', 'none'), item.get('acodec', 'none')
-        if vcodec != 'none' and not vcodec.startswith(('avc1', 'h264', 'hev1', 'hvc1', 'hevc')):
+        if vcodec != 'none' and not vcodec.startswith(('avc1', 'h264', 'hev1', 'hvc1', 'hevc', 'vp9', 'vp09', 'av01', 'av1')):
             raise LiveError('La señal usa un códec no compatible con la captura ligera. Prueba otro live.')
-        if acodec != 'none' and not acodec.startswith(('mp4a', 'aac', 'mp3')):
+        if acodec != 'none' and not acodec.startswith(('mp4a', 'aac', 'mp3', 'opus', 'vorbis')):
             raise LiveError('El audio de esa señal no es compatible con la captura ligera.')
         headers = {k: str(v).replace('\r','').replace('\n','') for k,v in
                    (item.get('http_headers') or info.get('http_headers') or {}).items()
                    if k.lower() in ('user-agent', 'referer', 'origin')}
-        streams.append({'url':address, 'headers':headers, 'video':vcodec != 'none', 'audio':acodec != 'none'})
+        container = 'mp4' if ((vcodec == 'none' or vcodec.startswith(('avc1','h264','hev1','hvc1','hevc')))
+                              and (acodec == 'none' or acodec.startswith(('mp4a','aac','mp3')))) else 'matroska'
+        streams.append({'url':address, 'headers':headers, 'video':vcodec != 'none', 'audio':acodec != 'none',
+                        'container': container})
     if not any(x['video'] for x in streams):
         raise LiveError('No se encontró una pista de video para el live.')
     return {'id':str(info.get('id', '')), 'title':str(info.get('title', 'YouTube Live'))[:160], 'streams':streams}
 
 
 def ffmpeg_command(ffmpeg, streams, folder, prefix, seconds):
+    container = 'matroska' if any(s.get('container') == 'matroska' for s in streams) else 'mp4'
+    extension = 'mkv' if container == 'matroska' else 'mp4'
     command = [ffmpeg, '-hide_banner', '-loglevel', 'error', '-y']
     for stream in streams:
         command += ['-rw_timeout', '15000000']
@@ -187,9 +192,9 @@ def ffmpeg_command(ffmpeg, streams, folder, prefix, seconds):
         if index is not None:
             command += ['-map', f'{index}:{"v" if kind == "video" else "a"}:0']
     command += ['-c', 'copy', '-f', 'segment', '-segment_time', str(seconds),
-                '-segment_format', 'mp4', '-segment_list_type', 'csv', '-segment_list_size', '0',
+                '-segment_format', container, '-segment_list_type', 'csv', '-segment_list_size', '0',
                 '-segment_list', str(Path(folder) / (prefix + '.csv')), '-reset_timestamps', '1',
-                str(Path(folder) / (prefix + '_%06d.mp4'))]
+                str(Path(folder) / (prefix + '_%06d.' + extension))]
     return command
 
 
@@ -202,7 +207,7 @@ def closed_segments(manifest):
     text = text[:text.rfind('\n') + 1]
     result = []
     for row in csv.reader(io.StringIO(text)):
-        if len(row) != 3 or not re.fullmatch(r'[a-f0-9]{8}_\d{6}\.mp4', row[0]):
+        if len(row) != 3 or not re.fullmatch(r'[a-f0-9]{8}_\d{6}\.(?:mp4|mkv)', row[0]):
             continue
         try:
             start, end = float(row[1]), float(row[2])
@@ -323,7 +328,9 @@ class LiveManager:
 
     def _space(self, cfg):
         used = 0
-        for file in self.root.glob('*/*.mp4'):
+        for file in self.root.glob('*/*'):
+            if file.suffix not in ('.mp4', '.mkv') or not file.is_file():
+                continue
             try:
                 used += file.stat().st_size
             except FileNotFoundError:  # La cola puede terminar y limpiar un segmento a la vez.

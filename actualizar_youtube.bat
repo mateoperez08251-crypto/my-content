@@ -14,7 +14,7 @@ if not defined BOT_PYTHON (
 echo Usando "%BOT_PYTHON%"
 "%BOT_PYTHON%" -m pip install --upgrade "yt-dlp[default,deno]"
 if errorlevel 1 goto error
-"%BOT_PYTHON%" -c "import subprocess, yt_dlp, yt_dlp_ejs; from deno import find_deno_bin; subprocess.run([find_deno_bin(), '--version'], check=True)"
+"%BOT_PYTHON%" -c "import subprocess, yt_dlp, yt_dlp_ejs; from importlib.metadata import version; from deno import find_deno_bin; print('yt-dlp:', version('yt-dlp')); print('EJS:', version('yt-dlp-ejs')); subprocess.run([find_deno_bin(), '--version'], check=True)"
 if errorlevel 1 goto error
 echo Listo. Abre My Content y vuelve a iniciar la captura del live.
 pause

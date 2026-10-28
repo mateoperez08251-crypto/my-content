@@ -48,7 +48,10 @@ def _js_runtimes():
     rt = {}
     try:
         from deno import find_deno_bin
-        rt["deno"] = {"path": find_deno_bin()}
+        deno_path = find_deno_bin()
+        if not os.path.isfile(deno_path):
+            raise FileNotFoundError()
+        rt["deno"] = {"path": deno_path}
     except Exception:
         if shutil.which("deno"):
             rt["deno"] = {}
@@ -65,6 +68,8 @@ def opciones_base():
         'retries': 5,
         'fragment_retries': 5,
         'extractor_retries': 3,
+        # Respaldo oficial si el paquete EJS instalado no coincide con yt-dlp.
+        'remote_components': ['ejs:github'],
     }
     rt = _js_runtimes()
     if rt:

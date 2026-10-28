@@ -22,6 +22,28 @@ URL = 'https://www.youtube.com/watch?v=example'
 
 
 class Validation(unittest.TestCase):
+    def test_vp9_opus_live_uses_mkv_with_stream_copy(self):
+        info = dict(live_status='is_live', id='example', title='Live VP9',
+                    requested_formats=[dict(url='https://r1.googlevideo.com/video', vcodec='vp9', acodec='none'),
+                                       dict(url='https://r1.googlevideo.com/audio', vcodec='none', acodec='opus')])
+        manager = Mock()
+        manager.__enter__ = Mock(return_value=manager)
+        manager.__exit__ = Mock(return_value=False)
+        manager.extract_info.return_value = info
+        with patch.dict(sys.modules, {'yt_dlp':SimpleNamespace(YoutubeDL=lambda opts: manager),
+                                     'yt_downloader':SimpleNamespace(opciones_base=lambda: {})}):
+            result = live.resolve_live(URL)
+        command = live.ffmpeg_command('ffmpeg', result['streams'], 'folder', 'aabbccdd', 60)
+        self.assertEqual(command[command.index('-segment_format') + 1], 'matroska')
+        self.assertEqual(command[command.index('-c') + 1], 'copy')
+        self.assertTrue(command[-1].endswith('.mkv'))
+
+    def test_mkv_manifest_recovers_only_closed_safe_names(self):
+        with tempfile.TemporaryDirectory() as folder:
+            manifest = Path(folder, 'segments.csv')
+            manifest.write_text('aabbccdd_000000.mkv,0,60\n../bad.mkv,60,120\naabbccdd_000001.mkv,60,120', encoding='utf-8')
+            self.assertEqual(live.closed_segments(manifest), [('aabbccdd_000000.mkv', 0, 60)])
+
     def test_only_youtube_https_without_credentials(self):
         for url in ['http://youtube.com/x', 'file:///a', 'https://youtube.com.evil.example/x',
                     'https://user:password@youtube.com/x', 'https://youtube.com:444/x', None]:
