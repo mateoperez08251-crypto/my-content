@@ -5,6 +5,7 @@ import json
 import re
 from urllib.parse import quote, unquote, urlsplit
 import xml.etree.ElementTree as ET
+from datetime import datetime
 
 CID = re.compile(r'UC[A-Za-z0-9_-]{22}\Z')
 VIDEO = re.compile(r'[A-Za-z0-9_-]{11}\Z')
@@ -124,7 +125,7 @@ class Pagina(HTMLParser):
     def datos(self):
         for script in self.scripts:
             texto = script.strip()
-            match = re.search(r'(?:var\s+ytInitialData|(?:window\s*\[\s*[\'"]ytInitialData[\'"]\s*\])|ytInitialData)\s*=\s*', texto)
+            match = re.search(r'(?:var\s+ytInitialData|(?:window\s*\[\s*[\'"]ytInitialData[\'"]\s*\])|ytInitialData|(?:var\s+)?ytInitialPlayerResponse)\s*=\s*', texto)
             if match:
                 texto = texto[match.end():]
             try:
@@ -200,8 +201,93 @@ def youtube(texto, leer):
             return []
         if ref.tipo == 'handle' and destino.tipo == 'handle' and destino.clave != ref.clave:
             return []
-    feed, _ = leer('https://www.youtube.com/feeds/videos.xml?channel_id=' + cid)
-    return leer_feed(feed, cid, ref)
+    try:
+        feed, _ = leer('https://www.youtube.com/feeds/videos.xml?channel_id=' + cid)
+        items = leer_feed(feed, cid, ref)
+        if items:
+            return items
+    except Exception:
+        # Algunos canales públicos devuelven 404 en RSS aunque tengan videos.
+        pass
+    return youtube_paginas(ref, cid, leer)
+
+
+def _videos_pestana(texto):
+    """Solo tarjetas de la pestaña seleccionada, nunca recomendaciones del HTML."""
+    for data in Pagina(texto).datos():
+        if not isinstance(data, dict):
+            continue
+        tabs = data.get('contents', {}).get('twoColumnBrowseResultsRenderer', {}).get('tabs', [])
+        for tab in tabs:
+            renderer = tab.get('tabRenderer', {})
+            if renderer.get('selected') is not True:
+                continue
+            cards = renderer.get('content', {}).get('richGridRenderer', {}).get('contents', [])
+            for card in cards:
+                content = card.get('richItemRenderer', {}).get('content', {})
+                video = content.get('videoRenderer', {}).get('videoId')
+                lockup = content.get('lockupViewModel', {})
+                if lockup.get('contentType') == 'LOCKUP_CONTENT_TYPE_VIDEO':
+                    video = lockup.get('contentId')
+                short = content.get('shortsLockupViewModel', {})
+                for obj in objetos(short.get('onTap', {})):
+                    video = obj.get('reelWatchEndpoint', {}).get('videoId') or video
+                if VIDEO.fullmatch(str(video or '')):
+                    yield video
+
+
+def _video_confirmado(texto, vid, cid, ref):
+    for data in Pagina(texto).datos():
+        if not isinstance(data, dict):
+            continue
+        details = data.get('videoDetails', {})
+        if details.get('videoId') != vid or details.get('channelId') != cid:
+            continue
+        if details.get('isLive') or details.get('isUpcoming'):
+            continue
+        meta = data.get('microformat', {}).get('playerMicroformatRenderer', {})
+        published = meta.get('publishDate') or meta.get('uploadDate') or ''
+        try:
+            fecha = datetime.fromisoformat(published.replace('Z', '+00:00'))
+            # Sin hora/zona no se puede decidir con seguridad si es nuevo.
+            if fecha.tzinfo is None:
+                continue
+        except (ValueError, TypeError):
+            continue
+        return {'id': vid, 'title': details.get('title', ''), 'published': published,
+                'link': 'https://youtu.be/' + vid, 'url': 'https://youtu.be/' + vid,
+                'platform': 'youtube', 'channel': ref.url, 'source_channel': ref.url,
+                'channel_id': cid, 'channel_url': 'https://www.youtube.com/channel/' + cid,
+                'owner_verified': True, 'thumbnail': f'https://i.ytimg.com/vi/{vid}/hqdefault.jpg'}
+
+
+def youtube_paginas(ref, cid, leer):
+    salida, vistos = [], set()
+    for tab in ('videos', 'shorts', 'streams'):
+        try:
+            html, final = leer(ref.url + '/' + tab)
+            destino = canal(final, 'youtube')
+            if not destino or resolver_youtube(ref, html) != cid:
+                continue
+            if destino.clave != ref.clave and not (destino.tipo == 'id' and destino.nombre == cid):
+                continue
+            # Revisar las últimas cinco tarjetas de cada sección en cada ronda.
+            for vid in list(_videos_pestana(html))[:5]:
+                if vid in vistos:
+                    continue
+                vistos.add(vid)
+                try:
+                    video_html, final_video = leer('https://www.youtube.com/watch?v=' + vid)
+                    if urlsplit(final_video).hostname not in ('www.youtube.com', 'youtube.com', 'm.youtube.com'):
+                        continue
+                    item = _video_confirmado(video_html, vid, cid, ref)
+                    if item:
+                        salida.append(item)
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return salida
 
 
 def objetos(data):
