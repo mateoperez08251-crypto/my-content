@@ -88,11 +88,12 @@ class Calidad(unittest.TestCase):
 
 class Persistencia(unittest.TestCase):
     def test_medicion_cacheada_no_cambia_version_y_se_invalida(self):
+        from contextlib import ExitStack
         from bot.motor import Motor
         from bot import archivos
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder, ExitStack() as recursos:
             m = Motor(folder, log=lambda _:None)
-            self.addCleanup(m.db._con.close)
+            recursos.callback(m.db._con.close)
             cid = m.db.crear_cuenta('Prueba','tiktok')
             tid = m.db.encolar_trabajo('https://example.test/video','manual', cuentas=[cid])
             carpeta = Path(m.carpeta_clips({'id':tid})); carpeta.mkdir(parents=True)

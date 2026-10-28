@@ -13,6 +13,8 @@ class ControlSubida:
         self.publicando = False
         self.confirmada = False
         self.url = ''
+        self.permiso_publicar = None
+        self.pausa_radar = False
 
     def cancelar(self):
         with self._lock:
@@ -25,6 +27,9 @@ class ControlSubida:
     def publicar(self):
         # El borrado y el inicio de Publicar tienen un orden definido.
         with self._lock:
+            if self.permiso_publicar is not None and not self.permiso_publicar():
+                self.pausa_radar = True
+                self.evento.set()
             self.comprobar()
             self.publicando = True
 

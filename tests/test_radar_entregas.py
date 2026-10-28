@@ -1,6 +1,6 @@
 """Regresiones del recorrido detección -> disco -> bot -> avisos, sin red real."""
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import tempfile
 import time
@@ -91,10 +91,39 @@ class EntregasRadar(unittest.TestCase):
 
     def test_dos_publicaciones_en_cinco_minutos_entran_en_ambas_cuentas(self):
         self.ronda()
-        self.items = [{**self.item, 'id': VB, 'link': 'https://youtu.be/' + VB}]
+        self.items = [{**self.item, 'id': VB, 'link': 'https://youtu.be/' + VB,
+                       'published': (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()}]
         self.ronda()
         self.assertEqual(len(self.m.db.trabajos_recientes()), 4)
         self.assertEqual({t['estado'] for t in self.m.db.trabajos_recientes()}, {'pendiente'})
+
+    def test_varias_juntas_solo_entrega_la_mas_reciente(self):
+        reciente = {**self.item, 'id': VB, 'link': 'https://youtu.be/' + VB,
+                    'published': (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()}
+        self.items = [self.item, reciente]
+        self.ronda()
+        self.assertEqual({t['url'] for t in self.m.db.trabajos_recientes()}, {reciente['link']})
+        self.inbox.assert_called_once_with(self.inbox.call_args.args[0])
+        self.assertEqual(self.inbox.call_args.args[0]['id'], VB)
+        self.items = [self.item]  # Feed temporalmente atrasado: no rescatar lo viejo.
+        self.ronda()
+        self.assertEqual(len(self.m.db.trabajos_recientes()), 2)
+
+    def test_pendiente_antiguo_no_se_entrega_si_hay_otra_actual(self):
+        with patch.object(bot_motor, '_motor', None):
+            self.ronda()
+        nueva = {**self.item, 'id': VB, 'link': 'https://youtu.be/' + VB,
+                 'published': (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()}
+        self.items = [nueva, self.item]
+        store = Seguimiento(self.ruta)
+        try:
+            store.reintentar_ahora()
+        finally:
+            store.close()
+        self.ronda()
+        self.assertEqual({t['url'] for t in self.m.db.trabajos_recientes()}, {nueva['link']})
+        anterior = next(e for e in self.resumen()['eventos'] if e['clave'] == 'youtube:' + VA)
+        self.assertEqual(anterior['estado'], 'omitido')
 
     def test_sin_regla_es_visible_y_se_recupera_al_asignar_destinos(self):
         self.m.db._q('DELETE FROM reglas')

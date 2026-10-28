@@ -31,6 +31,8 @@ from .plataformas.base import Rechazado, SesionCerrada, SinConfirmar
 CONFIG_DEFECTO = {
     "activo": True,          # el bot procesa la cola
     "radar_auto": True,      # lo que detecta el radar local entra solo a la cola
+    "radar_populares": False,
+    "radar_populares_configurado": False,
     "firebase_auto": True,   # lo que detecta el radar de la nube (bandeja Firebase) también
     "gap_min": 25,           # minutos mínimos entre subidas de UNA misma cuenta
     "gap_max": 60,
@@ -361,19 +363,19 @@ class Motor:
         if modo in ('solo_preparar', 'preparar_primero'):
             # Un live no tiene un final conocido: no retiene indefinidamente las publicaciones.
             excluir_live = modo == 'preparar_primero'
-            trabajo = self.db.siguiente_trabajo(excluir_live=excluir_live)
+            trabajo = self.db.siguiente_trabajo(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
             if trabajo:
                 self._procesar_trabajo(trabajo)
                 return True
-            if modo == 'solo_preparar' or self.db.por_preparar(excluir_live=excluir_live):
-                self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live)
+            if modo == 'solo_preparar' or self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares']):
+                self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
                                   else 'Preparando primero: esperando el reintento de un video.')
                 return False
         sub = self._siguiente_subida()
         if sub:
             self._procesar_subida(sub)
             return True
-        trabajo = self.db.siguiente_trabajo() if modo != 'solo_subir' else None
+        trabajo = self.db.siguiente_trabajo(excluir_populares=not self.cfg['radar_populares']) if modo != 'solo_subir' else None
         if trabajo:
             self._procesar_trabajo(trabajo)
             return True
@@ -416,6 +418,25 @@ class Motor:
             cambios = {**cambios, 'preset_corte': nombre}
         self.db.editar_cuenta(cid, **cambios)
         self.despertar()
+
+    def destinos_radar(self, item, popular=False, solo_libres=False):
+        regla = self.destino_para(item.get('source_channel') or item.get('channel', ''),
+                                 item.get('platform'), item.get('channel_id', '')) or {}
+        elegidas = []
+        for cid in regla.get('cuentas', []):
+            c = self.db.cuenta(cid)
+            if not c or not c['activa']:
+                continue
+            if popular and (c['plataforma'] != 'tiktok' or c.get('monetizada')):
+                continue
+            if not popular and self.cfg['radar_populares_configurado'] and c['plataforma'] == 'tiktok' and not c.get('monetizada'):
+                continue
+            if item.get('radar_cuenta') and int(item['radar_cuenta']) != cid:
+                continue
+            if solo_libres and self.db.cuenta_tiene_cola(cid):
+                continue
+            elegidas.append(cid)
+        return elegidas
 
     def encolar(self, url, origen="manual", clave=None, canal="", titulo="", cuentas=None,
                 cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id='', devolver_ids=False, subir_ahora=True):
@@ -470,9 +491,28 @@ class Motor:
         return self._encolar_detectado(item, 'radar')
 
     def _encolar_detectado(self, item, origen):
+        if self.cfg['radar_populares_configurado'] and item.get('platform') == 'youtube' and not item.get('radar_modo'):
+            resultados = [self._encolar_detectado({**item, 'radar_modo': 'actual', 'radar_cuenta': cid}, origen)
+                          for cid in self.destinos_radar(item)]
+            return next((r for r in resultados if r), None)
         url = item.get("link") or item.get("url")
-        clave = f"{item.get('platform', 'youtube')}:{item.get('id')}"
+        from firebase_radar.functions.canales import clave_evento
+        clave = clave_evento(item)
         canal = item.get("source_channel") or item.get("channel", "")
+        modo_radar = item.get('radar_modo')
+        if modo_radar in ('popular', 'actual'):
+            cuentas = self.destinos_radar(item, popular=modo_radar == 'popular')
+            if modo_radar == 'popular' and not self.cfg['radar_populares']:
+                return None
+            if not cuentas:
+                tid = self.db.encolar_trabajo(url, origen, clave=clave, canal=canal, titulo=item.get('title', ''))
+                if tid:
+                    self.db.marcar_trabajo(tid, 'omitido', 'La cuenta ya no corresponde a este radar o está pausada.')
+                return None
+            if modo_radar == 'popular':
+                return self.encolar(url, origen='radar_populares', clave=clave, canal=canal,
+                                    titulo=item.get('title', ''), cuentas=cuentas, cortar=True,
+                                    plataforma_origen=item.get('platform'), channel_id=item.get('channel_id', ''))
         anterior = self.db.trabajo_por_clave(clave)
         if anterior and (anterior['estado'] == 'sin_destino' or
                          (anterior['estado'] == 'omitido' and not self._es_viejo(item))):
@@ -487,6 +527,7 @@ class Motor:
                 self.db.marcar_trabajo(tid, "omitido", "Video anterior: solo se sube lo nuevo.")
             return None
         return self.encolar(url, origen=origen, clave=clave, canal=canal, titulo=item.get("title", ""),
+                            cuentas=cuentas if modo_radar == 'actual' else None,
                             plataforma_origen=item.get('platform'), channel_id=item.get('channel_id', ''))
 
     def encolar_archivo(self, stream, nombre, clave, cuentas, plataforma, texto=''):
@@ -547,11 +588,15 @@ class Motor:
         except radar_config.ErrorConfig:
             self.log('No pude verificar la lista del Radar. No añado videos de Firebase a la cola.')
             return 0
+        from firebase_radar.functions.canales import solo_actuales
+        candidatos = []
         for doc in docs:
             d = doc.to_dict() or {}
             if not permitido(d, radar_cfg):
                 continue
             d['id'] = d.get('id') or doc.id
+            candidatos.append(d)
+        for d in solo_actuales(candidatos):
             from firebase_radar.functions.canales import canal as referencia
             ref = referencia(d.get('source_channel'), d.get('platform'))
             d['seguir_desde'] = radar_cfg.get('radar_desde_canales', {}).get(ref.url, 0) if ref else 0
@@ -586,6 +631,13 @@ class Motor:
         return self._stop.is_set() or bool(self._edicion_actual and self._edicion_actual[1].is_set())
 
     def _preparar_trabajo(self, t):
+        if t.get('origen') == 'radar_populares':
+            if not self.cfg['radar_populares']:
+                self.db.marcar_trabajo(t['id'], 'pendiente', 'Radar de populares en pausa. Trabajo conservado.')
+                return
+            if any((self.db.cuenta(cid) or {}).get('monetizada') for cid in t['cuentas']):
+                self.db.marcar_trabajo(t['id'], 'omitido', 'Cuenta monetizada: se usa solo contenido reciente.')
+                return
         guardados = archivos.leer_preparados(self.carpeta_clips(t))
         if guardados:
             self._finalizar_clips(t, guardados)
@@ -876,13 +928,20 @@ class Motor:
         return {'pendientes': len(pendientes), 'mensaje': self._motivo_espera()}
 
     def _motivo_subida(self, s, cuenta=None, ahora=None):
+        trabajo_radar = self.db.trabajo(s.get('trabajo_id')) if s.get('trabajo_id') else None
+        if trabajo_radar and trabajo_radar.get('origen') == 'radar_populares':
+            if not self.cfg['radar_populares']:
+                return 'Radar de populares en pausa. La cola se conserva.'
+            destino = cuenta or self.db.cuenta(s['cuenta_id'])
+            if destino and destino.get('monetizada'):
+                return 'Cuenta monetizada: este clip de populares queda bloqueado; se usa contenido reciente.'
         """Motivo visible para una publicación pendiente, sin cambiar sus tiempos."""
         ahora = time.time() if ahora is None else ahora
         if not self.cfg['activo']:
             return 'Bot en pausa. Pulsa Lanzar subidas guardadas para activarlo.'
         if self.cfg['modo_cola'] == 'solo_preparar':
             return 'Solo editar y guardar. Pulsa Lanzar subidas guardadas para publicar.'
-        if self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True):
+        if self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True, excluir_populares=not self.cfg['radar_populares']):
             return 'Esperando a terminar toda la edición. Lanzar subidas guardadas permite publicar lo que ya está listo.'
         c = cuenta or self.db.cuenta(s['cuenta_id'])
         if not c:
@@ -1012,6 +1071,9 @@ class Motor:
                         mensaje = ('Se canceló después de iniciar Publicar. Revisa la cuenta: puede estar '
                                    'publicada. No se reintentará automáticamente.')
                         self.db.marcar_subida(s['id'], 'revisar', error=mensaje)
+                    elif control.pausa_radar:
+                        mensaje = 'Radar de populares pausado o cuenta cambiada a monetizada. Clip conservado sin publicar.'
+                        self.db.marcar_subida(s['id'], 'pendiente', error=mensaje)
                     else:
                         self.db.borrar_subida(s['id'])
                         mensaje = 'Subida cancelada y retirada de la cola.'
@@ -1032,6 +1094,13 @@ class Motor:
         if cuenta is None:
             self.db.borrar_subida(s['id'])
             return
+        trabajo_radar = self.db.trabajo(s['trabajo_id']) if s.get('trabajo_id') else None
+        if trabajo_radar and trabajo_radar.get('origen') == 'radar_populares':
+            control.permiso_publicar = lambda: bool(self.cfg['radar_populares'] and
+                not (self.db.cuenta(s['cuenta_id']) or {}).get('monetizada', True))
+            if not control.permiso_publicar():
+                self.db.marcar_subida(s['id'], 'pendiente', error='Populares en pausa o cuenta monetizada. No se publicará este clip.')
+                return
         mod = POR_NOMBRE[cuenta["plataforma"]]
         nombre = f"{mod.NOMBRE} · {cuenta['nombre']}"
         if not os.path.isfile(s["archivo"]):
@@ -1039,6 +1108,21 @@ class Motor:
             self._aviso_subida(s, 'archivo_ausente', 'El archivo del clip ya no existe en la PC.', 'errores', True)
             return
         calidad = self.calidad_subida(s['id'])
+        if cuenta['plataforma'] == 'tiktok' and cuenta.get('monetizada'):
+            from calidad_video import bloqueos_monetizacion
+            motivos = bloqueos_monetizacion(calidad)
+            if not motivos:
+                try:
+                    duplicado = self.db.conflicto_archivo_monetizado(s['id'])
+                    if duplicado:
+                        motivos.append(duplicado)
+                except OSError:
+                    motivos.append('No se pudo comprobar la huella del archivo.')
+            if motivos:
+                mensaje = 'Controles de cuenta monetizada: ' + ' '.join(motivos)
+                self.db.marcar_subida(s['id'], 'error', error=mensaje)
+                self._aviso_subida(s, 'monetizacion', mensaje, 'errores', True)
+                return
         for aviso in calidad.get('advertencias', []) + calidad.get('origen', {}).get('advertencias', []):
             self.log('Calidad: ' + aviso)
         control.comprobar()

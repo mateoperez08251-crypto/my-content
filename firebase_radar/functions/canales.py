@@ -212,6 +212,38 @@ def youtube(texto, leer):
     return youtube_paginas(ref, cid, leer)
 
 
+def fecha_publicacion(item):
+    try:
+        fecha = datetime.fromisoformat(str(item.get('published', '')).replace('Z', '+00:00'))
+        return fecha.timestamp() if fecha.tzinfo is not None else 0
+    except (ValueError, TypeError, OverflowError):
+        return 0
+
+
+def clave_evento(item):
+    clave = f"{item.get('platform', 'youtube')}:{item.get('id')}"
+    if item.get('radar_modo') in ('actual', 'popular') and item.get('radar_cuenta'):
+        clave += f":{item['radar_modo']}:{int(item['radar_cuenta'])}"
+    return clave
+
+
+def solo_actuales(items):
+    """Una sola publicación de YouTube por dueño, según fecha real, no orden del feed."""
+    otros, ultimos = [], {}
+    for item in items:
+        if item.get('platform') != 'youtube':
+            otros.append(item)
+            continue
+        fecha = fecha_publicacion(item)
+        clave = item.get('channel_id') or item.get('source_channel') or item.get('channel')
+        if not clave or not fecha:
+            continue
+        anterior = ultimos.get(clave)
+        if anterior is None or fecha > fecha_publicacion(anterior):
+            ultimos[clave] = item
+    return otros + list(ultimos.values())
+
+
 def _videos_pestana(texto):
     """Solo tarjetas de la pestaña seleccionada, nunca recomendaciones del HTML."""
     for data in Pagina(texto).datos():

@@ -228,8 +228,21 @@ def radar_monitor():
 
 def _entregar(store, cfg):
     from bot import motor as bot_motor
+    ultimos = _load_state().get('ultimos_youtube', {})
     for evento in store.pendientes():
         item, tareas = evento['item'], evento['tareas']
+        motor_actual = bot_motor.obtener()
+        if (motor_actual and motor_actual.cfg.get('radar_populares_configurado')
+                and item.get('platform') == 'youtube' and not item.get('radar_modo')):
+            store.guardar(evento, 'omitido', 'Detección anterior a la separación por cuenta. Se usa la selección actual de cada radar.')
+            continue
+        ultima = ultimos.get(item.get('channel_id')) if item.get('platform') == 'youtube' and item.get('radar_modo') != 'popular' else None
+        if ultima and item.get('id') != ultima.get('id'):
+            for tarea, valor in tareas.items():
+                if valor == 'pendiente':
+                    store.confirmar(evento, tarea, 'omitido')
+            store.guardar(evento, 'omitido', 'Hay una publicación más reciente del canal. Solo se procesa la actual.', evento['trabajo_id'])
+            continue
         if not canales.permitido(item, cfg):
             store.guardar(evento, 'retirado', 'El canal ya no está en la lista activa.')
             continue
@@ -239,6 +252,8 @@ def _entregar(store, cfg):
             motor = bot_motor.obtener()
             if not motor or not motor.cfg.get('radar_auto'):
                 estado, detalle = 'esperando_bot', 'Activa Radar automático en Bot para editar estos videos.'
+            elif item.get('radar_modo') == 'popular' and not motor.cfg.get('radar_populares'):
+                estado, detalle = 'esperando_bot', 'Radar de populares en pausa. La entrega se conserva.'
             else:
                 try:
                     bot_motor.desde_radar(item)
@@ -292,6 +307,7 @@ def _radar_monitor():
         plats = _plataformas_a_consultar(cfg.get("radar_platform") or "all")
         state = _load_state()
         seen = state.get('seen', {})
+        ultimos = state.setdefault('ultimos_youtube', {})
         for handle in channels:
             try:
                 items = _dispatch(handle, plats)
@@ -300,15 +316,31 @@ def _radar_monitor():
                     store.canal(handle, 'sin_resultados', 'No se pudieron confirmar publicaciones. Revisa el perfil y la conexión.')
                     continue
                 # No depender del orden del feed para distinguir novedades.
-                for it in sorted(validos, key=lambda x: x.get('published', ''), reverse=True):
+                for it in canales.solo_actuales(validos):
+                    if it.get('platform') == 'youtube':
+                        cid = it.get('channel_id')
+                        anterior = ultimos.get(cid, {})
+                        fecha = canales.fecha_publicacion(it)
+                        if fecha < anterior.get('fecha', 0):
+                            continue
+                        if fecha == anterior.get('fecha') and it['id'] != anterior.get('id'):
+                            continue
+                        ultimos[cid] = {'id': it['id'], 'fecha': fecha}
                     it = {**it, 'seguir_desde': cfg.get('radar_desde_canales', {}).get(
                         canales.canal(handle, cfg.get('radar_platform')).url, 0)}
                     key = f"{it['platform']}:{it['id']}"
-                    nuevo = store.registrar(it, cfg, conocido=key in seen)
-                    if nuevo and key not in seen:
-                        nuevos += 1
-                        _log(f"NUEVO {it['channel']}: {it['title'][:80]}")
-                    seen[key] = int(time.time())
+                    from bot import motor as bot_motor
+                    motor = bot_motor.obtener()
+                    entregas = [it]
+                    if motor and motor.cfg.get('radar_populares_configurado') and it.get('platform') == 'youtube':
+                        entregas = [{**it, 'radar_modo': 'actual', 'radar_cuenta': cid}
+                                    for cid in motor.destinos_radar(it)]
+                    for entrega in entregas:
+                        nuevo = store.registrar(entrega, cfg, conocido=key in seen)
+                        if nuevo and key not in seen:
+                            nuevos += 1
+                            _log(f"NUEVO {it['channel']}: {it['title'][:80]}")
+                        seen[key] = int(time.time())
                 store.canal(handle, 'ok', 'Canal revisado; consulta las entregas debajo.', len(validos))
             except Exception:
                 store.canal(handle, 'error', 'No se pudo consultar este canal. Se reintentará; los demás siguen.')
@@ -318,6 +350,7 @@ def _radar_monitor():
         state['seen'] = {k: v for k, v in seen.items() if v > corte}
         _save_state(state)
         _entregar(store, _config())
+        _radar_populares(store, cfg, state)
         store.ronda(intervalo=_interval_seconds(cfg))
         return nuevos
     except Exception:
@@ -325,6 +358,43 @@ def _radar_monitor():
         raise
     finally:
         store.close()
+
+
+def _radar_populares(store, cfg, state):
+    from bot import motor as bot_motor
+    from firebase_radar import populares
+    motor = bot_motor.obtener()
+    if not motor or not motor.cfg.get('radar_populares') or not motor.cfg.get('radar_auto'):
+        return
+    turnos = state.setdefault('turnos_populares', {})
+    conocidos = motor.db.fuentes_radar_conocidas()
+    for handle in sorted(cfg.get('channels', []), key=lambda h: turnos.get(h, 0)):
+        ref = canales.canal(handle, cfg.get('radar_platform'))
+        if not ref or ref.plataforma != 'youtube':
+            continue
+        info = {'platform': 'youtube', 'source_channel': ref.url,
+                'channel_id': _yt_channel_id(ref.url)}
+        destinos = motor.destinos_radar(info, popular=True, solo_libres=True)
+        if not destinos:
+            store.canal(handle + '#populares', 'esperando', 'Sin cuentas no monetizadas libres en esta regla. No se añaden más videos.')
+            continue
+        try:
+            item = populares.buscar(ref.url, _leer_publico,
+                                    lambda vid: 'youtube:' + vid in conocidos,
+                                    continuar=lambda: bool(motor.cfg.get('radar_populares')))
+            if not item:
+                store.canal(handle + '#populares', 'en_espera', 'Radar pausado o sin más videos nuevos en el ranking disponible.')
+                continue
+            for cid in destinos:
+                entrega = {**item, 'radar_cuenta': cid}
+                store.registrar(entrega, {**cfg, 'radar_email_notify': False, 'radar_whatsapp_notify': False}, conocido=True)
+            turnos[handle] = time.time()
+            _save_state(state)
+            _entregar(store, cfg)
+            conocidos.add('youtube:' + item['id'])
+            store.canal(handle + '#populares', 'ok', 'Popular elegido: ' + item['title'][:150], 1)
+        except Exception as exc:
+            store.canal(handle + '#populares', 'error', 'No se pudo consultar el ranking de populares (' + type(exc).__name__ + '). Se reintentará.')
 
 
 def _interval_seconds(cfg: dict) -> int:

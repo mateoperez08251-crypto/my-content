@@ -329,6 +329,7 @@ class Cola(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "No encontré Brave"):
                 self.m.abrir_login(self.tk, espera_s=5)
 
+    @unittest.skipIf(os.name == 'nt', 'Esta prueba usa un ejecutable simulado /bin/sh; el panel se comprueba con Edge en Windows.')
     def test_login_abre_el_navegador_normal(self):
         exe = os.path.join(self.tmp.name, "brave")
         pathlib.Path(exe).write_text("#!/bin/sh\necho \"$@\" > \"$0.args\"\nsleep 1\n")
@@ -359,7 +360,7 @@ class Cola(unittest.TestCase):
         self.m.encolar("https://youtu.be/x", cuentas=[self.tk])
         self._vaciar()
         self.assertEqual(len(PlataformaFalsa.llamadas), 1)
-        self.assertIn("esperando su turno", self.m._motivo_espera())
+        self.assertIn("límite diario", self.m._motivo_espera())
 
     def test_espera_si_la_app_esta_ocupada(self):
         self.ocupado = True
