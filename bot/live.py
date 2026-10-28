@@ -160,17 +160,23 @@ def resolve_live(url):
         if parsed.scheme != 'https' or not (host.endswith('.googlevideo.com') or host in ('youtube.com','www.youtube.com')):
             raise LiveError('YouTube no devolvió una señal HTTPS compatible para capturar.')
         # MKV admite VP9/AV1 y Opus sin recodificar durante la captura.
-        vcodec, acodec = item.get('vcodec', 'none'), item.get('acodec', 'none')
-        if vcodec != 'none' and not vcodec.startswith(('avc1', 'h264', 'hev1', 'hvc1', 'hevc', 'vp9', 'vp09', 'av01', 'av1')):
+        vcodec, acodec = item.get('vcodec') or '', item.get('acodec') or ''
+        tiene_video = (vcodec not in ('', 'none') or (not vcodec and (
+            item.get('video_ext') not in (None, 'none') or bool(item.get('width') and item.get('height')))))
+        tiene_audio = (acodec not in ('', 'none') or (not acodec and (
+            item.get('audio_ext') not in (None, 'none') or item.get('resolution') == 'audio only')))
+        if tiene_video and vcodec and not vcodec.startswith(('avc1', 'h264', 'hev1', 'hvc1', 'hevc', 'vp9', 'vp09', 'av01', 'av1')):
             raise LiveError('La señal usa un códec no compatible con la captura ligera. Prueba otro live.')
-        if acodec != 'none' and not acodec.startswith(('mp4a', 'aac', 'mp3', 'opus', 'vorbis')):
+        if tiene_audio and acodec and not acodec.startswith(('mp4a', 'aac', 'mp3', 'opus', 'vorbis')):
             raise LiveError('El audio de esa señal no es compatible con la captura ligera.')
         headers = {k: str(v).replace('\r','').replace('\n','') for k,v in
                    (item.get('http_headers') or info.get('http_headers') or {}).items()
                    if k.lower() in ('user-agent', 'referer', 'origin')}
-        container = 'mp4' if ((vcodec == 'none' or vcodec.startswith(('avc1','h264','hev1','hvc1','hevc')))
-                              and (acodec == 'none' or acodec.startswith(('mp4a','aac','mp3')))) else 'matroska'
-        streams.append({'url':address, 'headers':headers, 'video':vcodec != 'none', 'audio':acodec != 'none',
+        # Un códec no informado no equivale a pista ausente. MKV permite copiar
+        # esa señal y comprobar el audio real al cerrar el primer segmento.
+        container = 'mp4' if ((not tiene_video or vcodec.startswith(('avc1','h264','hev1','hvc1','hevc')))
+                              and (not tiene_audio or acodec.startswith(('mp4a','aac','mp3')))) else 'matroska'
+        streams.append({'url':address, 'headers':headers, 'video':tiene_video, 'audio':tiene_audio,
                         'container': container})
     if not any(x['video'] for x in streams):
         raise LiveError('No se encontró una pista de video para el live.')
