@@ -22,6 +22,18 @@ URL = 'https://www.youtube.com/watch?v=example'
 
 
 class Validation(unittest.TestCase):
+    def test_no_inicia_captura_si_youtube_solo_devolvio_video(self):
+        info = dict(live_status='is_live', id='example', title='Video sin audio',
+                    url='https://r1.googlevideo.com/video', vcodec='avc1', acodec='none')
+        manager = Mock()
+        manager.__enter__ = Mock(return_value=manager)
+        manager.__exit__ = Mock(return_value=False)
+        manager.extract_info.return_value = info
+        with patch.dict(sys.modules, {'yt_dlp':SimpleNamespace(YoutubeDL=lambda opts: manager),
+                                     'yt_downloader':SimpleNamespace(opciones_base=lambda: {})}):
+            with self.assertRaisesRegex(live.LiveError, 'captura silenciosa'):
+                live.resolve_live(URL)
+
     def test_vp9_opus_live_uses_mkv_with_stream_copy(self):
         info = dict(live_status='is_live', id='example', title='Live VP9',
                     requested_formats=[dict(url='https://r1.googlevideo.com/video', vcodec='vp9', acodec='none'),

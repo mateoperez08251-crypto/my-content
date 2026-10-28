@@ -215,19 +215,11 @@ def transcribir(video, inicio=None, fin=None, modelo="whisper-large-v3", idioma=
         return _transcribir_local(video, inicio, fin, idioma, python_local, script_local, modelo_local, progreso)
     tmp = tempfile.mkdtemp(prefix="smart_audio_")
     audio = os.path.join(tmp, "audio.m4a")
-    cmd = [_ffmpeg(), "-y", "-loglevel", "error"]
-    if inicio is not None:
-        cmd += ["-ss", str(inicio)]
-    if fin is not None:
-        cmd += ["-to", str(fin)]
-    cmd += ["-i", video, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "aac", "-b:a", "32k", audio]
-    subprocess.run(cmd, capture_output=True, creationflags=SIN_VENTANA)
     try:
-        if not os.path.exists(audio) or os.path.getsize(audio) < 1000:
-            raise RuntimeError("No se pudo extraer el audio del video (¿el archivo no tiene audio?).")
+        duracion_audio = _extraer_audio_transcripcion(video, audio, inicio, fin)
         # Partir en trozos de 20 min: sin límite de duración del video.
         trozos = [audio]
-        if _duracion(audio) > TROZO_AUDIO + 60:
+        if duracion_audio > TROZO_AUDIO + 60:
             patron = os.path.join(tmp, "trozo_%03d.m4a")
             subprocess.run([_ffmpeg(), "-y", "-loglevel", "error", "-i", audio, "-f", "segment",
                             "-segment_time", str(TROZO_AUDIO), "-c", "copy", patron],
@@ -256,6 +248,54 @@ def transcribir(video, inicio=None, fin=None, modelo="whisper-large-v3", idioma=
             os.rmdir(tmp)
         except OSError:
             pass
+
+
+def _fallo_extraccion_audio(stderr):
+    """Mensajes fijos: no exponer rutas privadas ni la salida cruda de FFmpeg."""
+    texto = stderr.decode('utf-8', 'replace') if isinstance(stderr, bytes) else str(stderr or '')
+    texto = texto.lower()
+    if 'matches no streams' in texto or 'does not contain any stream' in texto:
+        return 'El archivo guardado no contiene una pista de audio. Revisa la captura del live; todavía no se ha enviado nada a Groq.'
+    if 'no such file' in texto:
+        return 'El archivo del segmento ya no está disponible para extraer su audio. No es un fallo de Groq.'
+    if 'no space left' in texto:
+        return 'No hay espacio en disco para preparar el audio. No se ha enviado nada a Groq.'
+    if 'permission denied' in texto:
+        return 'No se pudo acceder al archivo o a la carpeta temporal para extraer el audio. No es un fallo de Groq.'
+    if any(x in texto for x in ('invalid data found', 'moov atom not found', 'error opening input')):
+        return 'FFmpeg no pudo leer el segmento: puede estar incompleto o dañado. No se ha enviado nada a Groq.'
+    return 'FFmpeg falló al preparar el audio del segmento. Comprueba que el archivo se pueda reproducir con sonido. No se ha enviado nada a Groq.'
+
+
+def _extraer_audio_transcripcion(video, audio, inicio=None, fin=None):
+    start = float(inicio or 0)
+    duration = None if fin is None else float(fin) - start
+    if start < 0 or (duration is not None and duration <= 0):
+        raise RuntimeError('El tramo solicitado para transcribir no tiene una duración válida.')
+    for preciso in (False, True):
+        cmd = [_ffmpeg(), '-nostdin', '-y', '-loglevel', 'error']
+        if start and not preciso:
+            cmd += ['-ss', str(start)]
+        cmd += ['-i', video]
+        if start and preciso:
+            # Respaldo para segmentos cuyo índice de búsqueda no es fiable.
+            cmd += ['-ss', str(start)]
+        if duration is not None:
+            cmd += ['-t', str(duration)]
+        cmd += ['-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000',
+                '-c:a', 'aac', '-b:a', '32k', audio]
+        result = subprocess.run(cmd, capture_output=True, creationflags=SIN_VENTANA)
+        if result.returncode == 0 and os.path.isfile(audio) and os.path.getsize(audio) > 0:
+            duracion = _duracion(audio)
+            if duracion > 0:
+                return duracion
+        stderr = result.stderr or b''
+        texto = stderr.decode('utf-8', 'replace') if isinstance(stderr, bytes) else str(stderr)
+        if result.returncode and ('matches no streams' in texto.lower() or not start or preciso):
+            raise RuntimeError(_fallo_extraccion_audio(stderr))
+        if not start or preciso:
+            raise RuntimeError('El tramo guardado no contiene audio utilizable en el intervalo elegido. Revisa el segmento y sus tiempos. No se ha enviado nada a Groq.')
+    raise RuntimeError('No se pudo preparar el audio; no se ha enviado nada a Groq.')
 
 
 # ---------------------------------------------------------------------------
