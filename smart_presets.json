@@ -273,7 +273,7 @@
   },
   "casa 3": {
     "anti_copyright_filter": false,
-    "clip_duration": 70.0,
+    "clip_duration": 30.0,
     "clip_selection": "ai",
     "context_before_seconds": 8.0,
     "download_quality": "best",
@@ -286,7 +286,7 @@
     "moment_query": "",
     "motor_ia": "pro",
     "normalize_audio": true,
-    "num_clips": 5,
+    "num_clips": 10,
     "original_volume": 1,
     "show_subtitles": true,
     "skip_intro_seconds": 180.0,
