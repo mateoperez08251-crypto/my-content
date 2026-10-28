@@ -11,6 +11,19 @@ SECRET = 'Cookie: session=secreto https://r1.googlevideo.com/video?token=firma-s
 
 
 class AccessErrors(unittest.TestCase):
+    def test_youtube_base_allows_official_ejs_fallback(self):
+        import yt_downloader
+        with patch.object(yt_downloader, 'ruta_cookies', return_value=None):
+            opts = yt_downloader.opciones_base()
+        self.assertEqual(opts['remote_components'], ['ejs:github'])
+
+    def test_stale_deno_path_can_fall_back_to_node(self):
+        import yt_downloader
+        with patch.dict(sys.modules, {'deno': SimpleNamespace(find_deno_bin=lambda: 'not-existing-runtime.exe')}), \
+             patch.object(yt_downloader.os.path, 'isfile', return_value=False), \
+             patch.object(yt_downloader.shutil, 'which', side_effect=lambda name: 'node.exe' if name == 'node' else None):
+            self.assertEqual(yt_downloader._js_runtimes(), {'node': {}})
+
     def error(self, message, *, cookies=False, warning=None):
         def factory(opts):
             self.opts = opts
