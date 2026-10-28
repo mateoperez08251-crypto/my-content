@@ -280,7 +280,7 @@
     "dubbing_language": "original",
     "efectos": false,
     "emojis": false,
-    "encuadre": "difuminado",
+    "encuadre": "caras",
     "export_profile": "quality",
     "moment_focus": "general",
     "moment_query": "",
@@ -295,7 +295,7 @@
     "subtitle_scale": 80.0,
     "transcripcion": "groq",
     "upscale": "off",
-    "video_format": "vertical_blur",
+    "video_format": "vertical",
     "whisper_local": "large-v3"
   },
   "cuenta_10": {
