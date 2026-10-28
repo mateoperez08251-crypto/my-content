@@ -109,7 +109,7 @@ class Queue(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.motor = Motor(self.tmp.name, log=lambda m: None)
         self.account = self.motor.db.crear_cuenta('Propia', 'youtube')
-        self.manager = live.LiveManager(self.motor, background=False)
+        self.manager = live.LiveManager(self.motor, background=False, auditor=lambda _: 'listo')
         self.motor._lives = self.manager
 
     def tearDown(self):
@@ -171,7 +171,7 @@ class Queue(unittest.TestCase):
     def test_recovery_idempotent_only_closed_and_cleanup_after_processing(self):
         jid, folder = self.seed('capturando')
         self.manager.close()
-        self.manager = live.LiveManager(self.motor, background=False)
+        self.manager = live.LiveManager(self.motor, background=False, auditor=lambda _: 'listo')
         self.manager.reconcile()
         tasks = self.motor.db.trabajos_recientes()
         self.assertEqual(len(tasks), 1)
@@ -325,6 +325,7 @@ class Queue(unittest.TestCase):
         self.assertIn('todavía no empieza', self.manager.state()['lives'][0]['detalle'])
 
     def test_real_ffmpeg_enqueues_before_source_ends_and_flushes_tail(self):
+        self.manager.auditor = lambda archivo: live.comprobar_audio(archivo, self.manager.ffmpeg)
         import imageio_ffmpeg
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         fixture = str(Path(self.tmp.name, 'source.mp4'))
