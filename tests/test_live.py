@@ -22,6 +22,26 @@ URL = 'https://www.youtube.com/watch?v=example'
 
 
 class Validation(unittest.TestCase):
+    def test_audio_hls_234_sin_nombre_de_codec_no_se_descarta(self):
+        for codec in ('ausente', None):
+            audio = dict(format_id='234',url='https://r1.googlevideo.com/audio',vcodec='none',
+                         audio_ext='mp4',video_ext='none',resolution='audio only')
+            if codec is None:
+                audio['acodec'] = None
+            info = dict(live_status='is_live',id='example',title='Live',requested_formats=[
+                dict(url='https://r1.googlevideo.com/video',vcodec='avc1.4D4020',acodec='none'),audio])
+            manager = Mock()
+            manager.__enter__ = Mock(return_value=manager)
+            manager.__exit__ = Mock(return_value=False)
+            manager.extract_info.return_value = info
+            with patch.dict(sys.modules, {'yt_dlp':SimpleNamespace(YoutubeDL=lambda opts: manager),
+                                         'yt_downloader':SimpleNamespace(opciones_base=lambda: {})}):
+                result = live.resolve_live(URL)
+            self.assertTrue(result['streams'][0]['video'])
+            self.assertTrue(result['streams'][1]['audio'])
+            cmd = live.ffmpeg_command('ffmpeg',result['streams'],'folder','aabbccdd',60)
+            self.assertIn('1:a:0',cmd)
+
     def test_no_inicia_captura_si_youtube_solo_devolvio_video(self):
         info = dict(live_status='is_live', id='example', title='Video sin audio',
                     url='https://r1.googlevideo.com/video', vcodec='avc1', acodec='none')
