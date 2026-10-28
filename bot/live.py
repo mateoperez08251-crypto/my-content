@@ -174,6 +174,8 @@ def resolve_live(url):
                         'container': container})
     if not any(x['video'] for x in streams):
         raise LiveError('No se encontró una pista de video para el live.')
+    if not any(x['audio'] for x in streams):
+        raise LiveError('YouTube devolvió video sin una pista de audio. No se iniciará una captura silenciosa; comprueba el enlace del live.', retryable=False)
     return {'id':str(info.get('id', '')), 'title':str(info.get('title', 'YouTube Live'))[:160], 'streams':streams}
 
 
