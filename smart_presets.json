@@ -191,7 +191,10 @@
     "transcripcion": "groq",
     "upscale": "off",
     "video_format": "vertical",
-    "whisper_local": "large-v3"
+    "whisper_local": "large-v3",
+    "moment_focus": "general",
+    "context_before_seconds": 8.0,
+    "moment_query": ""
   },
   "el mañanero": {
     "anti_copyright_filter": false,
@@ -263,7 +266,10 @@
     "transcripcion": "groq",
     "upscale": "off",
     "video_format": "vertical",
-    "whisper_local": "large-v3"
+    "whisper_local": "large-v3",
+    "moment_focus": "general",
+    "context_before_seconds": 8.0,
+    "moment_query": ""
   },
   "casa 3": {
     "anti_copyright_filter": false,
