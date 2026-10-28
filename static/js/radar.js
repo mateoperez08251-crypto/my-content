@@ -129,7 +129,13 @@ async function cargarEstadoRadar() {
             b.modo === 'solo_preparar' ? 'El bot edita y guarda. La publicación está en pausa por el modo elegido.' : 'Bot disponible para procesar videos.';
         const canales = (data.canales || []).map(c => '<li><b>' + radarEsc(c.canal) + '</b><br>' +
             radarEsc(c.estado) + ' · ' + radarEsc(radarFecha(c.revision)) + '<br>' + radarEsc(c.detalle) +
+            (c.populares ? '<br>Populares: ' + radarEsc(c.populares.detalle) : '') +
             (c.destinos === 0 ? '<br><strong>Falta una regla con cuentas de destino en Bot.</strong>' : '') + '</li>').join('');
+        const populares = document.getElementById('radar-populares');
+        if (populares && !populares.disabled) {
+            populares.dataset.activo = b.populares_activo ? '1' : '0';
+            populares.textContent = b.populares_activo ? 'Pausar radar de populares' : 'Iniciar radar de populares';
+        }
         const eventos = (data.eventos || []).map(e => '<li><b>' + radarEsc(e.titulo) + '</b><br>' +
             radarEsc(e.canal) + '<br>Entrega: ' + radarEsc(e.estado) +
             (e.trabajo_estado ? ' · Bot: ' + radarEsc(e.trabajo_estado) : '') + '<br>' +
@@ -158,4 +164,19 @@ async function revisarRadarAhora() {
         await cargarEstadoRadar();
     } catch (error) { radarEstado(error.message, true); }
     finally { button.disabled = false; }
+}
+
+async function alternarRadarPopulares() {
+    const boton = document.getElementById('radar-populares');
+    const activo = boton.dataset.activo !== '1';
+    boton.disabled = true;
+    try {
+        const res = await fetch('/api/radar/populares', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({activo})});
+        const data = await res.json();
+        if (!res.ok || !data.success) throw Error(data.message || 'No se pudo cambiar el radar de populares.');
+        boton.dataset.activo = data.activo ? '1' : '0';
+        boton.textContent = data.activo ? 'Pausar radar de populares' : 'Iniciar radar de populares';
+        radarEstado(data.message);
+    } catch(error) { radarEstado(error.message,true); }
+    finally { boton.disabled = false; }
 }

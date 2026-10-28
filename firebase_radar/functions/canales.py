@@ -220,6 +220,13 @@ def fecha_publicacion(item):
         return 0
 
 
+def clave_evento(item):
+    clave = f"{item.get('platform', 'youtube')}:{item.get('id')}"
+    if item.get('radar_modo') in ('actual', 'popular') and item.get('radar_cuenta'):
+        clave += f":{item['radar_modo']}:{int(item['radar_cuenta'])}"
+    return clave
+
+
 def solo_actuales(items):
     """Una sola publicación de YouTube por dueño, según fecha real, no orden del feed."""
     otros, ultimos = [], {}

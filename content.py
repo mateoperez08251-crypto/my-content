@@ -2027,6 +2027,7 @@ def radar_estado():
             store.close()
         motor = bot_motor.obtener()
         data['bot'] = {'disponible': bool(motor), 'automatico': bool(motor and motor.cfg['radar_auto']),
+                       'populares_activo': bool(motor and motor.cfg.get('radar_populares')),
                        'activo': bool(motor and motor.cfg['activo']),
                        'modo': motor.cfg['modo_cola'] if motor else ''}
         if motor:
@@ -2044,6 +2045,19 @@ def radar_estado():
         return jsonify({'success': True, **data})
     except Exception:
         return jsonify({'success': False, 'message': 'No se pudo leer el estado del Radar. Revisa configuración y almacenamiento.'}), 500
+
+
+@app.route('/api/radar/populares', methods=['POST'])
+def radar_populares_control():
+    datos = request.get_json(silent=True) or {}
+    if type(datos.get('activo')) is not bool:
+        return jsonify({'success': False, 'message': 'Elige iniciar o pausar el radar de populares.'}), 400
+    motor = _bot()
+    motor.guardar_cfg({'radar_populares': datos['activo'], 'radar_populares_configurado': True})
+    from firebase_radar.local_radar import solicitar_revision
+    solicitar_revision()
+    return jsonify({'success': True, 'activo': datos['activo'],
+                    'message': 'Radar de populares iniciado.' if datos['activo'] else 'Radar de populares pausado. Su cola se conserva.'})
 
 
 @app.route('/api/radar/revisar', methods=['POST'])
@@ -2365,9 +2379,14 @@ def bot_cuenta_editar(cid):
     d = request.get_json(silent=True) or {}
     if request.method == "DELETE":
         return _bot_respuesta(lambda: _bot().db.borrar_cuenta(cid))
-    return _bot_respuesta(lambda: _bot().guardar_cuenta(cid, {
-        k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
-                                          "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin")}))
+    def guardar():
+        _bot().guardar_cuenta(cid, {
+            k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
+                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada")})
+        if 'monetizada' in d:
+            from firebase_radar.local_radar import solicitar_revision
+            solicitar_revision()
+    return _bot_respuesta(guardar)
 
 
 @app.route("/api/bot/cuentas/<int:cid>/cerrar", methods=["POST"])

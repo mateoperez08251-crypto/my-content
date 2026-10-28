@@ -32,7 +32,8 @@ class Seguimiento:
         self.db.close()
 
     def registrar(self, item, cfg, conocido=False):
-        clave = f"{item['platform']}:{item['id']}"
+        from .functions.canales import clave_evento
+        clave = clave_evento(item)
         tareas = {'bot': 'pendiente',
                   'bandeja': 'pendiente' if cfg.get('radar_inbox', True) and not conocido else 'desactivado',
                   'correo': 'pendiente' if cfg.get('radar_email_notify') and not conocido else 'desactivado',
@@ -97,6 +98,9 @@ class Seguimiento:
                      canal=item.get('source_channel', ''), channel_id=item.get('channel_id', ''),
                      tareas=json.loads(d['tareas']))
             salida.append(d)
+        for c in canales:
+            if c in estados:
+                estados[c]['populares'] = estados.get(c + '#populares')
         return {'servicio': servicio, 'canales': [estados.get(c, {'canal': c, 'estado': 'sin_revisar',
                 'detalle': 'Aún no se ha revisado en esta PC.', 'revision': 0, 'videos': 0}) for c in canales],
                 'eventos': salida, 'pendientes': self.db.execute(

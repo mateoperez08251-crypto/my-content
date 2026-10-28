@@ -400,18 +400,34 @@ class DB:
                                    for cid, ruta, texto in subidas])
             self._con.execute("UPDATE trabajos SET estado='listo',error='',actualizado=? WHERE id=?", (ahora, tid))
 
-    def siguiente_trabajo(self, excluir_live=False):
+    def siguiente_trabajo(self, excluir_live=False, excluir_populares=False):
         filtro = "AND origen!='live' " if excluir_live else ''
+        if excluir_populares:
+            filtro += "AND origen!='radar_populares' "
         return self._uno("SELECT * FROM trabajos WHERE estado='pendiente' AND proximo_intento<=? "
                          + filtro + "ORDER BY id LIMIT 1", (time.time(),))
 
-    def por_preparar(self, excluir_live=False):
+    def por_preparar(self, excluir_live=False, excluir_populares=False):
         filtro = " AND origen!='live'" if excluir_live else ''
+        if excluir_populares:
+            filtro += " AND origen!='radar_populares'"
         return self._uno("SELECT COUNT(*) AS n FROM trabajos WHERE estado IN "
                          "('pendiente','descargando','cortando')" + filtro)["n"]
 
     def esperando_remotos(self):
         return self._uno("SELECT COUNT(*) AS n FROM trabajos WHERE estado='esperando_remoto'")['n']
+
+    def fuentes_radar_conocidas(self):
+        from .identidad import fuente
+        fuentes = {fuente(r['url']) for r in self._todos("SELECT url FROM trabajos WHERE estado NOT IN ('omitido','sin_destino')")}
+        fuentes.update(r['fuente'] for r in self._todos('SELECT DISTINCT fuente FROM clip_historial'))
+        return fuentes
+
+    def cuenta_tiene_cola(self, cid):
+        for job in self._todos("SELECT cuentas FROM trabajos WHERE estado NOT IN ('listo','omitido','sin_destino')"):
+            if cid in job['cuentas']:
+                return True
+        return bool(self._uno("SELECT 1 FROM subidas WHERE cuenta_id=? AND estado!='ok' LIMIT 1", (cid,)))
 
     def reanudar_remotos(self):
         return self._q("UPDATE trabajos SET estado='pendiente',error='',proximo_intento=0,actualizado=? "

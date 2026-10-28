@@ -2366,6 +2366,8 @@
                     <h3 id="radar-seguimiento-titulo">Estado del Radar y de sus entregas</h3>
                     <p>La PC debe estar encendida para editar. Seguir un canal detecta sus videos; configura sus cuentas de destino en <a href="/bot">Bot → Reglas</a>. La nube revisa cada 30 minutos si está desplegada; la frecuencia elegida arriba corresponde a esta PC.</p>
                     <button type="button" id="radar-revisar" class="btn" onclick="revisarRadarAhora()">Revisar ahora</button>
+                    <button type="button" id="radar-populares" class="btn" data-activo="0" onclick="alternarRadarPopulares()">Iniciar radar de populares</button>
+                    <p>Populares usa el ranking histórico de YouTube y solo cuentas de TikTok no monetizadas de tus reglas. Al iniciarlo, las cuentas monetizadas siguen únicamente publicaciones recientes. Respeta la edición, horarios y cola de cada cuenta. Pausar conserva los trabajos; una publicación ya enviada a TikTok no se puede retirar con este botón.</p>
                     <div id="radar-diagnostico" aria-live="polite">Cargando estado…</div>
                 </section>
             </div>
