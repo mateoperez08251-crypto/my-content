@@ -140,7 +140,7 @@ def resolve_live(url):
     logger = QuietLogger()
     opts = dict(yt_downloader.opciones_base(), quiet=True, noplaylist=True,
                 socket_timeout=15, retries=1, extractor_retries=1, logger=logger, no_warnings=False,
-                format='best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720]/bestvideo[height<=720]+bestaudio/worstvideo+bestaudio/worst')
+                format='bestvideo[height<=720][vcodec^=avc1][protocol*=m3u8]+bestaudio[acodec^=mp4a][protocol*=m3u8]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/worstvideo+bestaudio/worst')
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -235,16 +235,33 @@ def stop_process(proc):
         proc.stdin.close()
 
 
+def comprobar_audio(archivo, ffmpeg):
+    """Decodifica una muestra local: una etiqueta AAC no prueba que haya audio real."""
+    cmd = [ffmpeg, '-nostdin', '-loglevel', 'error', '-i', str(archivo),
+           '-map', '0:a:0', '-vn', '-frames:a', '1', '-ac', '1', '-ar', '16000', '-f', 's16le', '-']
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=15,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.TimeoutExpired):
+        return 'audio_no_verificado'
+    if result.returncode == 0:
+        return 'listo' if result.stdout else 'sin_audio'
+    stderr = result.stderr.decode('utf-8', 'replace').lower()
+    return 'sin_audio' if 'matches no streams' in stderr else 'audio_no_verificado'
+
+
 class LiveManager:
-    def __init__(self, motor, resolver=resolve_live, ffmpeg=None, background=True):
+    def __init__(self, motor, resolver=resolve_live, ffmpeg=None, background=True, auditor=None):
         import imageio_ffmpeg
         self.motor, self.db, self.resolver = motor, motor.db, resolver
         self.ffmpeg = ffmpeg or imageio_ffmpeg.get_ffmpeg_exe()
+        self.auditor = auditor or (lambda archivo: comprobar_audio(archivo, self.ffmpeg))
         self.root = Path(motor.carpeta, 'live_segments').resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.stop_all = threading.Event()
         self.threads, self.events = {}, {}
+        self._audio_revisados = set()
         with self.db._lock, self.db._con:
             self.db._con.executescript(SCHEMA)
             self.db._con.execute("UPDATE live_sesiones SET estado='interrumpido',detalle='La app se reinició. Los segmentos cerrados siguen en cola; vuelve a iniciar la URL para continuar capturando.' WHERE estado IN ('conectando','capturando','reconectando','deteniendo')")
@@ -377,17 +394,27 @@ class LiveManager:
                                         stderr=subprocess.DEVNULL, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
                 import winproc
                 winproc.adjuntar_a_job(proc)
+                fallo_audio = False
                 try:
                     while proc.poll() is None:
-                        self._ingest(jid, manifest)
+                        if self._ingest(jid, manifest):
+                            fallo_audio = True
+                            break
                         self._space(cfg)
                         if event.wait(.25) or self.stop_all.is_set():
                             break
                 finally:
                     stop_process(proc)
-                    self._ingest(jid, manifest)
+                    fallo_audio = self._ingest(jid, manifest) or fallo_audio
                 if event.is_set() or self.stop_all.is_set():
                     break
+                if fallo_audio:
+                    if attempt == 3:
+                        raise LiveError('La señal guardó segmentos sin audio verificable tras varios intentos. No se enviaron esos segmentos a editar ni a Groq. Detén esta captura y vuelve a iniciar el enlace del live.', retryable=False)
+                    self._update(jid, 'reconectando', 'El segmento no tiene audio verificable. No lo envío a editar; vuelvo a resolver video y audio del live.')
+                    if event.wait(min(5 * (attempt + 1), 15)):
+                        break
+                    continue
                 if proc.returncode == 0:
                     try:
                         ready_info = self.resolver(url)
@@ -412,7 +439,19 @@ class LiveManager:
                          else 'Falló la captura del live. Revisa conexión, yt-dlp y FFmpeg.')
 
     def _ingest(self, jid, manifest):
+        fallo_audio = False
         for name, start, end in closed_segments(manifest):
+            anterior = self.db._uno('SELECT estado FROM live_segmentos WHERE sesion=? AND nombre=?', (jid, name))
+            if anterior:
+                if anterior['estado'] == 'listo' and (jid, name) not in self._audio_revisados:
+                    estado = self.auditor(str(Path(manifest).parent / name))
+                    if estado not in ('listo', 'sin_audio', 'audio_no_verificado'):
+                        estado = 'audio_no_verificado'
+                    self.db._q("UPDATE live_segmentos SET estado=? WHERE sesion=? AND nombre=? AND estado='listo'", (estado, jid, name))
+                    anterior['estado'] = estado
+                    self._audio_revisados.add((jid, name))
+                fallo_audio = fallo_audio or anterior['estado'] in ('sin_audio', 'audio_no_verificado')
+                continue
             file = Path(manifest).parent / name
             # La fila solo se crea si el archivo cerrado existe y tiene datos.
             try:
@@ -420,8 +459,14 @@ class LiveManager:
             except FileNotFoundError:
                 ready = False
             if ready:
-                self.db._q('INSERT OR IGNORE INTO live_segmentos(sesion,nombre,archivo,inicio,fin) VALUES(?,?,?,?,?)',
-                           (jid, name, str(file), start, end))
+                estado = self.auditor(str(file))
+                if estado not in ('listo', 'sin_audio', 'audio_no_verificado'):
+                    estado = 'audio_no_verificado'
+                fallo_audio = fallo_audio or estado != 'listo'
+                self.db._q('INSERT OR IGNORE INTO live_segmentos(sesion,nombre,archivo,inicio,fin,estado) VALUES(?,?,?,?,?,?)',
+                           (jid, name, str(file), start, end, estado))
+                self._audio_revisados.add((jid, name))
+        return fallo_audio
 
     def reconcile(self):
         with self.lock:

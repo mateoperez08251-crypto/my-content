@@ -651,7 +651,7 @@ async function cargarLives() {
     <td><a href="${esc(live.url)}" target="_blank" rel="noopener">${esc(live.titulo || 'YouTube Live')}</a>
       <div class="muted">${live.mode === 'ai' ? `IA: ${live.seconds} s por cada ${live.window} s` : `Partes de unos ${live.seconds} s`} · ${live.accounts.map(id => esc((E.cuentas || []).find(c => c.id === id)?.nombre || `Cuenta ${id}`)).join(', ')}</div></td>
     <td>${esc(live.estado)}<div class="muted">${esc(live.detalle)}</div></td>
-    <td>${live.segmentos.map(s => `${esc(s.estado)}: ${s.n}`).join('<br>') || 'Esperando el primer segmento'}</td>
+    <td>${live.segmentos.map(s => `${esc(({sin_audio:'Sin audio · no se edita',audio_no_verificado:'Audio no verificable · no se edita'})[s.estado] || s.estado)}: ${s.n}`).join('<br>') || 'Esperando el primer segmento'}</td>
     <td>${['conectando','capturando','reconectando','deteniendo'].includes(live.estado) ?
       `<button onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener captura</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No hay capturas. Elige cuentas y pega un live activo.</td></tr>';
 }
