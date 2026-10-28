@@ -53,7 +53,7 @@ def radar_monitor(event: scheduler_fn.ScheduledEvent) -> None:
         ref = canales.canal(valor, config.get('radar_platform', config.get('platform', 'all')))
         if not ref or ref.plataforma != 'youtube':
             continue
-        for video in fetch_youtube_rss(ref.url) or []:
+        for video in canales.solo_actuales(fetch_youtube_rss(ref.url) or []):
             try:
                 actual = config_ref.get().to_dict() or {}
                 if not actual.get('radar_cloud', actual.get('cloud', False)) or not canales.permitido(video, actual):

@@ -71,7 +71,7 @@ class EstadoRadar(unittest.TestCase):
         self.assertEqual(scope['get_inbox']()['videos'], locales)
         self.assertIn('advertencia', scope['get_inbox']())
 
-    def test_lector_firebase_recupera_mas_de_25_y_detectados_antes_del_arranque(self):
+    def test_lector_firebase_elige_la_actual_aunque_este_despues_de_25_anteriores(self):
         import paths
         m = Motor(self.tmp.name, log=lambda s: None)
         self.addCleanup(m.db._con.close)
@@ -82,7 +82,8 @@ class EstadoRadar(unittest.TestCase):
                 'channel_id': A, 'owner_verified': True, 'published': '', 'detected_at': SimpleNamespace(timestamp=lambda: 1)}
         docs = []
         for i in range(35):
-            d = {**item, 'id': str(i), 'url': 'https://example.test/video/' + str(i)}
+            d = {**item, 'id': str(i), 'url': 'https://example.test/video/' + str(i),
+                 'published': f'2026-10-27T10:00:{i:02d}Z'}
             docs.append(SimpleNamespace(id=str(i), to_dict=lambda d=d: d))
         db = Mock()
         db.collection.return_value.order_by.return_value.stream.return_value = docs
@@ -91,9 +92,10 @@ class EstadoRadar(unittest.TestCase):
         radar_config.guardar(configpath, self.cfg)
         cloud = SimpleNamespace(firestore=SimpleNamespace(Query=SimpleNamespace(ASCENDING='ASCENDING')))
         with patch.dict(sys.modules, {'google.cloud': cloud}), patch.object(paths, 'data_path', return_value=configpath):
-            self.assertEqual(m.revisar_firebase(), 35)
+            self.assertEqual(m.revisar_firebase(), 1)
             self.assertEqual(m.revisar_firebase(), 0)
-        self.assertEqual(len(m.db.trabajos_recientes(100)), 35)
+        self.assertEqual(len(m.db.trabajos_recientes(100)), 1)
+        self.assertEqual(m.db.trabajos_recientes()[0]['url'], 'https://example.test/video/34')
 
     def test_rutas_de_cola_delegan_datos_sin_modificar_otra_cuenta(self):
         motor = Mock()

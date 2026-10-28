@@ -10,6 +10,10 @@ from datetime import datetime
 PLATAFORMAS = ("tiktok", "youtube", "facebook")
 
 _ESQUEMA = """
+CREATE TABLE IF NOT EXISTS publicacion_huellas (
+    subida_id INTEGER PRIMARY KEY, huella TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_publicacion_huella ON publicacion_huellas(huella);
 CREATE TABLE IF NOT EXISTS cuentas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
@@ -106,6 +110,8 @@ class DB:
             cuentas = {r[1] for r in self._con.execute('PRAGMA table_info(cuentas)')}
             if 'preset_corte' not in cuentas:
                 self._con.execute("ALTER TABLE cuentas ADD COLUMN preset_corte TEXT NOT NULL DEFAULT ''")
+            if 'monetizada' not in cuentas:
+                self._con.execute('ALTER TABLE cuentas ADD COLUMN monetizada INTEGER NOT NULL DEFAULT 0')
             for campo, tipo in [('intervalo_horas', 'REAL'), ('hora_inicio', 'TEXT'), ('hora_fin', 'TEXT')]:
                 if campo not in cuentas:
                     self._con.execute(f'ALTER TABLE cuentas ADD COLUMN {campo} {tipo}')
@@ -174,8 +180,13 @@ class DB:
     def editar_cuenta(self, cid, **campos):
         from .ritmo import validar
         permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre", "preset_corte",
-                      "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin"}
+                      "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada"}
         sets = {k: v for k, v in campos.items() if k in permitidos}
+        if 'monetizada' in sets:
+            if type(sets['monetizada']) is not bool:
+                raise ValueError('Elige si activar los controles de cuenta monetizada.')
+            if sets['monetizada'] and self.cuenta(cid)['plataforma'] != 'tiktok':
+                raise ValueError('Estos controles se aplican a TikTok.')
         sets = validar(sets)
         # Un cambio de intervalo se cuenta desde la última publicación, sin borrar su historial.
         if 'intervalo_horas' in sets and 'proxima_libre' not in sets:
@@ -462,6 +473,22 @@ class DB:
                                   s['trabajo_id'], s['trabajo_id'], s['cuenta_id']))
             if anterior:
                 return 'Este tramo del video ya está asignado a otra cuenta. Prepara un fragmento nuevo.'
+        return ''
+
+    def conflicto_archivo_monetizado(self, sid):
+        """Huella de bytes reales: solo nuestro historial, nunca una búsqueda en TikTok."""
+        import hashlib
+        s = self.subida(sid)
+        with open(s['archivo'], 'rb') as stream:
+            huella = hashlib.file_digest(stream, 'sha256').hexdigest()
+        with self._lock, self._con:
+            anterior = self._con.execute(
+                "SELECT s.id FROM publicacion_huellas h JOIN subidas s ON s.id=h.subida_id "
+                "WHERE h.huella=? AND s.id!=? AND (s.estado IN ('ok','revisar') "
+                "OR (s.estado='subiendo' AND s.id<?)) LIMIT 1", (huella, sid, sid)).fetchone()
+            self._con.execute('INSERT OR REPLACE INTO publicacion_huellas VALUES(?,?)', (sid, huella))
+        if anterior:
+            return 'Cuenta monetizada: este archivo coincide con una publicación anterior del bot. No se publicará otra vez.'
         return ''
 
     def subida(self, sid):

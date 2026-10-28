@@ -228,8 +228,16 @@ def radar_monitor():
 
 def _entregar(store, cfg):
     from bot import motor as bot_motor
+    ultimos = _load_state().get('ultimos_youtube', {})
     for evento in store.pendientes():
         item, tareas = evento['item'], evento['tareas']
+        ultima = ultimos.get(item.get('channel_id')) if item.get('platform') == 'youtube' else None
+        if ultima and item.get('id') != ultima.get('id'):
+            for tarea, valor in tareas.items():
+                if valor == 'pendiente':
+                    store.confirmar(evento, tarea, 'omitido')
+            store.guardar(evento, 'omitido', 'Hay una publicación más reciente del canal. Solo se procesa la actual.', evento['trabajo_id'])
+            continue
         if not canales.permitido(item, cfg):
             store.guardar(evento, 'retirado', 'El canal ya no está en la lista activa.')
             continue
@@ -292,6 +300,7 @@ def _radar_monitor():
         plats = _plataformas_a_consultar(cfg.get("radar_platform") or "all")
         state = _load_state()
         seen = state.get('seen', {})
+        ultimos = state.setdefault('ultimos_youtube', {})
         for handle in channels:
             try:
                 items = _dispatch(handle, plats)
@@ -300,7 +309,16 @@ def _radar_monitor():
                     store.canal(handle, 'sin_resultados', 'No se pudieron confirmar publicaciones. Revisa el perfil y la conexión.')
                     continue
                 # No depender del orden del feed para distinguir novedades.
-                for it in sorted(validos, key=lambda x: x.get('published', ''), reverse=True):
+                for it in canales.solo_actuales(validos):
+                    if it.get('platform') == 'youtube':
+                        cid = it.get('channel_id')
+                        anterior = ultimos.get(cid, {})
+                        fecha = canales.fecha_publicacion(it)
+                        if fecha < anterior.get('fecha', 0):
+                            continue
+                        if fecha == anterior.get('fecha') and it['id'] != anterior.get('id'):
+                            continue
+                        ultimos[cid] = {'id': it['id'], 'fecha': fecha}
                     it = {**it, 'seguir_desde': cfg.get('radar_desde_canales', {}).get(
                         canales.canal(handle, cfg.get('radar_platform')).url, 0)}
                     key = f"{it['platform']}:{it['id']}"

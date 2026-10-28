@@ -97,6 +97,23 @@ def inspeccionar(archivo):
         return {'estado': 'no_disponible', 'advertencias': ['No se pudo comprobar la calidad del archivo. No se le atribuye resolución ni bitrate.']}
 
 
+def bloqueos_monetizacion(datos):
+    """Mínimos técnicos propios del bot. No certifican originalidad ni monetización."""
+    if datos.get('estado') != 'comprobado':
+        return ['No se pudo comprobar el archivo.']
+    errores = []
+    if (numero(datos.get('duracion')) or 0) < 61:
+        errores.append('El clip debe durar al menos 61 segundos.')
+    if min(numero(datos.get('ancho')) or 0, numero(datos.get('alto')) or 0) < 1080:
+        errores.append('El archivo debe tener al menos 1080 píxeles en su lado corto.')
+    if (numero(datos.get('fps')) or 0) < 24:
+        errores.append('El archivo debe tener al menos 24 fps.')
+    origen = datos.get('origen') or {}
+    if origen.get('ancho') and origen.get('alto') and min(origen['ancho'], origen['alto']) < 720:
+        errores.append('La fuente tiene menos de 720 píxeles en el lado corto; ampliarla no recupera detalle.')
+    return errores
+
+
 def filtrar_frame(frame, modo):
     """Filtro moderado antes de los textos y de la única exportación con pérdida.
 

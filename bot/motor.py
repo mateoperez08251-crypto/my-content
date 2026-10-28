@@ -547,11 +547,15 @@ class Motor:
         except radar_config.ErrorConfig:
             self.log('No pude verificar la lista del Radar. No añado videos de Firebase a la cola.')
             return 0
+        from firebase_radar.functions.canales import solo_actuales
+        candidatos = []
         for doc in docs:
             d = doc.to_dict() or {}
             if not permitido(d, radar_cfg):
                 continue
             d['id'] = d.get('id') or doc.id
+            candidatos.append(d)
+        for d in solo_actuales(candidatos):
             from firebase_radar.functions.canales import canal as referencia
             ref = referencia(d.get('source_channel'), d.get('platform'))
             d['seguir_desde'] = radar_cfg.get('radar_desde_canales', {}).get(ref.url, 0) if ref else 0
@@ -1039,6 +1043,21 @@ class Motor:
             self._aviso_subida(s, 'archivo_ausente', 'El archivo del clip ya no existe en la PC.', 'errores', True)
             return
         calidad = self.calidad_subida(s['id'])
+        if cuenta['plataforma'] == 'tiktok' and cuenta.get('monetizada'):
+            from calidad_video import bloqueos_monetizacion
+            motivos = bloqueos_monetizacion(calidad)
+            if not motivos:
+                try:
+                    duplicado = self.db.conflicto_archivo_monetizado(s['id'])
+                    if duplicado:
+                        motivos.append(duplicado)
+                except OSError:
+                    motivos.append('No se pudo comprobar la huella del archivo.')
+            if motivos:
+                mensaje = 'Controles de cuenta monetizada: ' + ' '.join(motivos)
+                self.db.marcar_subida(s['id'], 'error', error=mensaje)
+                self._aviso_subida(s, 'monetizacion', mensaje, 'errores', True)
+                return
         for aviso in calidad.get('advertencias', []) + calidad.get('origen', {}).get('advertencias', []):
             self.log('Calidad: ' + aviso)
         control.comprobar()
