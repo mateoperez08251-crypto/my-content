@@ -161,6 +161,33 @@ class RecoveryTests(unittest.TestCase):
             self.assertFalse(navegador.ocupado(profile))
             self.assertFalse(navegador.es_perfil_ocupado('exitCode=210'))
 
+    def test_launch_timeout_cleans_profile_and_retries_once(self):
+        with tempfile.TemporaryDirectory() as profile:
+            open(os.path.join(profile, 'lockfile'), 'w').close()
+            ctx = Mock()
+            pw = Mock()
+            pw.chromium.launch_persistent_context.side_effect = [
+                RuntimeError('BrowserType.launch_persistent_context: Timeout 180000ms exceeded.'), ctx]
+            @contextmanager
+            def manager():
+                yield pw
+            module = SimpleNamespace(sync_playwright=manager)
+            with patch.dict(sys.modules, {'playwright.sync_api': module, 'psutil': None}), \
+                 patch.object(navegador, 'buscar_navegador', return_value=('chrome', '/chrome')):
+                with navegador.abrir(profile) as abierto:
+                    self.assertIs(abierto, ctx)
+            self.assertEqual(pw.chromium.launch_persistent_context.call_count, 2)
+            self.assertFalse(os.path.exists(os.path.join(profile, 'lockfile')))
+            self.assertFalse(navegador.ocupado(profile))
+
+            pw.chromium.launch_persistent_context.side_effect = RuntimeError('Timeout 90000ms exceeded.')
+            with patch.dict(sys.modules, {'playwright.sync_api': module, 'psutil': None}), \
+                 patch.object(navegador, 'buscar_navegador', return_value=('chrome', '/chrome')):
+                with self.assertRaisesRegex(navegador.NavegadorNoArranca, 'no terminó de abrir'):
+                    with navegador.abrir(profile):
+                        pass
+            self.assertFalse(navegador.ocupado(profile))
+
 
 class VerificationTests(unittest.TestCase):
     def setUp(self):

@@ -17,7 +17,7 @@ from datetime import datetime
 from texto_publicacion import crear_publicacion, limpiar_titulo
 from firebase_radar.functions.canales import coincide, permitido
 
-from . import archivos, locales, navegador, remoto
+from . import archivos, cookies_auto, locales, navegador, remoto
 from .planificacion import estimar
 from .ritmo import horario, intervalo
 from .presets import NOMBRE_CALIDAD, snapshot
@@ -33,6 +33,7 @@ CONFIG_DEFECTO = {
     "radar_auto": True,      # lo que detecta el radar local entra solo a la cola
     "radar_populares": False,
     "radar_populares_configurado": False,
+    "monetizada_max_min": 60,  # cuentas monetizadas: solo videos publicados hace ≤ N minutos
     "firebase_auto": True,   # lo que detecta el radar de la nube (bandeja Firebase) también
     "gap_min": 25,           # minutos mínimos entre subidas de UNA misma cuenta
     "gap_max": 60,
@@ -52,6 +53,8 @@ CONFIG_DEFECTO = {
     "remoto_url": "",        # servidor de cortes (Colab con GPU); vacío = cortar en esta PC
     "remoto_clave": "",
     "remoto_respaldo_local": False,  # Sin GPU local: conservar la cola y esperar al servidor.
+    "cookies_auto": False,   # renovar cookies de YouTube desde el perfil del bot (tras conectarlo)
+    "cookies_auto_ultima": 0.0,
     "avisos_activos": True,
     "avisos_cola": True,
     "avisos_progreso": True,
@@ -135,6 +138,10 @@ class Motor:
         self._lives = None
         self._lives_lock = threading.Lock()
         self._ultimo_vigilar = 0.0
+        self._cookies_lock = threading.Lock()
+        self._cookies_estado = ''
+        self._cookies_intento = 0.0
+        self._cookies_bloqueo = 0.0
         self.db.reparar_al_arrancar()
         self._avisos = Avisos(self.db, self.notificar, lambda: self.cfg, self.log)
 
@@ -173,6 +180,8 @@ class Motor:
             raise ValueError('Elige entre 1 y 20 intentos.')
         if not 1 <= nueva['avisos_intervalo_min'] <= 60:
             raise ValueError('Agrupa los avisos entre 1 y 60 minutos.')
+        if not 5 <= nueva['monetizada_max_min'] <= 1440:
+            raise ValueError('La antigüedad máxima para cuentas monetizadas debe estar entre 5 y 1440 minutos.')
         if nueva['modo_cola'] not in ('preparar_primero', 'solo_preparar', 'solo_subir', 'alternar'):
             raise ValueError('Modo de cola no válido.')
         for k in ('hora_inicio', 'hora_fin'):
@@ -342,6 +351,7 @@ class Motor:
                 if self.cfg["firebase_auto"] and time.time() - self._ultimo_firebase > 120:
                     self._ultimo_firebase = time.time()
                     self.revisar_firebase()
+                self._cookies_periodicas()
                 if self.cfg['modo_cola'] != 'solo_subir' and self.cfg["remoto_url"] and time.time() - self._ultimo_vigilar > 300:
                     self._ultimo_vigilar = time.time()
                     self._vigilar_remoto()
@@ -515,7 +525,8 @@ class Motor:
                                     plataforma_origen=item.get('platform'), channel_id=item.get('channel_id', ''))
         anterior = self.db.trabajo_por_clave(clave)
         if anterior and (anterior['estado'] == 'sin_destino' or
-                         (anterior['estado'] == 'omitido' and not self._es_viejo(item))):
+                         (anterior['estado'] == 'omitido' and not self._es_viejo(item)
+                          and not str(anterior.get('error', '')).startswith('Cuenta monetizada'))):
             regla = self.destino_para(canal, item.get('platform'), item.get('channel_id', ''))
             if anterior['estado'] == 'omitido' or (regla and regla.get('cuentas')):
                 self.db.reabrir_radar(clave)
@@ -526,9 +537,46 @@ class Motor:
             if tid:
                 self.db.marcar_trabajo(tid, "omitido", "Video anterior: solo se sube lo nuevo.")
             return None
+        destinos = cuentas if modo_radar == 'actual' else (
+            self.destino_para(canal, item.get('platform'), item.get('channel_id', '')) or {}).get('cuentas') or []
+        if destinos:
+            permitidas, motivo = self._filtrar_monetizadas(item, destinos)
+            if not permitidas:
+                if not self.db.trabajo_por_clave(clave):
+                    tid = self.db.encolar_trabajo(url, origen, clave=clave, canal=canal, titulo=item.get('title', ''))
+                    if tid:
+                        self.db.marcar_trabajo(tid, 'omitido', motivo)
+                        self.log(f"Radar: {item.get('title', url)[:80]} — {motivo}")
+                return None
+            cuentas = permitidas
         return self.encolar(url, origen=origen, clave=clave, canal=canal, titulo=item.get("title", ""),
-                            cuentas=cuentas if modo_radar == 'actual' else None,
+                            cuentas=cuentas if destinos else None,
                             plataforma_origen=item.get('platform'), channel_id=item.get('channel_id', ''))
+
+    @staticmethod
+    def _edad_min(item):
+        """Minutos desde la publicación; None si la plataforma no da una fecha con zona horaria."""
+        try:
+            fecha = datetime.fromisoformat(str(item.get('published') or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        if fecha.tzinfo is None:
+            return None
+        return max(0.0, (time.time() - fecha.timestamp()) / 60)
+
+    def _filtrar_monetizadas(self, item, cuentas):
+        """Las cuentas monetizadas solo reciben videos muy recientes del radar."""
+        limite = self.cfg['monetizada_max_min']
+        edad = self._edad_min(item)
+        if edad is not None and edad <= limite:
+            return list(cuentas), ''
+        permitidas = [cid for cid in cuentas if not (self.db.cuenta(cid) or {}).get('monetizada')]
+        if edad is None:
+            motivo = 'Cuenta monetizada: no se pudo comprobar la hora de publicación; solo recibe videos verificados recientes.'
+        else:
+            motivo = (f'Cuenta monetizada: el video se publicó hace {duracion(edad * 60)}; '
+                      f'solo recibe videos de los últimos {limite} min.')
+        return permitidas, motivo
 
     def encolar_archivo(self, stream, nombre, clave, cuentas, plataforma, texto=''):
         nombre, extension, clave, cuentas, texto = locales.validar(nombre, clave, cuentas, plataforma, texto)
@@ -709,6 +757,8 @@ class Motor:
                 self.liberar()
             if self._edicion_cancelada():
                 raise remoto.CorteCancelado('Corte cancelado.') from e
+            if self._reintentar_con_cookies(t, e):
+                return
             intentos = t["intentos"] + 1
             if getattr(e, 'code', '') == 'sin_momentos' or intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
@@ -828,6 +878,8 @@ class Motor:
                 self.db.marcar_trabajo(t['id'], 'cortando', remoto_id=jid, remoto_url=self.cfg['remoto_url'])
             clips = cli.esperar_y_bajar(jid, carpeta, progreso, cancelar=self._edicion_cancelada)
         except (remoto.FalloTrabajo, OSError, ValueError) as e:
+            if self._reintentar_con_cookies(t, e):
+                return
             intentos = t["intentos"] + 1
             extra = {'remoto_id':'', 'remoto_url':''} if isinstance(e, remoto.FalloCorte) else {}
             if getattr(e, 'code', '') == 'sin_momentos' or intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
@@ -1311,6 +1363,137 @@ class Motor:
         self.log(f"Cerraste el navegador de {cuenta['nombre']}. Compruebo la sesión…")
         self.probar_sesion(cuenta["id"])
 
+    # -- cookies de YouTube automáticas ----------------------------------
+    def _perfil_youtube(self):
+        return cookies_auto.perfil(self.almacenamiento)
+
+    def sincronizar_cookies(self, motivo='manual'):
+        """Exporta las cookies del perfil de YouTube del bot a esta PC y a Colab."""
+        if not self._cookies_lock.acquire(blocking=False):
+            raise ValueError('Ya estoy renovando las cookies de YouTube. Espera un momento.')
+        self._cookies_intento = time.time()
+        try:
+            self._cookies_estado = 'Renovando cookies de YouTube…'
+            try:
+                texto = cookies_auto.extraer(self._perfil_youtube(), self.cfg['navegador'])
+            except cookies_auto.SinSesionYouTube as e:
+                self._cookies_estado = str(e)
+                if self.cfg['cookies_auto']:
+                    self.avisar('sistema', f'youtube_sesion:{datetime.now():%Y-%m-%d}',
+                                'Google cerró la sesión de YouTube del bot. Abre Cookies en el panel y pulsa '
+                                '«Conectar YouTube» para iniciar sesión otra vez.', True)
+                self.guardar_cfg({'cookies_auto': False})
+                raise ValueError(str(e)) from None
+            except navegador.PerfilOcupado:
+                self._cookies_estado = 'La ventana de YouTube del bot sigue abierta. Ciérrala para renovar las cookies.'
+                raise ValueError(self._cookies_estado) from None
+            except Exception as e:
+                # Nunca incluir valores: Playwright solo informa del arranque/navegación.
+                self._cookies_estado = f'No pude abrir el perfil de YouTube ({type(e).__name__}). Reintentaré más tarde.'
+                raise ValueError(self._cookies_estado) from None
+            from .cookies_descarga import guardar
+            guardar(os.path.join(self.carpeta, 'cookies_youtube.txt'), texto)
+            colab = False
+            detalle = 'Guardadas en esta PC'
+            if self.cfg['remoto_url'] and self.cfg['remoto_clave']:
+                cli = self._cliente_remoto()
+                try:
+                    cli.cookies_youtube('POST', texto)
+                    colab = True
+                    detalle += ' y en Colab'
+                except (remoto.ServidorCaido, ValueError) as e:
+                    detalle += f'; Colab no las recibió ({e})'
+                finally:
+                    cli.s.close()
+            self.guardar_cfg({'cookies_auto': True, 'cookies_auto_ultima': time.time()})
+            self._cookies_estado = f'{detalle} · {datetime.now():%d/%m %H:%M}.'
+            self.log(f'Cookies de YouTube renovadas ({motivo}): {detalle}.')
+            return {'colab': colab, 'mensaje': self._cookies_estado}
+        finally:
+            self._cookies_lock.release()
+
+    def _cookies_periodicas(self):
+        if not self.cfg['cookies_auto'] or navegador.login_abierto(self._perfil_youtube()):
+            return
+        ahora = time.time()
+        # Tras un fallo, esperar 30 min; si todo va bien, renovar cada 6 h.
+        if ahora - self.cfg['cookies_auto_ultima'] < cookies_auto.CADA_S or ahora - self._cookies_intento < 1800:
+            return
+        try:
+            self.sincronizar_cookies('periódica')
+        except ValueError as e:
+            self.log(f'No pude renovar las cookies de YouTube: {e}')
+
+    def _reintentar_con_cookies(self, t, error):
+        """Si YouTube bloqueó la descarga, renovar cookies y reintentar sin gastar un intento."""
+        if not self.cfg['cookies_auto'] or not cookies_auto.es_bloqueo(error):
+            return False
+        if time.time() - self._cookies_bloqueo < cookies_auto.MIN_ENTRE_BLOQUEOS_S:
+            return False
+        self._cookies_bloqueo = time.time()
+        self._actividad('YouTube bloqueó la descarga: renuevo las cookies automáticamente…')
+        try:
+            resultado = self.sincronizar_cookies('bloqueo de YouTube')
+        except ValueError as e:
+            self.log(f'No pude renovar las cookies tras el bloqueo: {e}')
+            return False
+        if self.cfg['remoto_url'] and not resultado['colab'] and t.get('cortar') and not t.get('archivo_local'):
+            return False
+        self.db.marcar_trabajo(t['id'], 'pendiente', 'Cookies de YouTube renovadas automáticamente; reintento en 1 minuto.',
+                               remoto_id='', remoto_url='', proximo_intento=time.time() + 60)
+        self.log(f"Reintento de «{t['titulo'] or t['url']}» con cookies nuevas en 1 minuto.")
+        return True
+
+    def conectar_youtube(self, espera_s=45):
+        """Abre el perfil de YouTube del bot para iniciar sesión una sola vez."""
+        ruta = self._perfil_youtube()
+        if navegador.ocupado(ruta):
+            raise ValueError('La ventana de YouTube del bot ya está abierta.')
+        listo, resultado = threading.Event(), {}
+
+        def abierto(nombre, _ruta):
+            resultado['navegador'] = nombre.capitalize()
+            listo.set()
+
+        def hilo():
+            try:
+                navegador.abrir_normal(ruta, cookies_auto.URL_LOGIN, self.cfg['navegador'], al_abrir=abierto)
+            except Exception as e:
+                resultado['error'] = f'No pude abrir el navegador: {e}'
+                listo.set()
+                return
+            self.log('Cerraste la ventana de YouTube del bot. Renuevo las cookies…')
+            try:
+                self.sincronizar_cookies('conexión')
+            except ValueError as e:
+                self.log(str(e))
+
+        threading.Thread(target=hilo, daemon=True, name='bot-youtube-login').start()
+        if not listo.wait(espera_s):
+            raise ValueError('El navegador tarda en abrir. Espera un poco y mira la barra de tareas.')
+        if resultado.get('error'):
+            raise ValueError(resultado['error'])
+        self._cookies_estado = 'Ventana abierta: inicia sesión en YouTube y ciérrala para terminar.'
+        return {'navegador': resultado.get('navegador', ''), 'mensaje': self._cookies_estado}
+
+    def cerrar_youtube(self):
+        recuperada = navegador.cerrar_normal(self._perfil_youtube(), recuperar=True, navegador=self.cfg['navegador'])
+        if recuperada:  # ventana de una ejecución anterior: no hay hilo que renueve al cerrar
+            threading.Thread(target=lambda: self._cookies_sin_error('conexión'), daemon=True).start()
+        return {'mensaje': 'Ventana cerrada. Renuevo las cookies en segundo plano.'}
+
+    def _cookies_sin_error(self, motivo):
+        try:
+            self.sincronizar_cookies(motivo)
+        except ValueError as e:
+            self.log(str(e))
+
+    def estado_youtube(self):
+        ruta = self._perfil_youtube()
+        return {'conectado': bool(self.cfg['cookies_auto']), 'ultima': self.cfg['cookies_auto_ultima'],
+                'estado': self._cookies_estado, 'ventana': navegador.login_abierto(ruta),
+                'renovando': self._cookies_lock.locked()}
+
     def _reservar_comprobacion(self, cid):
         if not self.db.cuenta(cid):
             raise ValueError('Cuenta no encontrada.')
@@ -1437,6 +1620,7 @@ class Motor:
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
             "remoto": self._remoto_estado,
+            "youtube_auto": self.estado_youtube(),
             "avisos": self._avisos.resumen(),
             "plan": plan,
             "carpeta_datos": self.almacenamiento,

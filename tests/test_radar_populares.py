@@ -125,6 +125,68 @@ class RutasPorCuenta(unittest.TestCase):
         self.assertFalse(control.publicando)
         self.assertTrue(control.pausa_radar)
 
+    def test_fallo_definitivo_no_bloquea_para_siempre_la_cuenta(self):
+        info = {'platform': 'youtube', 'source_channel': URL, 'channel_id': A}
+        tid = self.m.db.encolar_trabajo(self.pop['link'], 'radar_populares', cuentas=[self.libre])
+        sid = self.m.db.crear_subida(tid, self.libre, 'clip.mp4', 'texto')
+        for estado in ('pendiente', 'subiendo'):
+            self.m.db.marcar_subida(sid, estado)
+            self.assertEqual(self.m.destinos_radar(info, popular=True, solo_libres=True), [], estado)
+        self.m.db.marcar_trabajo(tid, 'listo')
+        for estado in ('error', 'revisar', 'ok'):
+            self.m.db.marcar_subida(sid, estado)
+            self.assertEqual(self.m.destinos_radar(info, popular=True, solo_libres=True), [self.libre], estado)
+        self.m.db.marcar_trabajo(tid, 'error')  # preparación fallida definitiva
+        self.assertEqual(self.m.destinos_radar(info, popular=True, solo_libres=True), [self.libre])
+
+    def test_popular_omitido_no_se_vuelve_a_elegir_en_bucle(self):
+        clave = f'youtube:{VB}:popular:{self.libre}'
+        tid = self.m.db.encolar_trabajo(self.pop['link'], 'radar', clave=clave)
+        self.m.db.marcar_trabajo(tid, 'omitido', 'La cuenta ya no corresponde a este radar o está pausada.')
+        self.assertIn('youtube:' + VB, self.m.db.fuentes_radar_conocidas())
+        # Un reciente omitido (video anterior) sí puede usarse como popular.
+        viejo = self.m.db.encolar_trabajo('https://youtu.be/' + VA, 'radar', clave='youtube:' + VA)
+        self.m.db.marcar_trabajo(viejo, 'omitido', 'Video anterior: solo se sube lo nuevo.')
+        self.assertNotIn('youtube:' + VA, self.m.db.fuentes_radar_conocidas())
+
+    def _actual(self, minutos, vid=VA):
+        from datetime import timedelta
+        self.m.guardar_cfg({'radar_desde': 1.0})  # sin filtro de «video anterior»
+        publicado = (datetime.now(timezone.utc) - timedelta(minutes=minutos)).isoformat()
+        return {**self.item, 'id': vid, 'link': 'https://youtu.be/' + vid, 'published': publicado}
+
+    def test_monetizada_recibe_video_de_la_ultima_hora(self):
+        self.m.desde_radar(self._actual(40))
+        job = next(j for j in self.m.db.trabajos_recientes() if j['origen'] == 'radar')
+        self.assertEqual(job['cuentas'], [self.monet])
+        self.assertEqual(job['estado'], 'pendiente')
+
+    def test_monetizada_no_recibe_video_de_hace_mas_de_una_hora(self):
+        self.m.desde_radar(self._actual(90))
+        jobs = self.m.db.trabajos_recientes()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]['estado'], 'omitido')
+        self.assertIn('Cuenta monetizada', jobs[0]['error'])
+        self.m.desde_radar(self._actual(90))  # otra ronda: no se reabre ni se duplica
+        self.assertEqual([j['id'] for j in self.m.db.trabajos_recientes()], [jobs[0]['id']])
+
+    def test_monetizada_sin_fecha_no_recibe_y_limite_configurable(self):
+        item = {**self._actual(0), 'published': ''}
+        self.m.desde_radar(item)
+        self.assertEqual(self.m.db.trabajos_recientes()[0]['estado'], 'omitido')
+        self.m.guardar_cfg({'monetizada_max_min': 180})
+        self.m.desde_radar(self._actual(90, vid=VB))
+        job = next(j for j in self.m.db.trabajos_recientes() if j['url'].endswith(VB))
+        self.assertEqual((job['estado'], job['cuentas']), ('pendiente', [self.monet]))
+        with self.assertRaises(ValueError):
+            self.m.guardar_cfg({'monetizada_max_min': 0})
+
+    def test_sin_separacion_solo_se_quita_la_monetizada(self):
+        self.m.guardar_cfg({'radar_populares_configurado': False})
+        self.m.desde_radar(self._actual(90))
+        job = next(j for j in self.m.db.trabajos_recientes() if j['estado'] == 'pendiente')
+        self.assertEqual(job['cuentas'], [self.libre])
+
 
 if __name__ == '__main__':
     unittest.main()
