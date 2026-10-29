@@ -2346,6 +2346,20 @@ def bot_cookies_youtube():
     return _bot_respuesta(hacer)
 
 
+@app.route('/api/bot/youtube_auto/<accion>', methods=['POST'])
+def bot_youtube_auto(accion):
+    def hacer():
+        motor = _bot()
+        if accion == 'conectar':
+            return motor.conectar_youtube()
+        if accion == 'renovar':
+            return motor.sincronizar_cookies('manual')
+        if accion == 'cerrar':
+            return motor.cerrar_youtube()
+        raise ValueError('Acción no válida.')
+    return _bot_respuesta(hacer)
+
+
 @app.route("/api/bot/cuentas", methods=["POST"])
 def bot_cuenta_crear():
     d = request.get_json(silent=True) or {}

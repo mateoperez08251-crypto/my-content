@@ -265,6 +265,7 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
     <div class="ajustes">
       <div><label>Pausa entre cualquier publicación (min)</label><div class="fila rango"><div><label for="pausa_min">Mínima</label><input id="pausa_min" type="number" min="0" max="1440"></div><div><label for="pausa_max">Máxima</label><input id="pausa_max" type="number" min="0" max="1440"></div></div></div>
       <div><label for="max_intentos">Máximo de intentos por subida</label><input id="max_intentos" type="number" min="1" max="20"></div>
+      <div><label for="monetizada_max_min">Radar → cuentas monetizadas: solo videos de los últimos (min)</label><input id="monetizada_max_min" type="number" min="5" max="1440" value="60"></div>
       <div><label for="estimacion_subida_min">Minutos para subir cada clip (estimación)</label><input id="estimacion_subida_min" type="number" min="0.1" max="180" step="0.5"></div>
       <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
         <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
@@ -343,7 +344,17 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
   <h2 id="cookies-descarga-titulo">🍪 Cookies de YouTube
     <button type="button" onclick="cerrarCookiesDescarga()" aria-label="Cerrar cookies">Cerrar</button>
   </h2>
-  <p class="ayuda">Carga las cookies de tu sesión de YouTube. Son las mismas que usa Smart Split para descargar videos.</p>
+  <div class="ayuda" id="yt-auto">
+    <b>YouTube automático (recomendado)</b>
+    <p class="muted">Inicia sesión una sola vez en la ventana del bot y ciérrala. Después el bot renueva las cookies cada 6 horas y cuando YouTube bloquea una descarga, y las envía a esta PC y a Colab. Usa una cuenta de Google secundaria.</p>
+    <p id="yt-auto-estado" role="status" aria-live="polite"></p>
+    <div class="fila">
+      <button type="button" id="yt-auto-conectar" class="prim" onclick="youtubeAuto('conectar')">Conectar YouTube</button>
+      <button type="button" id="yt-auto-renovar" onclick="youtubeAuto('renovar')">Renovar ahora</button>
+      <button type="button" id="yt-auto-cerrar" onclick="youtubeAuto('cerrar')" hidden>Terminé de iniciar sesión</button>
+    </div>
+  </div>
+  <p class="ayuda">O carga manualmente las cookies de tu sesión de YouTube. Son las mismas que usa Smart Split para descargar videos.</p>
   <label for="cookies-descarga-destino">¿Dónde se descarga el video?</label>
   <select id="cookies-descarga-destino" onchange="cambiarDestinoCookies()">
     <option value="pc">Esta PC</option><option value="colab">Colab · servidor de cortes</option>
@@ -531,7 +542,7 @@ function tarjetaCuenta(c) {
       <div><label for="cuenta-inicio-${c.id}">Subir desde</label><input id="cuenta-inicio-${c.id}" type="time" value="${esc(c.hora_inicio || '08:00')}" onchange="guardarRitmo(${c.id},'hora_inicio',this)"></div>
       <div><label for="cuenta-fin-${c.id}">Hasta</label><input id="cuenta-fin-${c.id}" type="time" value="${esc(c.hora_fin || '23:30')}" onchange="guardarRitmo(${c.id},'hora_fin',this)"></div>
     </div>
-    ${c.plataforma === 'tiktok' ? `<label><input type="checkbox" ${c.monetizada ? 'checked' : ''} aria-describedby="monetizada-ayuda-${c.id}" onchange="guardarMonetizada(${c.id},this)"> Controles para cuenta monetizada</label><p class="muted" id="monetizada-ayuda-${c.id}">Bloquea archivos idénticos ya registrados por el bot y exige 61 s, 1080p y 24 fps. No comprueba copias en todo TikTok ni garantiza originalidad o monetización.</p>` : ''}
+    ${c.plataforma === 'tiktok' ? `<label><input type="checkbox" ${c.monetizada ? 'checked' : ''} aria-describedby="monetizada-ayuda-${c.id}" onchange="guardarMonetizada(${c.id},this)"> Controles para cuenta monetizada</label><p class="muted" id="monetizada-ayuda-${c.id}">Bloquea archivos idénticos ya registrados por el bot y exige 61 s, 1080p y 24 fps. Del radar solo recibe videos publicados en los últimos ${esc(E.config.monetizada_max_min ?? 60)} min y no recibe populares. No comprueba copias en todo TikTok ni garantiza originalidad o monetización.</p>` : ''}
     <div class="proximo"><b>${faltan === null ? 'Sin hora estimada' : faltan ? 'Turno estimado en '+Math.floor(faltan/60)+' h '+faltan%60+' min' : 'Turno disponible'}</b>
       ${proxima ? '<div>'+fechaSubida(proxima)+'</div>' : ''}<p>${esc(c.espera || '')}</p>
       ${siguiente ? `<div class="fila"><video controls preload="none" src="/api/bot/clip/${Number(siguiente.id)}" aria-label="Próximo clip de ${esc(c.nombre)}"></video><span>${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>` : ''}
@@ -560,7 +571,7 @@ function pintar() {
   $('activo').checked = c.activo;
   $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
   if (!editando) {
-    for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min','modo_cola','remoto_url','remoto_clave','navegador'])
+    for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min','monetizada_max_min','modo_cola','remoto_url','remoto_clave','navegador'])
       $(k).value = c[k];
     for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) $(k).checked = c[k];
     for (const k of ['avisos_activos','avisos_cola','avisos_progreso','avisos_publicados','avisos_errores','avisos_lives','avisos_sistema']) $(k).checked = c[k] !== false;
@@ -569,6 +580,7 @@ function pintar() {
   const avisos = E.avisos || {};
   $('avisos-estado').textContent = `${avisos.pendiente || 0} eventos pendientes · ${avisos.enviado || 0} eventos enviados · ${avisos.fallido || 0} fallidos · ${avisos.revisar || 0} por revisar tras reinicio. Si fallan, revisa la API y el número en Radar.`;
   $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
+  pintarYoutubeAuto();
   $('modo-activo').textContent = 'Modo guardado: ' + ({preparar_primero:'editar toda la cola y después publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados',alternar:'alternar edición y publicación'}[c.modo_cola] || c.modo_cola);
   pintarPlan();
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
@@ -667,6 +679,30 @@ async function abrirCookiesDescarga() {
   await cambiarDestinoCookies();
 }
 function cerrarCookiesDescarga() { $('cookies-descarga-modal').close(); }
+
+let youtubeAutoOcupado = false;
+function pintarYoutubeAuto() {
+  const y = E?.youtube_auto; if (!y || !$('yt-auto-estado')) return;
+  const ultima = y.ultima ? new Date(y.ultima * 1000).toLocaleString('es', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+  let texto = y.ventana ? 'Ventana abierta: inicia sesión en YouTube y ciérrala (o pulsa «Terminé de iniciar sesión»).'
+    : y.renovando ? 'Renovando cookies…'
+    : y.conectado ? `Conectado · cookies renovadas ${ultima || 'pendiente'}. ${y.estado || ''}`
+    : (y.estado || 'Sin conectar. Pulsa «Conectar YouTube» e inicia sesión una vez.');
+  const el = $('yt-auto-estado'); el.textContent = texto;
+  el.style.color = !y.conectado && !y.ventana && y.estado ? 'var(--mal)' : '';
+  $('yt-auto-cerrar').hidden = !y.ventana;
+  $('yt-auto-conectar').hidden = !!y.ventana;
+  $('yt-auto-conectar').textContent = y.conectado ? 'Volver a iniciar sesión' : 'Conectar YouTube';
+  for (const id of ['yt-auto-conectar','yt-auto-renovar','yt-auto-cerrar']) $(id).disabled = youtubeAutoOcupado || y.renovando;
+  $('yt-auto-renovar').disabled ||= !!y.ventana;
+}
+async function youtubeAuto(accion) {
+  if (youtubeAutoOcupado) return;
+  youtubeAutoOcupado = true; pintarYoutubeAuto();
+  if (accion === 'renovar') $('yt-auto-estado').textContent = 'Renovando cookies… puede tardar hasta un minuto.';
+  try { const j = await api(`/api/bot/youtube_auto/${accion}`, {}); toast(j.mensaje || 'Hecho'); }
+  catch (e) {} finally { youtubeAutoOcupado = false; await cargar(); }
+}
 
 async function cambiarDestinoCookies() {
   if (cookiesDescargaOcupado) return;
@@ -909,7 +945,7 @@ async function probarRemoto() {
 }
 async function guardarAjustes() {
   const d = {};
-  for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min']) d[k] = +$(k).value;
+  for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min','monetizada_max_min']) d[k] = +$(k).value;
   for (const k of ['preset','modo_cola','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
   for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) d[k] = $(k).checked;
   await api('/api/bot/config', d); editando = false; await cargar(); toast('Horario y modo guardados');

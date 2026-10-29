@@ -419,15 +419,22 @@ class DB:
 
     def fuentes_radar_conocidas(self):
         from .identidad import fuente
-        fuentes = {fuente(r['url']) for r in self._todos("SELECT url FROM trabajos WHERE estado NOT IN ('omitido','sin_destino')")}
+        # Un popular omitido también cuenta: si no, el ranking lo elegiría en cada ronda
+        # y su entrega ya registrada no volvería a encolarse (radar atascado).
+        fuentes = {fuente(r['url']) for r in self._todos(
+            "SELECT url FROM trabajos WHERE estado NOT IN ('omitido','sin_destino') "
+            "OR origen='radar_populares' OR clave LIKE '%:popular:%'")}
         fuentes.update(r['fuente'] for r in self._todos('SELECT DISTINCT fuente FROM clip_historial'))
         return fuentes
 
     def cuenta_tiene_cola(self, cid):
-        for job in self._todos("SELECT cuentas FROM trabajos WHERE estado NOT IN ('listo','omitido','sin_destino')"):
+        """Solo trabajo activo. Un fallo definitivo o un 'revisar' no frena el radar para siempre."""
+        for job in self._todos("SELECT cuentas FROM trabajos WHERE estado IN "
+                               "('pendiente','descargando','cortando','esperando_remoto')"):
             if cid in job['cuentas']:
                 return True
-        return bool(self._uno("SELECT 1 FROM subidas WHERE cuenta_id=? AND estado!='ok' LIMIT 1", (cid,)))
+        return bool(self._uno("SELECT 1 FROM subidas WHERE cuenta_id=? AND estado IN "
+                              "('pendiente','subiendo','cancelando') LIMIT 1", (cid,)))
 
     def reanudar_remotos(self):
         return self._q("UPDATE trabajos SET estado='pendiente',error='',proximo_intento=0,actualizado=? "

@@ -167,6 +167,65 @@ class SinNavegador(Exception):
     pass
 
 
+class NavegadorNoArranca(Exception):
+    """Chrome/Brave/Edge no terminó de arrancar a tiempo (se reintenta en la cola)."""
+
+
+LAUNCH_TIMEOUT_MS = 90_000
+_CANDADOS = ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile")
+
+
+def _es_timeout_arranque(error):
+    detalle = str(error).lower()
+    return "timeout" in detalle and ("launch" in detalle or "exceeded" in detalle)
+
+
+def _limpiar_arranque(perfil):
+    """Tras un arranque colgado: cierra navegadores automatizados HUÉRFANOS (su proceso
+    padre de Playwright ya murió) que usan este perfil exacto y borra candados viejos.
+    Nunca toca ventanas normales ni navegadores personales."""
+    cerrados = 0
+    en_uso = False
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+    if psutil is not None:
+        for proc in psutil.process_iter(['cmdline']):
+            try:
+                args = proc.info.get('cmdline') or []
+                perfiles = [a.split('=', 1)[1] for a in args[1:] if a.startswith('--user-data-dir=')]
+                if not perfiles or not _misma_ruta(perfiles[0], perfil):
+                    continue
+                if any(a.startswith('--type=') for a in args[1:]):
+                    continue  # hijos (renderer, gpu...): mueren con el principal
+                automatizado = '--remote-debugging-pipe' in args
+                padre = proc.parent()
+                if automatizado and (padre is None or not padre.is_running()):
+                    for hijo in proc.children(recursive=True):
+                        try:
+                            hijo.kill()
+                        except psutil.Error:
+                            pass
+                    proc.kill()
+                    cerrados += 1
+                else:
+                    en_uso = True
+            except (psutil.Error, OSError):
+                continue
+        if cerrados:
+            time.sleep(2)
+    if not en_uso:
+        for nombre in _CANDADOS:
+            ruta = os.path.join(perfil, nombre)
+            try:
+                if os.path.lexists(ruta):
+                    os.remove(ruta)
+            except OSError:
+                pass
+    return cerrados
+
+
 NAVEGADORES = ("auto", "brave", "chrome", "edge", "chromium")
 
 
@@ -213,11 +272,29 @@ def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False, naveg
         with sync_playwright() as p:
             opciones = dict(user_data_dir=perfil, headless=headless, args=ARGS, no_viewport=True,
                             ignore_default_args=["--enable-automation"], locale="es-ES",
-                            accept_downloads=False)
+                            accept_downloads=False, timeout=LAUNCH_TIMEOUT_MS)
             if ruta:
                 opciones["executable_path"] = ruta
             try:
-                ctx = p.chromium.launch_persistent_context(**opciones)
+                try:
+                    ctx = p.chromium.launch_persistent_context(**opciones)
+                except Exception as primero:
+                    if not _es_timeout_arranque(primero):
+                        raise
+                    # Arranque colgado: limpiar restos del perfil y reintentar una vez.
+                    _limpiar_arranque(perfil)
+                    try:
+                        ctx = p.chromium.launch_persistent_context(**opciones)
+                    except Exception as segundo:
+                        if not _es_timeout_arranque(segundo):
+                            raise
+                        _limpiar_arranque(perfil)
+                        raise NavegadorNoArranca(
+                            f"{nombre.capitalize()} no terminó de abrir en {LAUNCH_TIMEOUT_MS // 1000} s "
+                            "(2 intentos). Cierra las ventanas del navegador de esta cuenta, comprueba que "
+                            f"{nombre.capitalize()} abre normal y se reintentará solo.") from None
+            except NavegadorNoArranca:
+                raise
             except Exception as e:
                 if es_perfil_ocupado(e):
                     raise PerfilOcupado('El perfil de esta cuenta sigue abierto en otro proceso. '
