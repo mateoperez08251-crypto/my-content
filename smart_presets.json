@@ -173,12 +173,15 @@
     "anti_copyright_filter": false,
     "clip_duration": 70.0,
     "clip_selection": "ai",
+    "context_before_seconds": 8.0,
     "download_quality": "best",
     "dubbing_language": "original",
     "efectos": false,
     "emojis": false,
     "encuadre": "caras",
     "export_profile": "quality",
+    "moment_focus": "general",
+    "moment_query": "",
     "motor_ia": "pro",
     "normalize_audio": true,
     "num_clips": 8,
@@ -191,10 +194,7 @@
     "transcripcion": "groq",
     "upscale": "off",
     "video_format": "vertical",
-    "whisper_local": "large-v3",
-    "moment_focus": "general",
-    "context_before_seconds": 8.0,
-    "moment_query": ""
+    "whisper_local": "large-v3"
   },
   "el mañanero": {
     "anti_copyright_filter": false,
