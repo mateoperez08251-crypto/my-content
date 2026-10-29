@@ -4,8 +4,8 @@
 Idea (como Opus Clip y alternativas abiertas tipo ClipsAI / ClippyMe):
 1. Pasada de análisis a baja resolución: detecta caras (YuNet de OpenCV) y mide
    cuánto se mueve la boca de cada una.
-2. Hablante activo = la cara cuya boca se mueve más mientras hay voz (según los
-   tiempos de las palabras de la transcripción).
+2. Hablante activo: LR-ASD compara audio y video si SMART_ASD_ENGINE=lr_asd.
+   El modo motion conserva la aproximación por movimiento de boca.
 3. Si todas las caras caben en el recorte 9:16 se encuadra al grupo (nadie queda
    fuera); si no, se enfoca al hablante.
 4. La cámara se anticipa unos milisegundos al cambio de hablante y hace cortes
@@ -20,6 +20,10 @@ from __future__ import annotations
 
 import bisect
 import os
+import json
+import subprocess
+import tempfile
+import sys
 import time
 import urllib.request
 
@@ -106,8 +110,14 @@ class _Pista:
         self.boca_prev = None
         self.actividad = 0.0
         self.visto = 0.0
+        self.vx = 0.0
+        self.vy = 0.0
 
     def actualizar(self, cx, cy, w, h, t):
+        dt = t - self.visto
+        if 0 < dt < 0.8:
+            self.vx = 0.5 * self.vx + 0.5 * (cx - self.cx) / dt
+            self.vy = 0.5 * self.vy + 0.5 * (cy - self.cy) / dt
         a = 0.6  # suavizado de la posición
         self.cx = a * cx + (1 - a) * self.cx
         self.cy = a * cy + (1 - a) * self.cy
@@ -143,12 +153,79 @@ def _hay_voz(t, palabras_ini, palabras):
     return k >= 0 and palabras[k]["end"] + 0.25 >= t
 
 
+
+def _asignar(pistas, caras, t):
+    """Greedy global one-to-one matching, with short-term velocity and scale gating."""
+    pairs = []
+    for p in pistas:
+        age = t - p.visto
+        if age > 0.8:
+            continue
+        for index, c in enumerate(caras):
+            if min(p.w,p.h,c[2],c[3]) <= 0:
+                continue
+            ratio = max(p.w/c[2],c[2]/p.w,p.h/c[3],c[3]/p.h)
+            if ratio > 2.0:
+                continue
+            px = p.cx + p.vx * min(age,0.3)
+            py = p.cy + p.vy * min(age,0.3)
+            distance = ((px-c[0])**2 + (py-c[1])**2)**0.5
+            scale = max(p.w,p.h,c[2],c[3])
+            if distance < max(24.0,scale*0.8):
+                pairs.append((distance/scale + abs(np.log(ratio))*0.2,index,p))
+    assigned, used = {}, set()
+    for cost,index,p in sorted(pairs,key=lambda x:(x[0],x[1],x[2].id)):
+        if index not in assigned and p.id not in used:
+            assigned[index] = p
+            used.add(p.id)
+    return assigned
+
+
+def _media_centrada(values, half):
+    """Preserve the exact sample count even for clips shorter than the kernel."""
+    if not len(values):
+        return np.array([],dtype=float)
+    return np.convolve(np.pad(np.asarray(values,dtype=float),(half,half),mode='edge'),
+                       np.ones(2*half+1)/(2*half+1),mode='valid')
+
+
+def _puntuacion(rows, times, t):
+    i = bisect.bisect_left(times,t)
+    nearby = [k for k in (i-1,i) if 0 <= k < len(rows) and abs(times[k]-t) <= 0.12]
+    return rows[min(nearby,key=lambda k:abs(times[k]-t))][1] if nearby else -8.0
+
+
+def _lr_scores(video, t_ini, t_fin, muestras, orig_w, orig_h, aw):
+    python = os.environ.get('SMART_ASD_PYTHON')
+    if not python or not os.path.isfile(python):
+        raise RuntimeError('Falta SMART_ASD_PYTHON. Ejecuta la celda de seguimiento LR-ASD en Colab.')
+    with tempfile.TemporaryDirectory(prefix='smart_asd_') as directory:
+        result = os.path.join(directory,'scores.json')
+        job = dict(video=os.path.abspath(video),start=t_ini,end=t_fin,samples=muestras,
+                   width=orig_w,height=orig_h,analysis_width=aw,result=result)
+        path = os.path.join(directory,'job.json')
+        with open(path,'w',encoding='utf-8') as stream:
+            json.dump(job,stream)
+        print('Reencuadre: LR-ASD · audio y video · GPU',flush=True)
+        subprocess.run([python,os.path.join(os.path.dirname(__file__),'smart_asd_worker.py'),path],
+                       check=True,timeout=3600)
+        with open(result,encoding='utf-8') as stream:
+            payload = json.load(stream)
+        return {int(pid):(rows,[r[0] for r in rows]) for pid,rows in payload['scores'].items()}
+
+
 def calcular_trayectoria(video, t_ini, t_fin, crop_w, palabras=None, nivel="equilibrado", progreso=None):
     """Devuelve (tiempos, centros_x) relativos a t_ini, en píxeles del video original.
 
     palabras: lista de {"start","end"} en segundos del video completo (para saber
     cuándo hay voz)."""
-    cfg = NIVELES.get(nivel, NIVELES["equilibrado"])
+    cfg = dict(NIVELES.get(nivel, NIVELES["equilibrado"]))
+    engine = os.environ.get('SMART_ASD_ENGINE','motion').strip().lower()
+    if engine not in ('motion','lr_asd'):
+        raise ValueError('SMART_ASD_ENGINE debe ser motion o lr_asd.')
+    learned = engine == 'lr_asd' and cfg['caras']
+    if cv2 is None:
+        raise RuntimeError('Falta OpenCV para analizar el reencuadre.')
     # Silencia los warnings "Your platform doesn't support hardware accelerated AV1 decoding"
     # que llenan el log en videos AV1 (4K/8K de YouTube). El decode cae a software igual.
     try:
@@ -157,6 +234,9 @@ def calcular_trayectoria(video, t_ini, t_fin, crop_w, palabras=None, nivel="equi
         pass
     os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'hwaccel;none')
     cap = cv2.VideoCapture(video)
+    if not cap.isOpened():
+        cap.release()
+        raise RuntimeError('No se pudo abrir el video para seguir al hablante.')
     orig_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920
     orig_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080
     escala = ANCHO_ANALISIS / orig_w
@@ -165,6 +245,9 @@ def calcular_trayectoria(video, t_ini, t_fin, crop_w, palabras=None, nivel="equi
 
     det = _crear_detector(aw, ah) if cfg["caras"] else None
     haar = _haar() if cfg["caras"] and det is None else None
+    if learned and det is None and haar is None:
+        cap.release()
+        raise RuntimeError('LR-ASD necesita detecciones de cara. No se cambia a movimiento silenciosamente.')
     if cfg["caras"] and det is None and haar is None:
         print("Aviso: no hay detector de caras disponible; se usa el seguimiento por movimiento.")
         cfg = dict(cfg, caras=False)
@@ -208,21 +291,22 @@ def calcular_trayectoria(video, t_ini, t_fin, crop_w, palabras=None, nivel="equi
         gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         caras = _detectar(det, haar, img) if (det is not None or haar is not None) else []
 
-        registro = {"t": t - t_ini, "caras": [], "voz": _hay_voz(t, p_ini, palabras) if palabras else True}
-        usadas = set()
-        for c in caras:
-            mejor, dist = None, aw * 0.12
-            for pz in pistas:
-                d = abs(pz.cx - c[0]) + 0.5 * abs(pz.cy - c[1])
-                if d < dist and pz.id not in usadas:
-                    mejor, dist = pz, d
+        shot_cut = gris_prev is not None and float(np.mean(cv2.absdiff(gris_prev,gris))) > 45.0
+        if shot_cut:
+            pistas = []
+            frame_previo = None
+        registro = {"t": t - t_ini, "cut": bool(shot_cut), "boxes": {}, "caras": [], "voz": _hay_voz(t, p_ini, palabras) if palabras else True}
+        assignments = _asignar(pistas,caras,t)
+        for index,c in enumerate(caras):
+            mejor = assignments.get(index)
             if mejor is None:
                 mejor = _Pista(c[0], c[1], c[2], c[3])
                 pistas.append(mejor)
             mejor.actualizar(c[0], c[1], c[2], c[3], t)
-            usadas.add(mejor.id)
+            registro['boxes'][str(mejor.id)] = [float(v) for v in c[:4]]
             mov = 0.0
             x1, y1, x2, y2 = (int(max(0, v)) for v in c[4:8])
+            x1,y1 = min(aw-2,x1),min(ah-2,y1)
             x2, y2 = min(aw, max(x2, x1 + 2)), min(ah, max(y2, y1 + 2))
             ref = frame_previo if frame_previo is not None else gris_prev
             if ref is not None and x2 > x1 and y2 > y1:
@@ -247,38 +331,57 @@ def calcular_trayectoria(video, t_ini, t_fin, crop_w, palabras=None, nivel="equi
     if not muestras:
         return [0.0], [orig_w / 2]
 
+    if learned:
+        learned_scores = _lr_scores(video,t_ini,t_fin,muestras,orig_w,orig_h,aw)
+        for m in muestras:
+            m['caras'] = [(pid,cx,w,float(_puntuacion(*learned_scores[pid],m['t'])))
+                          if pid in learned_scores else (pid,cx,w,-8.0)
+                          for pid,cx,w,_ in m['caras']]
     # pasada 2: decidir el encuadre mirando antes Y después de cada instante
     ventana = max(1, int(round(0.3 * cfg["fps"])))
     ids = {pid for m in muestras for (pid, _, _, _) in m["caras"]}
-    serie = {pid: [0.0] * len(muestras) for pid in ids}
+    serie = {pid: [-8.0 if learned else 0.0] * len(muestras) for pid in ids}
     for k, m in enumerate(muestras):
         for pid, _, _, mov in m["caras"]:
             serie[pid][k] = mov
     suave = {}
     for pid, v in serie.items():
-        arr = np.array(v)
-        kernel = np.ones(2 * ventana + 1) / (2 * ventana + 1)
-        suave[pid] = np.convolve(arr, kernel, mode="same")  # media centrada (sin retraso)
+        suave[pid] = _media_centrada(v,ventana)
 
     tiempos, objetivos = [], []
     hablante = None
     centro = aw / 2
     inicio_habla = {}  # índice de muestra del cambio -> instante en que empezó a mover la boca
+    pending, pending_since = None, 0.0
+    cortes_escena = [m['t'] for m in muestras if m.get('cut')]
     for k, m in enumerate(muestras):
+        if m.get('cut'):
+            hablante = pending = None
         previo = hablante
         vis = m["caras"]
         if vis:
             por_id = {pid: (cx, w) for pid, cx, w, _ in vis}
             candidato = max(por_id, key=lambda pid: suave[pid][k])
             act = suave[candidato][k]
-            if m["voz"] and act > 0.008:
-                if hablante not in por_id or act > suave[hablante][k] * 1.2:
+            if learned:
+                if candidato != pending:
+                    pending, pending_since = candidato, m['t']
+                current_score = suave[hablante][k] if hablante in por_id else -8.0
+                if act > 0.0 and (hablante not in por_id or
+                        (act > current_score + 0.25 and m['t'] - pending_since >= 0.3)):
                     hablante = candidato
-            elif hablante not in por_id:
-                hablante = max(por_id, key=lambda pid: por_id[pid][1])  # la cara más grande
+                if hablante not in por_id:
+                    # No audible face is confidently speaking: keep composition on the group.
+                    hablante = None
+            else:
+                if m["voz"] and act > 0.008:
+                    if hablante not in por_id or act > suave[hablante][k] * 1.2:
+                        hablante = candidato
+                elif hablante not in por_id:
+                    hablante = max(por_id, key=lambda pid: por_id[pid][1])
             izq = min(cx - w * 0.75 for cx, w in por_id.values())
             der = max(cx + w * 0.75 for cx, w in por_id.values())
-            centro = (izq + der) / 2 if der - izq <= crop_a * 0.92 else por_id[hablante][0]
+            centro = (izq + der) / 2 if der - izq <= crop_a * 0.92 or hablante is None else por_id[hablante][0]
             if hablante != previo and previo is not None and hablante in suave:
                 # buscar hacia atrás cuándo empezó a moverse la boca del nuevo hablante
                 pico = max(suave[hablante][k:k + ventana + 1]) if k < len(muestras) else suave[hablante][k]
@@ -296,16 +399,17 @@ def calcular_trayectoria(video, t_ini, t_fin, crop_w, palabras=None, nivel="equi
         if k == 0 or pw["start"] - palabras[k - 1]["end"] >= 0.2:
             if t_ini - 1 <= pw["start"] <= t_fin:
                 inicios.append(pw["start"] - t_ini)
-    return _estabilizar(tiempos, objetivos, orig_w, crop_w, cfg, inicios, inicio_habla)
+    return _estabilizar(tiempos, objetivos, orig_w, crop_w, cfg, inicios, inicio_habla, cortes_escena)
 
 
-def _estabilizar(tiempos, objetivos, orig_w, crop_w, cfg, inicios_frase=None, inicio_habla=None):
+def _estabilizar(tiempos, objetivos, orig_w, crop_w, cfg, inicios_frase=None, inicio_habla=None, cortes_escena=None):
     """Convierte los objetivos en planos: cámara quieta y cortes limpios que llegan
     ANTES de que la persona empiece a hablar."""
     zona_muerta = orig_w * 0.06
     corte = orig_w * 0.12
     anticipo = cfg["anticipo"]
     obj = list(objetivos)
+    shot_indices = {bisect.bisect_left(tiempos,t) for t in (cortes_escena or [])}
 
     # 1) Adelantar cada cambio grande al inicio de la frase del nuevo hablante
     #    (si hay una en el segundo y medio anterior) menos el anticipo.
@@ -319,7 +423,7 @@ def _estabilizar(tiempos, objetivos, orig_w, crop_w, cfg, inicios_frase=None, in
             previas = [x for x in inicios if t_boca - 0.6 <= x <= t_cambio + 0.05]
             t_obj = min([t_boca] + previas[-1:]) - anticipo
             j2 = k
-            while j2 > 0 and tiempos[j2 - 1] >= t_obj and abs(obj[j2 - 1] - obj[k - 1]) < corte:
+            while j2 > 0 and j2 not in shot_indices and tiempos[j2 - 1] >= t_obj and abs(obj[j2 - 1] - obj[k - 1]) < corte:
                 j2 -= 1
             for q in range(j2, k):
                 obj[q] = obj[k]
@@ -329,8 +433,11 @@ def _estabilizar(tiempos, objetivos, orig_w, crop_w, cfg, inicios_frase=None, in
     salida = []
     actual = obj[0]
     inicio_plano = tiempos[0]
-    for t, x in zip(tiempos, obj):
-        if abs(x - actual) > corte and (t - inicio_plano) >= cfg["plano_min"]:
+    for index,(t, x) in enumerate(zip(tiempos, obj)):
+        if index in shot_indices:
+            actual = x
+            inicio_plano = t
+        elif abs(x - actual) > corte and (t - inicio_plano) >= cfg["plano_min"]:
             actual = x
             inicio_plano = t
         elif zona_muerta < abs(x - actual) <= corte:
@@ -344,3 +451,4 @@ def centro_en(tiempos, centros, t):
     """Centro del recorte en el instante t (escalonado, sin interpolar = cortes limpios)."""
     k = bisect.bisect_right(tiempos, t) - 1
     return centros[max(0, min(k, len(centros) - 1))]
+

@@ -33,3 +33,9 @@ La libreta clona `main` del repositorio público; los cambios de Smart Split ya 
 El enlace solo dura mientras estén activos la libreta y el entorno. Google advierte que [abrir el proxy en otra pestaña puede fallar](https://github.com/googlecolab/colabtools/blob/main/google/colab/output/_util.py); por eso se incluye la vista iframe. También se aplican los [límites de Colab](https://research.google.com/colaboratory/faq.html), incluidas las restricciones de interfaces web en el nivel gratuito sin saldo.
 
 Validación local: `python -m unittest discover -s tests -p 'test_colab_notebook.py'`. Comprueba sintaxis, claves opcionales (sin pedir Hugging Face cuando está desactivado), preparación sin voces, arranque mediante healthcheck, errores del proxy y ocultación de claves en el diagnóstico con servicios simulados. No equivale a una ejecución real de los modelos o del proxy de Google.
+
+
+## Seguimiento del hablante con audio y video
+
+La nueva [libreta LR-ASD](My_Content_Colab_seguimiento.ipynb) prepara el seguimiento en la celda **5C**. Se activa en Caras/Zoom dinámico con Equilibrado o Pro. No necesita token de Hugging Face para seguir al hablante visible. Consulta [instalación, pruebas y límites](SEGUIMIENTO.md). La calidad real con tus videos y G4 queda pendiente de medir.
+
