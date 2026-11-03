@@ -147,12 +147,87 @@ class Cliente:
             fecha = ''
         return {'hay': data['hay'], 'fecha': fecha}
 
-    def esperar_y_bajar(self, jid, carpeta, progreso=None, cancelar=None, limite_s=4 * 3600, cada_s=10):
-        """Espera al corte y guarda todos los clips y su manifiesto en esta PC.
-        El motor confirma la cola en SQLite antes de limpiar la copia remota.
+    def _abrir_registro_descargas(self, carpeta, jid):
+        os.makedirs(carpeta, exist_ok=True)
+        registro_path = os.path.join(carpeta, 'descargas.json')
+        try:
+            with open(registro_path, encoding='utf-8') as f:
+                registro = json.load(f)
+            if registro.get('origen') != [self.url, jid] or not isinstance(registro.get('archivos'), dict):
+                registro = {}
+        except (OSError, ValueError, AttributeError):
+            registro = {}
+        return registro_path, (registro or {'origen': [self.url, jid], 'archivos': {}})
+
+    def _descargar_clip_item(self, jid, c, carpeta, registro, registro_path):
+        destino = os.path.join(carpeta, f"{int(c['n']) + 1:04d}_" + os.path.basename(c['nombre']).replace('\\', '_'))
+        size = c.get('bytes')
+        nombre = os.path.basename(destino)
+        if not (isinstance(size, int) and size > 0 and registro['archivos'].get(nombre) == size
+                and os.path.isfile(destino) and os.path.getsize(destino) == size):
+            self._bajar(f"/api/bot/remoto/{jid}/clip/{c['n']}", destino, esperado=size)
+            registro['archivos'][nombre] = os.path.getsize(destino)
+            with open(registro_path + '.tmp', 'w', encoding='utf-8') as f:
+                json.dump(registro, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(registro_path + '.tmp', registro_path)
+        mb = c.get('miniatura_bytes')
+        if isinstance(mb, int) and mb > 0:
+            thumb_destino = os.path.splitext(destino)[0] + '_miniatura.jpg'
+            thumb_nombre = os.path.basename(thumb_destino)
+            if not (registro['archivos'].get(thumb_nombre) == mb
+                    and os.path.isfile(thumb_destino) and os.path.getsize(thumb_destino) == mb):
+                try:
+                    self._bajar(f"/api/bot/remoto/{jid}/miniatura/{c['n']}", thumb_destino, esperado=mb)
+                    registro['archivos'][thumb_nombre] = os.path.getsize(thumb_destino)
+                    with open(registro_path + '.tmp', 'w', encoding='utf-8') as f:
+                        json.dump(registro, f)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(registro_path + '.tmp', registro_path)
+                except (FalloTrabajo, ServidorCaido):
+                    pass
+        return destino
+
+    def esperar_y_bajar(self, jid, carpeta, progreso=None, cancelar=None, limite_s=4 * 3600, cada_s=10,
+                        al_bajar_clip=None):
+        """Importa a esta PC cada clip apenas Colab termina de renderizarlo, sin esperar al lote completo.
+        El motor puede ir encolando y subiendo el primero mientras se cortan los siguientes.
         Devuelve [(ruta_local, publicacion), ...]."""
         fin = time.time() + limite_s
         fallos = 0
+        registro_path = None
+        registro = None
+        por_indice = {}
+        cb_clip = al_bajar_clip or getattr(self, 'al_bajar_clip', None)
+
+        def _guardar_parciales(clips_remotos, total_ref):
+            nonlocal registro_path, registro
+            for c in clips_remotos:
+                idx_n = int(c['n'])
+                if idx_n in por_indice:
+                    continue
+                if cancelar and cancelar():
+                    try:
+                        self.limpiar(jid)
+                    except (ServidorCaido, requests.RequestException):
+                        pass
+                    raise CorteCancelado('Corte cancelado desde la cola.')
+                if registro is None:
+                    registro_path, registro = self._abrir_registro_descargas(carpeta, jid)
+                destino = self._descargar_clip_item(jid, c, carpeta, registro, registro_path)
+                pub = c.get("publicacion") or ""
+                por_indice[idx_n] = (destino, pub, c)
+                ordenados = [por_indice[k] for k in sorted(por_indice)]
+                archivos.guardar_manifest_parcial(
+                    carpeta,
+                    [(r_p, p_t) for r_p, p_t, _ in ordenados],
+                    {r_p: m_c for r_p, _, m_c in ordenados},
+                )
+                if callable(cb_clip):
+                    cb_clip(destino, pub, c, idx_n, max(int(total_ref or 0), len(clips_remotos), idx_n + 1))
+
         while True:
             if cancelar and cancelar():
                 try:
@@ -176,58 +251,28 @@ class Cliente:
                 raise TrabajoPerdido("el servidor se reinició y perdió el trabajo")
             if d.get("estado") == "error":
                 raise FalloCorte(d.get("error") or "falló el corte", code=d.get('error_code') or 'edicion_fallida')
+            clips_parciales = [
+                c for c in (d.get("clips") or [])
+                if isinstance(c, dict) and 'n' in c and 'nombre' in c
+                and (d.get("estado") == "listo" or (isinstance(c.get("bytes"), int) and c.get("bytes") > 0))
+            ]
+            if d.get("estado") != "listo" and clips_parciales:
+                _guardar_parciales(clips_parciales, d.get("total_clips") or len(clips_parciales))
             if d.get("estado") == "listo":
                 break
             if progreso:
-                texto = (d.get("progreso") or "").split("|")
+                texto = str(d.get("progreso") or "").split("|")
                 etapa = texto[0][:220]
-                progreso(f"{texto[1]}% · {etapa}" if len(texto) > 1 and texto[1].lstrip("-").isdigit() else etapa)
+                extra_ya = f" · {len(por_indice)} ya en PC" if por_indice else ""
+                progreso((f"{texto[1]}% · {etapa}" if len(texto) > 1 and texto[1].lstrip("-").isdigit() else etapa) + extra_ya)
             self._esperar_cancelable(cada_s, cancelar)
 
         if not d.get("clips"):
             raise FalloTrabajo("El servidor no generó clips.")
-        os.makedirs(carpeta, exist_ok=True)
-        registro_path = os.path.join(carpeta, 'descargas.json')
-        try:
-            with open(registro_path, encoding='utf-8') as f:
-                registro = json.load(f)
-            if registro.get('origen') != [self.url, jid] or not isinstance(registro.get('archivos'), dict):
-                registro = {}
-        except (OSError, ValueError, AttributeError):
-            registro = {}
-        registro = registro or {'origen': [self.url, jid], 'archivos': {}}
-        salida = []
-        for c in d["clips"]:
-            destino = os.path.join(carpeta, f"{int(c['n']) + 1:04d}_" + os.path.basename(c['nombre']).replace('\\', '_'))
-            size = c.get('bytes')
-            nombre = os.path.basename(destino)
-            if not (isinstance(size, int) and size > 0 and registro['archivos'].get(nombre) == size
-                    and os.path.isfile(destino) and os.path.getsize(destino) == size):
-                self._bajar(f"/api/bot/remoto/{jid}/clip/{c['n']}", destino, esperado=size)
-                registro['archivos'][nombre] = os.path.getsize(destino)
-                with open(registro_path + '.tmp', 'w', encoding='utf-8') as f:
-                    json.dump(registro, f)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(registro_path + '.tmp', registro_path)
-            mb = c.get('miniatura_bytes')
-            if isinstance(mb, int) and mb > 0:
-                thumb_destino = os.path.splitext(destino)[0] + '_miniatura.jpg'
-                thumb_nombre = os.path.basename(thumb_destino)
-                if not (registro['archivos'].get(thumb_nombre) == mb
-                        and os.path.isfile(thumb_destino) and os.path.getsize(thumb_destino) == mb):
-                    try:
-                        self._bajar(f"/api/bot/remoto/{jid}/miniatura/{c['n']}", thumb_destino, esperado=mb)
-                        registro['archivos'][thumb_nombre] = os.path.getsize(thumb_destino)
-                        with open(registro_path + '.tmp', 'w', encoding='utf-8') as f:
-                            json.dump(registro, f)
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.replace(registro_path + '.tmp', registro_path)
-                    except (FalloTrabajo, ServidorCaido):
-                        pass
-            salida.append((destino, c.get("publicacion") or ""))
-        metadata = {ruta: c for (ruta, _), c in zip(salida, d['clips'])}
+        _guardar_parciales(d["clips"], d.get("total_clips") or len(d["clips"]))
+        ordenados_fin = [por_indice[k] for k in sorted(por_indice)]
+        salida = [(r_p, p_t) for r_p, p_t, _ in ordenados_fin]
+        metadata = {r_p: m_c for r_p, _, m_c in ordenados_fin}
         archivos.guardar_manifest(carpeta, salida, metadata)
         return salida
 

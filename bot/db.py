@@ -379,13 +379,73 @@ class DB:
                                  'Revisa ese historial antes de volver a procesarlo para estas cuentas.') from None
         return result
 
+    def encolar_clip_parcial(self, tid, subidas, intervalos=None):
+        """Encola un clip individual apenas está en esta PC para subirlo sin esperar al lote completo."""
+        ahora = time.time()
+        nuevas = []
+        with self._lock, self._con:
+            row = self._con.execute('SELECT estado FROM trabajos WHERE id=?', (tid,)).fetchone()
+            if row is None or row[0] in ('listo', 'omitido'):
+                return []
+            existentes = {
+                (int(r[0]), r[1])
+                for r in self._con.execute('SELECT cuenta_id, archivo FROM subidas WHERE trabajo_id=?', (tid,)).fetchall()
+            }
+            ya_historial = {
+                (int(r[0]), r[1])
+                for r in self._con.execute('SELECT cuenta_id, archivo FROM clip_historial WHERE trabajo_id=?', (tid,)).fetchall()
+            }
+            pendientes_insertar = [
+                (cid, ruta, texto)
+                for cid, ruta, texto in subidas
+                if ruta is None or ((int(cid), ruta) not in existentes and (int(cid), ruta) not in ya_historial)
+            ]
+            if not pendientes_insertar:
+                return []
+            if intervalos is not None:
+                from .identidad import fuente
+                import math
+                job = self.trabajo(tid)
+                identity = fuente(job['url'])
+                for cid, ruta, texto in pendientes_insertar:
+                    start, end = intervalos[ruta]
+                    if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+                        raise ValueError('El clip no contiene tiempos válidos del video original.')
+                    used = self.intervalos_usados(job['url'], None, tid)
+                    if any(min(end, b) > max(start, a) for a, b in used):
+                        raise ValueError('Ese fragmento ya está reservado en otra publicación. No se enviará a otra cuenta.')
+                for cid, ruta, texto in pendientes_insertar:
+                    start, end = intervalos[ruta]
+                    self._con.execute('INSERT OR IGNORE INTO clip_historial VALUES(?,?,?,?,?,?)',
+                                      (identity, cid, start, end, tid, ruta))
+            for cid, ruta, texto in pendientes_insertar:
+                cur = self._con.execute(
+                    'INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado,programada_para) VALUES(?,?,?,?,?,?,?)',
+                    (tid, cid, ruta, texto, ahora, ahora, 0),
+                )
+                nuevas.append(cur.lastrowid)
+        return nuevas
+
     def finalizar_trabajo(self, tid, subidas, intervalos=None):
-        """Encolar todos los resultados y marcar listo en una sola transacción."""
+        """Encolar los resultados pendientes y marcar listo en una sola transacción."""
         ahora = time.time()
         with self._lock, self._con:
             row = self._con.execute('SELECT estado FROM trabajos WHERE id=?', (tid,)).fetchone()
             if row is None or row[0] == 'listo':
                 return
+            existentes = {
+                (int(r[0]), r[1])
+                for r in self._con.execute('SELECT cuenta_id, archivo FROM subidas WHERE trabajo_id=?', (tid,)).fetchall()
+            }
+            ya_historial = {
+                (int(r[0]), r[1])
+                for r in self._con.execute('SELECT cuenta_id, archivo FROM clip_historial WHERE trabajo_id=?', (tid,)).fetchall()
+            }
+            restantes = [
+                (cid, ruta, texto)
+                for cid, ruta, texto in subidas
+                if ruta is None or ((int(cid), ruta) not in existentes and (int(cid), ruta) not in ya_historial)
+            ]
             if intervalos is not None:
                 from .identidad import fuente
                 import math
@@ -398,13 +458,14 @@ class DB:
                     used = self.intervalos_usados(job['url'], None, tid)
                     if any(min(end, b) > max(start, a) for a, b in used):
                         raise ValueError('Ese fragmento ya está reservado en otra publicación. No se enviará a otra cuenta.')
-                for cid, ruta, texto in subidas:
+                for cid, ruta, texto in restantes:
                     start, end = intervalos[ruta]
                     self._con.execute('INSERT OR IGNORE INTO clip_historial VALUES(?,?,?,?,?,?)',
                                       (identity, cid, start, end, tid, ruta))
-            self._con.executemany('INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado,programada_para) VALUES(?,?,?,?,?,?,?)',
-                                  [(tid, cid, ruta, texto, ahora, ahora, 0)
-                                   for cid, ruta, texto in subidas])
+            if restantes:
+                self._con.executemany('INSERT INTO subidas(trabajo_id,cuenta_id,archivo,texto,creado,actualizado,programada_para) VALUES(?,?,?,?,?,?,?)',
+                                      [(tid, cid, ruta, texto, ahora, ahora, 0)
+                                       for cid, ruta, texto in restantes])
             self._con.execute("UPDATE trabajos SET estado='listo',error='',actualizado=? WHERE id=?", (ahora, tid))
 
     def siguiente_trabajo(self, excluir_live=False, excluir_populares=False):

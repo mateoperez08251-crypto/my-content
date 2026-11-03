@@ -180,3 +180,96 @@ def limpiar_metadatos_mp4(video):
             except OSError:
                 pass
     return False
+
+
+def asegurar_miniatura_video(video, cache_dir=''):
+    """Devuelve la ruta de la miniatura del video (prioriza `_miniatura.jpg` IA; si no, extrae un fotograma nítido)."""
+    if not video or not os.path.isfile(video):
+        return ''
+    ruta_abs = os.path.abspath(video)
+    portada_ia = os.path.splitext(ruta_abs)[0] + '_miniatura.jpg'
+    if os.path.isfile(portada_ia) and os.path.getsize(portada_ia) > 0:
+        return portada_ia
+
+    import hashlib
+    try:
+        st = os.stat(ruta_abs)
+    except OSError:
+        return ''
+    if st.st_size <= 0:
+        return ''
+
+    if not cache_dir:
+        try:
+            import paths
+            cache_dir = os.path.join(paths.TEMP_DIR, 'video_thumbs')
+        except Exception:
+            cache_dir = os.path.join(os.path.dirname(ruta_abs), '.thumbs')
+    os.makedirs(cache_dir, exist_ok=True)
+    clave = hashlib.sha1(f'{ruta_abs}|{st.st_size}|{st.st_mtime_ns}'.encode('utf-8', 'replace')).hexdigest()[:24]
+    destino = os.path.join(cache_dir, f'poster_{clave}.jpg')
+    if os.path.isfile(destino) and os.path.getsize(destino) > 0:
+        return destino
+
+    tmp = destino + f'.{os.getpid()}.tmp.jpg'
+    try:
+        try:
+            import cv2
+            cap = cv2.VideoCapture(ruta_abs)
+            mejor = None
+            mejor_puntaje = -1.0
+            try:
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                for frac in (0.18, 0.35, 0.55, 0.06, 0.0):
+                    if total > 3:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, min(total - 1, int(total * frac))))
+                    ok, frame = cap.read()
+                    if not ok or frame is None or getattr(frame, 'size', 0) == 0:
+                        continue
+                    brillo = float(frame.mean())
+                    if brillo > mejor_puntaje:
+                        mejor = frame
+                        mejor_puntaje = brillo
+                    if brillo >= 22.0:
+                        mejor = frame
+                        break
+            finally:
+                cap.release()
+            if mejor is not None:
+                alto, ancho = mejor.shape[:2]
+                escala = min(1.0, 640.0 / max(ancho, alto, 1))
+                if escala < 0.99:
+                    mejor = cv2.resize(
+                        mejor,
+                        (max(2, int(round(ancho * escala))), max(2, int(round(alto * escala)))),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                if cv2.imwrite(tmp, mejor, [int(cv2.IMWRITE_JPEG_QUALITY), 88]) and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                    os.replace(tmp, destino)
+                    return destino
+        except Exception:
+            pass
+
+        import imageio_ffmpeg
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        sin_ventana = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        for ss in ('0.8', '0.0'):
+            r = subprocess.run(
+                [
+                    ffmpeg, '-y', '-loglevel', 'error', '-ss', ss, '-i', ruta_abs,
+                    '-frames:v', '1', '-vf', "scale='min(640,iw)':-2", '-q:v', '3', tmp,
+                ],
+                capture_output=True, timeout=15, creationflags=sin_ventana,
+            )
+            if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                os.replace(tmp, destino)
+                return destino
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return ''

@@ -514,12 +514,78 @@ class LiveManager:
             except Exception:
                 self.motor.log('No pude revisar la cola de lives; se conservaron los segmentos para reintentar.')
 
+    def resolver_media_segmento(self, jid, nombre):
+        """Resuelve la ruta segura en disco de un tramo de live o su clip ya procesado."""
+        jid_str = str(jid or '')
+        nom_str = str(nombre or '')
+        if not re.fullmatch(r'[a-f0-9]{16}', jid_str) or not re.fullmatch(r'[a-f0-9]{8}_\d{6}\.(?:mp4|mkv)', nom_str):
+            return None
+        try:
+            candidato = (self.root / jid_str / nom_str).resolve()
+            if os.path.commonpath([str(self.root), str(candidato)]) == str(self.root):
+                if candidato.is_file() and candidato.stat().st_size > 0:
+                    return str(candidato)
+        except OSError:
+            pass
+        fila = self.db._uno('SELECT trabajo_id FROM live_segmentos WHERE sesion=? AND nombre=?', (jid_str, nom_str))
+        if fila and fila.get('trabajo_id'):
+            carpeta_t = Path(self.motor.carpeta, 'bot_clips', f"trabajo_{int(fila['trabajo_id'])}")
+            if carpeta_t.is_dir():
+                for clip_f in sorted(carpeta_t.iterdir()):
+                    if clip_f.suffix.lower() in ('.mp4', '.mov') and clip_f.is_file() and clip_f.stat().st_size > 0:
+                        return str(clip_f)
+        return None
+
     def state(self):
         sessions = self.db._todos('SELECT id,url,titulo,estado,detalle,creado,actualizado FROM live_sesiones ORDER BY creado DESC LIMIT 15')
         for item in sessions:
-            item['segmentos'] = self.db._todos('SELECT estado,COUNT(*) AS n FROM live_segmentos WHERE sesion=? GROUP BY estado', (item['id'],))
-            cfg = json.loads(self.db._uno('SELECT config FROM live_sesiones WHERE id=?', (item['id'],))['config'])
+            jid = item['id']
+            item['segmentos'] = self.db._todos('SELECT estado,COUNT(*) AS n FROM live_segmentos WHERE sesion=? GROUP BY estado', (jid,))
+            cfg = json.loads(self.db._uno('SELECT config FROM live_sesiones WHERE id=?', (jid,))['config'])
             item.update(mode=cfg['mode'], seconds=cfg['seconds'], window=cfg['window'], accounts=cfg['accounts'])
+            filas_seg = self.db._todos(
+                'SELECT nombre,inicio,fin,estado,trabajo_id FROM live_segmentos WHERE sesion=? ORDER BY inicio DESC LIMIT 8',
+                (jid,),
+            )
+            conocidos = {r['nombre'] for r in filas_seg}
+            clips_live = []
+            if item['estado'] in ACTIVE:
+                carpeta_s = self.root / jid
+                if carpeta_s.is_dir():
+                    for f_abierto in sorted(carpeta_s.iterdir(), reverse=True):
+                        if f_abierto.name in conocidos or not re.fullmatch(r'[a-f0-9]{8}_\d{6}\.(?:mp4|mkv)', f_abierto.name):
+                            continue
+                        try:
+                            st = f_abierto.stat()
+                        except OSError:
+                            continue
+                        if st.st_size >= 65536:
+                            clips_live.append({
+                                'nombre': f_abierto.name,
+                                'duracion': 0.0,
+                                'estado': 'capturando',
+                                'trabajo_id': None,
+                                'capturando_ahora': True,
+                                'disponible': True,
+                                'thumb_url': f"/api/bot/lives/{jid}/miniatura/{f_abierto.name}?t={int(st.st_mtime)}",
+                                'video_url': '',
+                            })
+                            break
+            for seg in filas_seg:
+                ruta_ok = self.resolver_media_segmento(jid, seg['nombre'])
+                disp = bool(ruta_ok)
+                dur = round(max(0.0, float(seg['fin']) - float(seg['inicio'])), 1)
+                clips_live.append({
+                    'nombre': seg['nombre'],
+                    'duracion': dur,
+                    'estado': seg['estado'],
+                    'trabajo_id': seg['trabajo_id'],
+                    'capturando_ahora': False,
+                    'disponible': disp,
+                    'thumb_url': f"/api/bot/lives/{jid}/miniatura/{seg['nombre']}" if disp else '',
+                    'video_url': f"/api/bot/lives/{jid}/clip/{seg['nombre']}" if disp else '',
+                })
+            item['clips_recientes'] = clips_live[:8]
         return {'lives':sessions}
 
     def close(self):

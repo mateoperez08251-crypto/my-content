@@ -293,5 +293,99 @@ class QualityAndMetadataTests(unittest.TestCase):
         self.assertEqual(datos_enviados["auto_thumbnail"], "cover_and_jpg")
 
 
+class GlassVesselsAndUniversalThumbnailsTests(unittest.TestCase):
+    def test_asegurar_miniatura_video_extracts_clean_poster_and_prioritizes_ai_cover(self):
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        if not ffmpeg or not os.path.isfile(ffmpeg):
+            self.skipTest("ffmpeg no disponible")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vdir = Path(tmp) / "clips"
+            cdir = Path(tmp) / "cache_thumbs"
+            vdir.mkdir()
+            clip = vdir / "clip_pc.mp4"
+            subprocess.run(
+                [
+                    ffmpeg, "-y", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "testsrc=size=360x640:rate=25:duration=1.0",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    str(clip),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            # Sin _miniatura.jpg: extrae póster en caché sin ensuciar la carpeta del clip
+            auto_poster = calidad_video.asegurar_miniatura_video(str(clip), cache_dir=str(cdir))
+            self.assertTrue(auto_poster and os.path.isfile(auto_poster))
+            self.assertEqual([p.name for p in vdir.iterdir()], ["clip_pc.mp4"])
+            self.assertTrue(Path(auto_poster).read_bytes().startswith(b"\xff\xd8"))
+
+            # Si existe _miniatura.jpg (Portada IA con frase), tiene prioridad inmediata
+            portada_ia = vdir / "clip_pc_miniatura.jpg"
+            portada_ia.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 32 + b"\xff\xd9")
+            elegida = calidad_video.asegurar_miniatura_video(str(clip), cache_dir=str(cdir))
+            self.assertEqual(os.path.abspath(elegida), os.path.abspath(str(portada_ia)))
+
+    def test_smart_editor_per_clip_glass_vessel_lifecycle(self):
+        import smart_editor
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = os.path.join(tmp, "smart_clips_state.json")
+            prog_file = os.path.join(tmp, "smart_progress.txt")
+            live_dir = os.path.join(tmp, "live_previews")
+            clip1 = os.path.join(tmp, "clip_1.mp4")
+            clip2 = os.path.join(tmp, "clip_2.mp4")
+            thumb1 = os.path.join(tmp, "preview_1.jpg")
+            for p in (clip1, clip2):
+                Path(p).write_bytes(b"\x00\x00\x00\x18ftypmp42")
+            Path(thumb1).write_bytes(b"\xff\xd8\xff\xd9")
+
+            with patch.object(smart_editor, "CLIPS_STATE_FILE", state_file), \
+                 patch.object(smart_editor, "PROGRESS_FILE", prog_file), \
+                 patch.object(smart_editor, "LIVE_PREVIEW_DIR", live_dir):
+                smart_editor._iniciar_estado_clips(2)
+                smart_editor._fijar_lista_clips([
+                    {"inicio": 10.0, "fin": 40.0, "titulo": "Momento 1"},
+                    {"inicio": 55.0, "fin": 85.0, "titulo": "Momento 2"},
+                ], base=5.0)
+                smart_editor._activar_clip_runtime(0, p0=20, tramo=35, etapa="Siguiendo hablante")
+                smart_editor._actualizar_thumb_clip_runtime(0, thumb1)
+                smart_editor.write_progress("Renderizando Clip 1/2 (50%)", 38)
+
+                mid_state = json.loads(Path(state_file).read_text(encoding="utf-8"))
+                self.assertEqual(mid_state["clips_total"], 2)
+                self.assertEqual(mid_state["clips"][0]["titulo"], "Momento 1")
+                self.assertEqual(mid_state["clips"][0]["inicio"], 15.0)
+                self.assertEqual(mid_state["clips"][0]["estado"], "llenando")
+                self.assertGreater(mid_state["clips"][0]["pct"], 30)
+                self.assertEqual(mid_state["clips"][1]["estado"], "esperando")
+                self.assertIn("|38", Path(prog_file).read_text(encoding="utf-8"))
+
+                smart_editor._completar_clip_runtime(0, clip1, thumb1)
+                done_state = json.loads(Path(state_file).read_text(encoding="utf-8"))
+                self.assertEqual(done_state["clips"][0]["estado"], "listo")
+                self.assertEqual(done_state["clips"][0]["pct"], 100)
+                self.assertEqual(done_state["clips"][0]["archivo"], os.path.abspath(clip1))
+
+    def test_full_window_ui_and_bot_universal_thumbnails_wiring(self):
+        root = Path(__file__).resolve().parents[1]
+        index_html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+        bot_html = (root / "templates" / "bot.html").read_text(encoding="utf-8")
+
+        # Ventana completa integrada en lugar del antiguo popup flotante
+        self.assertIn('id="moduleBotUpload"', index_html)
+        self.assertNotIn('id="botUploadModal"', index_html)
+        self.assertIn('id="pcClipsGrid"', index_html)
+        self.assertIn('id="smartSplitGlassesGrid"', index_html)
+        self.assertIn('id="appleQuickPreviewModal"', index_html)
+
+        # Miniaturas universales + vasos llenándose + vista rápida en el bot
+        self.assertIn('id="vasos-activos-seccion"', bot_html)
+        self.assertIn('id="vista-rapida-dialog"', bot_html)
+        self.assertIn('class="clip-thumb-box', bot_html)
+        self.assertIn("pintarVasosActivos", bot_html)
+
+
 if __name__ == "__main__":
     unittest.main()

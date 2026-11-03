@@ -7,137 +7,341 @@
 <link rel="icon" type="image/svg+xml" href="/static/icons/my-content.svg">
 <link rel="alternate icon" href="/static/icons/my-content.ico">
 <meta name="theme-color" content="#0B1525">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <style>
 :root{
-  --bg:#080b11;--panel:#101520;--panel-elev:#151b28;--borde:rgba(255,255,255,.09);
-  --texto:#eef2f8;--suave:#8c96a8;--acento:#00e5ff;--acento-suave:rgba(0,229,255,.11);
-  --ok:#34d399;--mal:#f87171;--aviso:#fbbf24;--azul:#60a5fa
+  --bg:#05070c;--panel:rgba(20,25,37,.66);--panel-solid:#121724;--panel-elev:rgba(34,42,60,.74);
+  --borde:rgba(255,255,255,.09);--borde-luz:rgba(255,255,255,.15);
+  --texto:#f5f7fb;--suave:#94a3b8;--acento:#5ac8fa;--acento-azul:#0a84ff;--acento-suave:rgba(10,132,255,.16);
+  --ok:#30d158;--mal:#ff453a;--aviso:#ff9f0a;--azul:#64d2ff;
+  --spring:cubic-bezier(.22,1,.36,1)
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--texto);font:13.5px/1.45 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{
+  margin:0;background:var(--bg);color:var(--texto);
+  font:13.5px/1.48 -apple-system,BlinkMacSystemFont,"SF Pro Display","Plus Jakarta Sans",Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;letter-spacing:-.01em;min-height:100vh;position:relative;overflow-x:hidden
+}
+body::before,body::after{
+  content:"";position:fixed;width:580px;height:580px;border-radius:50%;filter:blur(135px);
+  pointer-events:none;z-index:-1;opacity:.16
+}
+body::before{top:-180px;left:-140px;background:#0a84ff}
+body::after{bottom:-200px;right:-140px;background:#5e5ce6}
 body.modo-embed .volver-app{display:none}
-header{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid var(--borde);
-  position:sticky;top:0;background:rgba(8,11,17,.92);backdrop-filter:blur(12px);z-index:20;flex-wrap:wrap}
-header h1{font:700 17px Outfit,sans-serif;margin:0;display:flex;align-items:center;gap:8px;letter-spacing:-.01em}
-#actividad{color:var(--suave);flex:1;min-width:160px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  background:rgba(255,255,255,.03);border:1px solid var(--borde);border-radius:99px;padding:4px 12px}
+body:not(.modo-embed) .solo-embed{display:none}
+
+/* Cabecera translúcida Apple Liquid Glass */
+header{
+  display:flex;align-items:center;gap:12px;padding:12px 22px;border-bottom:1px solid var(--borde);
+  position:sticky;top:0;background:rgba(9,12,20,.74);backdrop-filter:blur(32px) saturate(185%);
+  -webkit-backdrop-filter:blur(32px) saturate(185%);z-index:25;flex-wrap:wrap;
+  box-shadow:inset 0 -1px 0 rgba(255,255,255,.03)
+}
+header h1{
+  font:700 17.5px/1.2 "Plus Jakarta Sans",-apple-system,sans-serif;margin:0;
+  display:flex;align-items:center;gap:9px;letter-spacing:-.022em;color:#fff
+}
+#actividad{
+  color:var(--suave);flex:1;min-width:180px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:rgba(255,255,255,.045);border:1px solid var(--borde);border-radius:99px;padding:6px 14px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07)
+}
 #actividad b{color:var(--texto);font-weight:600}
 
-/* Navegación compacta por pestañas */
-.bot-nav-wrap{position:sticky;top:55px;z-index:18;background:rgba(8,11,17,.9);backdrop-filter:blur(12px);
-  border-bottom:1px solid var(--borde);padding:8px 18px}
-.bot-tabs{display:flex;gap:6px;max-width:1280px;margin:0 auto;overflow-x:auto;scrollbar-width:none}
+/* Control segmentado estilo macOS / iOS */
+.bot-nav-wrap{
+  position:sticky;top:57px;z-index:22;background:rgba(9,12,20,.68);
+  backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);
+  border-bottom:1px solid var(--borde);padding:8px 22px
+}
+.bot-tabs{
+  display:inline-flex;gap:4px;max-width:100%;overflow-x:auto;scrollbar-width:none;
+  background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.075);
+  border-radius:14px;padding:4px;box-shadow:inset 0 1px 2px rgba(0,0,0,.35)
+}
 .bot-tabs::-webkit-scrollbar{display:none}
-.bot-tab{background:transparent;border:1px solid transparent;color:var(--suave);border-radius:10px;
-  padding:7px 13px;font:500 13px Inter,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.16s}
-.bot-tab:hover{color:var(--texto);background:rgba(255,255,255,.04)}
-.bot-tab.activa{background:var(--acento-suave);border-color:rgba(0,229,255,.32);color:var(--acento);font-weight:600}
-.tab-badge{font-size:11px;padding:1px 7px;border-radius:99px;background:rgba(255,255,255,.08);color:var(--texto)}
-.bot-tab.activa .tab-badge{background:rgba(0,229,255,.2);color:var(--acento)}
+.bot-tab{
+  background:transparent;border:1px solid transparent;color:var(--suave);border-radius:10px;
+  padding:7px 14px;font:500 13px inherit;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+  transition:all .26s var(--spring)
+}
+.bot-tab:hover{color:var(--texto);background:rgba(255,255,255,.05)}
+.bot-tab.activa{
+  background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.08));
+  border-color:rgba(255,255,255,.16);color:#fff;font-weight:600;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 4px 12px rgba(0,0,0,.28)
+}
+.tab-badge{
+  font-size:11px;padding:1px 7px;border-radius:99px;background:rgba(255,255,255,.09);
+  color:var(--texto);font-variant-numeric:tabular-nums
+}
+.bot-tab.activa .tab-badge{background:var(--acento-azul);color:#fff}
 
-main{max-width:1280px;margin:0 auto;padding:16px 18px 36px}
-.vista-panel{display:none;gap:14px}
-.vista-panel.activa{display:grid;grid-template-columns:repeat(12,minmax(0,1fr))}
+main{max-width:1420px;margin:0 auto;padding:20px 22px 44px}
+.vista-panel{display:none;gap:16px}
+.vista-panel.activa{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));animation:appleFadeIn .32s var(--spring)}
+@keyframes appleFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .col-12{grid-column:span 12}
 .col-7{grid-column:span 7}
 .col-6{grid-column:span 6}
 .col-5{grid-column:span 5}
-@media(max-width:920px){.col-7,.col-6,.col-5{grid-column:span 12}}
+@media(max-width:960px){.col-7,.col-6,.col-5{grid-column:span 12}}
 
-.card{min-width:0;background:var(--panel);border:1px solid var(--borde);border-radius:14px;padding:15px 16px;
-  box-shadow:0 8px 24px rgba(0,0,0,.22)}
-.card h2{font:600 15px Outfit,sans-serif;margin:0 0 10px;display:flex;align-items:center;gap:8px}
-.card h2 small{font:400 12px Inter,sans-serif;color:var(--suave);margin-left:auto}
+/* Superficies Liquid Glass */
+.card{
+  min-width:0;background:var(--panel);backdrop-filter:blur(28px) saturate(175%);
+  -webkit-backdrop-filter:blur(28px) saturate(175%);border:1px solid var(--borde);border-radius:20px;
+  padding:18px 20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 18px 42px -12px rgba(0,0,0,.48);
+  transition:border-color .28s ease,box-shadow .28s ease
+}
+.card h2{
+  font:600 15.5px/1.25 "Plus Jakarta Sans",-apple-system,sans-serif;letter-spacing:-.018em;
+  margin:0 0 12px;display:flex;align-items:center;gap:8px;color:#fff
+}
+.card h2 small{font:400 12px inherit;color:var(--suave);margin-left:auto;letter-spacing:0}
 .ancho{grid-column:1/-1}
 
-input,select,textarea{background:#090d14;border:1px solid var(--borde);color:var(--texto);border-radius:9px;
-  padding:7px 10px;font:inherit;width:100%;transition:border-color .15s}
-input:focus,select:focus,textarea:focus{outline:none;border-color:rgba(0,229,255,.55)}
-textarea{resize:vertical;min-height:58px}
-label{font-size:12px;color:var(--suave);display:block;margin:6px 0 4px}
+input,select,textarea{
+  background:rgba(8,11,18,.62);border:1px solid rgba(255,255,255,.11);color:var(--texto);border-radius:12px;
+  padding:8px 12px;font:inherit;width:100%;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.28)
+}
+input:focus,select:focus,textarea:focus{
+  outline:none;border-color:rgba(90,200,250,.65);background:rgba(12,17,28,.85);
+  box-shadow:0 0 0 3px rgba(10,132,255,.22)
+}
+textarea{resize:vertical;min-height:62px}
+label{font-size:12px;font-weight:500;color:var(--suave);display:block;margin:7px 0 4px}
 .fila{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .fila>*{flex:1}
-button{background:var(--panel-elev);color:var(--texto);border:1px solid var(--borde);border-radius:9px;padding:6px 11px;
-  font:500 12.5px Inter,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto;transition:.15s}
-button:hover{border-color:rgba(255,255,255,.24);background:#1b2333}
-button.prim{background:var(--acento);color:#001318;border:0;font-weight:600}
-button.prim:hover{filter:brightness(1.06)}
-button.peligro:hover{border-color:var(--mal);color:var(--mal)}
-button.mini{padding:4px 8px;font-size:11.5px}
+
+button{
+  background:var(--panel-elev);color:var(--texto);border:1px solid rgba(255,255,255,.11);border-radius:12px;
+  padding:7px 13px;font:500 12.5px inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  white-space:nowrap;flex:0 0 auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.09);
+  transition:transform .2s var(--spring),background .2s ease,border-color .2s ease,box-shadow .2s ease
+}
+button:hover:not(:disabled){border-color:rgba(255,255,255,.24);background:rgba(50,62,88,.82);transform:translateY(-1px)}
+button:active:not(:disabled){transform:scale(.98)}
+button:disabled{opacity:.48;cursor:not-allowed}
+button.prim{
+  background:linear-gradient(135deg,#38bdf8 0%,#0a84ff 100%);color:#fff;border:1px solid rgba(255,255,255,.22);
+  font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.32),0 8px 20px -4px rgba(10,132,255,.45)
+}
+button.prim:hover:not(:disabled){filter:brightness(1.07);box-shadow:inset 0 1px 0 rgba(255,255,255,.38),0 10px 24px -4px rgba(10,132,255,.6)}
+button.peligro:hover:not(:disabled){border-color:rgba(255,69,58,.55);background:rgba(255,69,58,.14);color:#ff6961}
+button.mini{padding:5px 9px;font-size:11.5px;border-radius:9px}
 
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
-.chip{border:1px solid var(--borde);border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;user-select:none;background:#0a0e16;transition:.14s}
-.chip.on{border-color:var(--acento);color:var(--acento);background:var(--acento-suave)}
+.chip{
+  border:1px solid var(--borde);border-radius:99px;padding:5px 12px;font-size:12px;cursor:pointer;
+  user-select:none;background:rgba(10,14,24,.65);transition:all .22s var(--spring)
+}
+.chip:hover{border-color:rgba(255,255,255,.22)}
+.chip.on{
+  border-color:rgba(90,200,250,.55);color:#fff;
+  background:linear-gradient(135deg,rgba(10,132,255,.32),rgba(90,200,250,.18));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18)
+}
 
 table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{text-align:left;color:var(--suave);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--borde)}
-td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}
+th{text-align:left;color:var(--suave);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--borde)}
+td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
 td.acc{white-space:nowrap;text-align:right}
-.est{font-size:11.5px;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
-.e-ok,.e-listo,.e-publicada{color:var(--ok)} .e-error,.e-sin_login,.e-sin_destino{color:var(--mal)}
-.e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#64748b}
-.e-revisar,.e-sin_comprobar,.e-cancelando{color:var(--aviso)}
+.est{
+  font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;
+  border:1px solid currentColor;background:rgba(255,255,255,.03);white-space:nowrap
+}
+.e-ok,.e-listo,.e-publicada{color:var(--ok);background:rgba(48,209,88,.1)}
+.e-error,.e-sin_login,.e-sin_destino{color:var(--mal);background:rgba(255,69,58,.1)}
+.e-pendiente{color:#cbd5e1}
+.e-subiendo,.e-cortando,.e-descargando{color:var(--azul);background:rgba(100,210,255,.12)}
+.e-omitido{color:#64748b}
+.e-revisar,.e-sin_comprobar,.e-cancelando{color:var(--aviso);background:rgba(255,159,10,.12)}
 .plat{display:inline-flex;align-items:center;gap:4px}
 .muted{color:var(--suave);font-size:12px}
 .err{color:var(--mal);font-size:12px;max-width:380px;word-break:break-word}
 .tabla-scroll{max-height:340px;overflow:auto}
-#registro{background:#06080d;border:1px solid var(--borde);border-radius:9px;padding:10px;height:185px;overflow:auto;
-  font:11.5px/1.5 ui-monospace,Consolas,monospace;color:#86efac;white-space:pre-wrap}
-.switch{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12.5px;color:var(--texto)}
-.switch input{width:auto;accent-color:var(--acento)}
+#registro{
+  background:rgba(5,7,13,.78);border:1px solid var(--borde);border-radius:14px;padding:12px;height:195px;overflow:auto;
+  font:11.5px/1.55 "SF Mono",ui-monospace,Consolas,monospace;color:#86efac;white-space:pre-wrap
+}
 
-.ajustes{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:8px 12px}
-.metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin:0}
-.metrica{padding:10px 12px;background:var(--panel);border:1px solid var(--borde);border-radius:11px;font-size:12px;color:var(--suave)}
-.metrica b{display:block;font:700 20px Outfit,sans-serif;color:var(--acento);line-height:1.15;margin-bottom:2px}
+/* Interruptor nativo estilo iOS */
+.switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12.5px;color:var(--texto);user-select:none}
+.switch input[type=checkbox]{
+  appearance:none;-webkit-appearance:none;width:36px;height:21px;border-radius:99px;
+  background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.14);position:relative;
+  cursor:pointer;flex:0 0 36px;margin:0;transition:background .25s var(--spring),border-color .25s ease;box-shadow:none;padding:0
+}
+.switch input[type=checkbox]::after{
+  content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+  background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .25s var(--spring)
+}
+.switch input[type=checkbox]:checked{background:var(--ok);border-color:rgba(255,255,255,.22)}
+.switch input[type=checkbox]:checked::after{transform:translateX(15px)}
+
+.ajustes{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px}
+.metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:0}
+.metrica{
+  padding:13px 15px;background:var(--panel);backdrop-filter:blur(22px);border:1px solid var(--borde);
+  border-radius:16px;font-size:12px;color:var(--suave);box-shadow:inset 0 1px 0 rgba(255,255,255,.1)
+}
+.metrica b{
+  display:block;font:700 22px/1.15 "Plus Jakarta Sans",-apple-system,sans-serif;
+  color:#fff;margin-bottom:3px;font-variant-numeric:tabular-nums
+}
 .ayuda{font-size:12.5px;line-height:1.55;color:var(--suave);margin:6px 0}
-.ayuda-plegable{margin-top:8px;border-top:1px solid var(--borde);padding-top:6px}
+.ayuda-plegable{margin-top:10px;border-top:1px solid var(--borde);padding-top:8px}
 .ayuda-plegable>summary{cursor:pointer;font-size:12px;color:var(--suave);user-select:none;list-style:none;display:inline-flex;align-items:center;gap:5px}
 .ayuda-plegable>summary::-webkit-details-marker{display:none}
 .ayuda-plegable>summary:hover{color:var(--texto)}
 
-.grupo-edicion{border:1px solid var(--borde);border-radius:11px;background:rgba(255,255,255,.015);margin-top:10px;overflow:hidden}
-.grupo-edicion>summary{cursor:pointer;padding:10px 13px;font:600 13px Outfit,sans-serif;color:var(--texto);
-  display:flex;align-items:center;justify-content:space-between;list-style:none;user-select:none;background:rgba(255,255,255,.02)}
+.grupo-edicion{border:1px solid var(--borde);border-radius:16px;background:rgba(255,255,255,.02);margin-top:12px;overflow:hidden}
+.grupo-edicion>summary{
+  cursor:pointer;padding:12px 16px;font:600 13.5px "Plus Jakarta Sans",-apple-system,sans-serif;color:var(--texto);
+  display:flex;align-items:center;justify-content:space-between;list-style:none;user-select:none;background:rgba(255,255,255,.025)
+}
 .grupo-edicion>summary::-webkit-details-marker{display:none}
 .grupo-edicion>summary span.sub{font:400 11.5px Inter,sans-serif;color:var(--suave)}
-.grupo-edicion-cuerpo{padding:10px 13px 13px;border-top:1px solid var(--borde)}
+.grupo-edicion-cuerpo{padding:13px 16px 16px;border-top:1px solid var(--borde)}
 
 .rango label{margin:0;font-size:11.5px}
 .rango>div{flex:1;min-width:60px}
-#sub-preview{flex:0 0 84px;width:84px;height:126px;max-width:84px;object-fit:contain;border-radius:8px;background:#05060a;border:1px solid var(--borde)}
+#sub-preview{flex:0 0 84px;width:84px;height:126px;max-width:84px;object-fit:contain;border-radius:12px;background:#05060a;border:1px solid var(--borde)}
 #ed-resumen{flex:1 1 200px;min-width:0;margin:0}
-#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#171d2b;border:1px solid rgba(0,229,255,.35);
-  padding:9px 15px;border-radius:10px;display:none;z-index:99;box-shadow:0 12px 32px rgba(0,0,0,.5)}
+#toast{
+  position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:rgba(22,28,42,.88);
+  backdrop-filter:blur(24px);border:1px solid rgba(90,200,250,.38);padding:10px 18px;border-radius:99px;
+  display:none;z-index:99;box-shadow:0 16px 40px rgba(0,0,0,.55);font-weight:500
+}
 a{color:var(--acento);text-decoration:none}
 a:hover{text-decoration:underline}
 
-dialog.cookies-dialog{width:min(500px,calc(100% - 24px));max-height:90vh;color:var(--texto);padding:18px;background:var(--panel);border:1px solid var(--borde);border-radius:14px}
-dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.74)}
+dialog.cookies-dialog,#texto-dialog,#vista-rapida-dialog{
+  color:var(--texto);background:rgba(18,23,35,.9);backdrop-filter:blur(32px) saturate(185%);
+  -webkit-backdrop-filter:blur(32px) saturate(185%);border:1px solid var(--borde-luz);border-radius:22px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 32px 80px rgba(0,0,0,.75)
+}
+dialog.cookies-dialog{width:min(510px,calc(100% - 24px));max-height:90vh;padding:20px}
+dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
 .cookies-dialog h2{justify-content:space-between}
 .cookies-dialog button:disabled{opacity:.5;cursor:wait}
 #cookies-descarga-servidor{overflow-wrap:anywhere}
 
-/* Tarjetas de cola de subidas */
-.subidas-seccion h2{font:600 15px Outfit,sans-serif;margin:0 0 10px;display:flex;align-items:center;gap:8px}
-.subidas-seccion h2 small{font:400 12px Inter,sans-serif;color:var(--suave);margin-left:auto}
+/* === Vasos de Cristal Activos ("Estilo Llenando Vaso" en tiempo real) === */
+.vasos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,190px));gap:14px;margin-top:10px}
+.vaso-clip{
+  position:relative;aspect-ratio:9/16;border-radius:20px;overflow:hidden;isolation:isolate;
+  background:linear-gradient(160deg,rgba(255,255,255,.08),rgba(12,16,26,.88));
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:inset 0 1.5px 1px rgba(255,255,255,.28),inset 0 -8px 18px rgba(0,0,0,.55),0 14px 32px rgba(0,0,0,.45);
+  transition:transform .32s var(--spring),border-color .3s ease
+}
+.vaso-clip:hover{transform:translateY(-3px);border-color:rgba(90,200,250,.48)}
+.vaso-clip.es-listo{border-color:rgba(48,209,88,.48)}
+.vaso-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.48;z-index:0;transition:opacity .4s ease}
+.vaso-clip.es-listo .vaso-poster{opacity:.92}
+.vaso-video-local{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.58;z-index:0;pointer-events:none}
+.vaso-clip.es-listo .vaso-video-local{opacity:.92}
+.vaso-liquido{
+  position:absolute;left:0;right:0;bottom:0;height:0%;z-index:1;
+  background:linear-gradient(180deg,rgba(90,200,250,.60) 0%,rgba(10,132,255,.55) 50%,rgba(94,92,230,.68) 100%);
+  backdrop-filter:blur(4px) saturate(160%);-webkit-backdrop-filter:blur(4px) saturate(160%);
+  box-shadow:inset 0 2px 8px rgba(255,255,255,.35),0 -6px 18px rgba(10,132,255,.3);
+  transition:height .8s var(--spring),background .4s ease
+}
+.vaso-clip.es-listo .vaso-liquido{background:linear-gradient(180deg,rgba(48,209,88,.18),rgba(10,132,255,.14));backdrop-filter:none}
+.vaso-olas{position:absolute;top:-14px;left:0;width:200%;height:16px;overflow:hidden;pointer-events:none}
+.vaso-clip.es-listo .vaso-olas{display:none}
+.vaso-ola{width:100%;height:100%;display:block;animation:olaBot 3.6s linear infinite}
+.vaso-ola.atras{position:absolute;top:2px;left:0;opacity:.55;animation:olaBot 5.4s linear infinite reverse}
+@keyframes olaBot{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.vaso-burbujas{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.vaso-burbujas i{
+  position:absolute;bottom:-8px;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.48);
+  animation:burbujaBot 3s ease-in infinite
+}
+.vaso-burbujas i:nth-child(1){left:24%;animation-delay:0s}
+.vaso-burbujas i:nth-child(2){left:56%;width:7px;height:7px;animation-delay:1s}
+.vaso-burbujas i:nth-child(3){left:78%;width:4px;height:4px;animation-delay:1.9s}
+@keyframes burbujaBot{0%{transform:translateY(0);opacity:0}25%{opacity:.7}100%{transform:translateY(-170px);opacity:0}}
+.vaso-brillo{
+  position:absolute;inset:0;z-index:2;pointer-events:none;
+  background:linear-gradient(115deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,.02) 34%,transparent 62%,rgba(255,255,255,.06) 100%)
+}
+.vaso-capa{
+  position:relative;z-index:3;height:100%;padding:10px 11px;display:flex;flex-direction:column;justify-content:space-between;
+  background:linear-gradient(180deg,rgba(4,7,14,.55) 0%,rgba(4,7,14,.1) 46%,rgba(4,7,14,.8) 100%)
+}
+.vaso-chip{
+  font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:99px;background:rgba(8,12,22,.68);
+  border:1px solid rgba(255,255,255,.15);color:#f8fafc;backdrop-filter:blur(10px)
+}
+.vaso-centro{margin:auto 0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:5px}
+.vaso-pct{font:700 24px/1 "Plus Jakarta Sans",-apple-system,sans-serif;color:#fff;font-variant-numeric:tabular-nums;text-shadow:0 3px 12px rgba(0,0,0,.55)}
+.vaso-etapa{font-size:11px;color:#e2e8f0;background:rgba(6,10,18,.56);padding:3px 8px;border-radius:8px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vaso-play{
+  width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.32);
+  background:rgba(15,23,42,.7);backdrop-filter:blur(12px);color:#fff;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;font-size:16px
+}
+.vaso-play:hover{background:var(--acento-azul);transform:scale(1.08)}
+.vaso-pie{font-size:11.5px;font-weight:600;color:#fff;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 2px 6px rgba(0,0,0,.7)}
+.live-clips-tira{display:flex;gap:8px;overflow-x:auto;padding:8px 0 2px;scrollbar-width:thin}
+.live-seg-card{
+  position:relative;width:62px;height:108px;flex:0 0 62px;border-radius:12px;overflow:hidden;
+  background:linear-gradient(155deg,#131b2c,#080c15);border:1px solid rgba(255,255,255,.15);
+  box-shadow:0 6px 16px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.12)
+}
+.live-seg-card img{width:100%;height:100%;object-fit:cover;display:block}
+.live-seg-fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(10,132,255,.32),rgba(48,209,88,.45));pointer-events:none;transition:height .5s var(--spring)}
+.live-seg-badge{position:absolute;top:4px;left:4px;right:4px;font-size:9.5px;font-weight:700;padding:2px 5px;border-radius:99px;background:rgba(6,10,18,.74);color:#f8fafc;text-align:center;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live-seg-foot{position:absolute;left:4px;right:4px;bottom:4px;font-size:9.5px;font-weight:600;color:#fff;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,.85)}
+.live-seg-play{position:absolute;inset:0;border:0;border-radius:0;padding:0;background:rgba(6,10,18,.18);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+.live-seg-play:hover{background:rgba(10,132,255,.4);transform:none}
+
+/* Tarjetas de cola de subidas con Miniatura 9:16 Visible */
+.subidas-seccion h2{font:600 15.5px "Plus Jakarta Sans",-apple-system,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.subidas-seccion h2 small{font:400 12px inherit;color:var(--suave);margin-left:auto}
 .subidas-controles button{flex:0 0 auto}
-.subidas-lista{display:grid;gap:8px;margin-top:10px}
-.publicacion{background:#0c1018;border:1px solid var(--borde);border-radius:11px;overflow:hidden}
-.publicacion-resumen{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;cursor:pointer;list-style:none}
+.subidas-lista{display:grid;gap:10px;margin-top:12px}
+.publicacion{
+  background:rgba(14,19,30,.72);border:1px solid var(--borde);border-radius:16px;overflow:hidden;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07);transition:border-color .24s ease,transform .24s var(--spring)
+}
+.publicacion:hover{border-color:rgba(255,255,255,.17)}
+.publicacion-resumen{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 14px;cursor:pointer;list-style:none}
 .publicacion-resumen::-webkit-details-marker{display:none}
 .publicacion-resumen:focus-visible{outline:2px solid var(--acento);outline-offset:-3px}
-.publicacion-resumen h3{font:600 13.5px/1.35 Inter,sans-serif;margin:0 0 3px;overflow-wrap:anywhere}
+.publicacion-resumen-izq{display:flex;align-items:center;gap:13px;min-width:0;flex:1}
+.clip-thumb-box{
+  position:relative;width:50px;height:88px;flex:0 0 50px;border-radius:11px;overflow:hidden;
+  background:linear-gradient(145deg,#131a29,#090d16);border:1px solid rgba(255,255,255,.14);
+  box-shadow:0 6px 16px rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center
+}
+.clip-thumb-box img{width:100%;height:100%;object-fit:cover;display:block}
+.clip-thumb-box.sin-img img{display:none}
+.clip-thumb-play{
+  position:absolute;inset:0;background:rgba(4,8,16,.28);color:#fff;border:0;border-radius:0;padding:0;
+  display:flex;align-items:center;justify-content:center;opacity:.88;transition:opacity .2s ease,background .2s ease
+}
+.clip-thumb-box:hover .clip-thumb-play{opacity:1;background:rgba(10,132,255,.45);transform:none}
+.clip-thumb-play span{
+  width:24px;height:24px;border-radius:50%;background:rgba(10,14,24,.72);backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,.3);display:inline-flex;align-items:center;justify-content:center;font-size:11px
+}
+.publicacion-resumen h3{font:600 14px/1.35 inherit;margin:0 0 3px;overflow-wrap:anywhere;color:#fff}
 .publicacion-resumen-meta{font-size:12px;color:var(--suave)}
 .publicacion-resumen-estado{display:flex;gap:10px;align-items:center;white-space:nowrap}
-.publicacion-toggle{font-size:11.5px;color:var(--acento)}
+.publicacion-toggle{font-size:12px;color:var(--acento);font-weight:500}
 .publicacion-detalle:not([open]) .texto-contraer,.publicacion-detalle[open] .texto-expandir{display:none}
-.publicacion-cuerpo{display:grid;grid-template-columns:96px minmax(0,1fr);gap:16px;border-top:1px solid var(--borde);padding:13px 14px}
+.publicacion-cuerpo{display:grid;grid-template-columns:116px minmax(0,1fr);gap:18px;border-top:1px solid var(--borde);padding:15px 16px;background:rgba(7,10,17,.45)}
 .historial-subidas{margin-top:6px}
-.historial-subidas>summary{cursor:pointer;font:600 14px Outfit,sans-serif;padding:8px 0;color:var(--suave)}
-.publicacion video{width:100%;max-height:170px;aspect-ratio:9/16;object-fit:contain;background:var(--bg);border-radius:7px}
+.historial-subidas>summary{cursor:pointer;font:600 14px "Plus Jakarta Sans",sans-serif;padding:8px 0;color:var(--suave)}
+.publicacion video{width:100%;max-height:206px;aspect-ratio:9/16;object-fit:cover;background:#04060b;border-radius:12px;border:1px solid var(--borde)}
 .publicacion-cabecera{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px}
 .publicacion-datos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 16px;margin:12px 0}
 .publicacion-datos dt{font-size:11.5px;color:var(--suave);margin-bottom:2px}
@@ -145,38 +349,47 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.74)}
 .publicacion-texto{white-space:pre-wrap;overflow-wrap:anywhere;max-width:75ch;margin:4px 0 12px;font-size:12.5px}
 .publicacion-espera{color:var(--aviso);margin:6px 0;font-size:12px}
 .publicacion .err{max-width:75ch}
-.publicacion-acciones{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-.publicacion-acciones button{min-height:32px}
+.publicacion-acciones{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.publicacion-acciones button{min-height:33px}
 .publicacion-origen{font-size:12px;color:var(--suave);overflow-wrap:anywhere;margin:4px 0}
-.publicacion-falta{color:var(--suave);padding:18px 8px;border:1px dashed var(--borde);border-radius:7px;font-size:12px;text-align:center}
-.publicacion-vacia{padding:18px;color:var(--suave);border:1px dashed var(--borde);border-radius:9px;text-align:center;margin:0}
+.publicacion-falta{color:var(--suave);padding:18px 8px;border:1px dashed var(--borde);border-radius:12px;font-size:12px;text-align:center}
+.publicacion-vacia{padding:22px;color:var(--suave);border:1px dashed var(--borde);border-radius:14px;text-align:center;margin:0}
 
-/* Tarjetas compactas de cuentas */
-.cuentas-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
-.cuenta-panel{border:1px solid var(--borde);border-radius:12px;padding:13px 14px;background:#0b0f17;min-width:0;display:flex;flex-direction:column;gap:8px}
+/* Tarjetas compactas de cuentas con miniatura del próximo clip */
+.cuentas-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(305px,100%),1fr));gap:14px}
+.cuenta-panel{
+  border:1px solid var(--borde);border-radius:18px;padding:15px 16px;background:rgba(13,18,28,.72);
+  min-width:0;display:flex;flex-direction:column;gap:9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)
+}
 .cuenta-cabecera{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.cuenta-panel h3{font:600 15.5px Outfit,sans-serif;margin:0;display:flex;align-items:center;gap:6px}
+.cuenta-panel h3{font:600 15.5px "Plus Jakarta Sans",sans-serif;margin:0;display:flex;align-items:center;gap:6px;color:#fff}
 .cuenta-panel p{overflow-wrap:anywhere;margin:2px 0}
-.cuenta-panel .proximo{padding:9px 11px;border:1px solid rgba(96,165,250,.22);background:rgba(96,165,250,.04);border-radius:9px;font-size:12px}
-.cuenta-panel video{width:64px;max-height:98px;background:#05060a;border-radius:6px;flex:0 0 64px}
+.cuenta-panel .proximo{
+  padding:10px 12px;border:1px solid rgba(90,200,250,.22);
+  background:linear-gradient(145deg,rgba(10,132,255,.08),rgba(90,200,250,.03));border-radius:13px;font-size:12px
+}
+.cuenta-panel video{width:62px;height:110px;object-fit:cover;background:#05060a;border-radius:10px;flex:0 0 62px;border:1px solid rgba(255,255,255,.14)}
 .cuenta-panel .acc{display:flex;gap:6px;flex-wrap:wrap}
 .cuenta-panel input{min-width:0}
-.cuenta-avanzado{border-top:1px solid var(--borde);padding-top:7px;margin-top:2px}
-.cuenta-avanzado>summary{cursor:pointer;font-size:12px;color:var(--acento);list-style:none;user-select:none;display:flex;align-items:center;justify-content:space-between}
+.cuenta-avanzado{border-top:1px solid var(--borde);padding-top:8px;margin-top:2px}
+.cuenta-avanzado>summary{cursor:pointer;font-size:12px;color:var(--acento);list-style:none;user-select:none;display:flex;align-items:center;justify-content:space-between;font-weight:500}
 .cuenta-avanzado>summary::-webkit-details-marker{display:none}
 
-#texto-dialog{width:min(660px,95vw);max-height:90vh;overflow:auto;color:var(--texto);background:var(--panel);border:1px solid var(--borde);border-radius:14px;padding:18px}
-#texto-dialog::backdrop{background:rgba(0,0,0,.8)}
-#texto-dialog video{max-height:220px;max-width:100%;display:block;margin:auto;border-radius:8px}
-.cola-toolbar{background:rgba(255,255,255,.02);padding:8px 10px;border-radius:9px;border:1px solid var(--borde);margin-top:8px}
-.cola-toolbar input[type=checkbox],.seleccion-clip input{width:auto}
+#texto-dialog{width:min(680px,95vw);max-height:90vh;overflow:auto;padding:20px}
+#texto-dialog video{max-height:240px;max-width:100%;display:block;margin:auto;border-radius:12px}
+#vista-rapida-dialog{width:min(430px,94vw);padding:0;overflow:hidden}
+.cola-toolbar{background:rgba(255,255,255,.03);padding:9px 12px;border-radius:13px;border:1px solid var(--borde);margin-top:10px}
 
+@media(prefers-reduced-motion:reduce){
+  .vaso-ola,.vaso-burbujas i,.vista-panel.activa{animation:none!important}
+  .vaso-liquido,.vaso-clip,button,.publicacion{transition:none!important}
+}
 @media(max-width:650px){
   .publicacion-cuerpo{grid-template-columns:1fr;padding:12px;gap:12px}
   .publicacion-resumen{flex-wrap:wrap;padding:11px;gap:8px}
-  .publicacion video{max-height:150px;width:96px}
+  .publicacion video{max-height:170px;width:96px}
   .publicacion-datos{grid-template-columns:repeat(2,minmax(0,1fr))}
-  main{padding:12px}header{padding:10px 12px}.bot-nav-wrap{padding:6px 12px;top:50px}
+  main{padding:12px}header{padding:10px 14px}.bot-nav-wrap{padding:6px 14px;top:52px}
 }
 </style>
 </head>
@@ -185,6 +398,10 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.74)}
   <h1><img src="/static/icons/bot.svg" width="26" height="26" alt=""> Bot de subida</h1>
   <div id="actividad">Cargando…</div>
   <label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Encendido</label>
+  <button type="button" id="btn-bot-inmersivo" class="solo-embed" onclick="alternarModoInmersivoBot()" title="Ocultar o mostrar la barra lateral del programa">
+    <i class="ph ph-corners-out"></i> <span id="lbl-bot-inmersivo">Ampliar vista</span>
+  </button>
+  <a href="/bot" target="_blank" rel="noopener" class="solo-embed"><button type="button" title="Abrir en pestaña del navegador"><i class="ph ph-arrow-square-out"></i></button></a>
   <a href="/" class="volver-app"><button type="button"><i class="ph ph-arrow-left"></i> Volver</button></a>
 </header>
 
@@ -252,10 +469,10 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.74)}
       <h2><i class="ph-duotone ph-magic-wand"></i> 1. Editar con Smart Split y guardar en esta PC <small id="modo-activo"></small></h2>
       <div class="ajustes">
         <div><label for="modo_cola">Modo de trabajo del bot</label><select id="modo_cola">
+          <option value="alternar">Subir cada clip apenas esté listo en la PC (flujo continuo)</option>
           <option value="preparar_primero">Editar toda la cola y después publicar</option>
           <option value="solo_preparar">Solo editar y guardar · no publicar</option>
           <option value="solo_subir">Solo publicar los clips guardados</option>
-          <option value="alternar">Alternar edición y publicación</option>
         </select></div>
         <div><label for="ed-cuenta">Configuración de cuenta</label><select id="ed-cuenta" onchange="cambiarCuentaEdicion(this.value)"><option value="">General · cuentas sin preset propio</option></select></div>
         <div><label for="preset">Preset activo</label><select id="preset" onchange="cambiarPresetEdicion(this.value)"></select></div>
@@ -469,6 +686,11 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.74)}
       <p class="muted" id="carpeta-clips" style="overflow-wrap:anywhere;margin:6px 2px 0"></p>
     </div>
 
+    <section class="card col-12 subidas-seccion" id="vasos-activos-seccion" hidden>
+      <h2><i class="ph-duotone ph-drop-half-bottom"></i> Procesando ahora · Llenando clips <small id="vasos-activos-resumen"></small></h2>
+      <div id="vasos-activos" class="vasos-grid" aria-live="polite"></div>
+    </section>
+
     <section class="card col-12 subidas-seccion">
       <h2><i class="ph-duotone ph-upload-simple"></i> Clips listos y en cola <small id="res-subidas"></small></h2>
       <div class="fila">
@@ -548,6 +770,23 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.74)}
   <p id="texto-estado" aria-live="polite"></p>
   <div class="fila" style="margin-top:10px"><button onclick="cerrarTexto()">Cerrar</button><button id="texto-guardar" class="prim" onclick="guardarTexto()">Guardar texto</button></div>
 </dialog>
+
+<dialog id="vista-rapida-dialog" aria-labelledby="vista-rapida-titulo">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid var(--borde)">
+    <div style="min-width:0">
+      <div id="vista-rapida-titulo" style="font:600 14px 'Plus Jakarta Sans',-apple-system,sans-serif;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Vista previa del clip</div>
+      <div id="vista-rapida-meta" class="muted" style="font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+    </div>
+    <button type="button" class="mini" onclick="cerrarVistaRapidaBot()" aria-label="Cerrar vista previa">✕</button>
+  </div>
+  <div style="background:#03050a;display:flex;justify-content:center;align-items:center">
+    <video id="vista-rapida-video" controls playsinline preload="none" style="width:100%;max-height:74vh;aspect-ratio:9/16;object-fit:contain;background:#000"></video>
+  </div>
+  <div class="fila" style="padding:11px 16px;justify-content:space-between;border-top:1px solid var(--borde)">
+    <a id="vista-rapida-abrir" href="#" target="_blank" rel="noopener" style="font-size:12.5px">Abrir archivo completo ↗</a>
+    <button type="button" onclick="cerrarVistaRapidaBot()">Cerrar</button>
+  </div>
+</dialog>
 <div id="toast"></div>
 <datalist id="smart-presets"></datalist>
 
@@ -586,6 +825,9 @@ if (typeof window !== 'undefined' && typeof URLSearchParams !== 'undefined') {
   if (['cola','anadir','cuentas','edicion','sistema'].includes(hashVista)) cambiarPestanaBot(hashVista);
   window.addEventListener?.('message', ev => {
     if (ev?.data?.type === 'bot-switch-tab' && ev.data.tab) cambiarPestanaBot(ev.data.tab);
+    if (ev?.data?.type === 'bot-immersive-state' && $('lbl-bot-inmersivo')) {
+      $('lbl-bot-inmersivo').textContent = ev.data.immersive ? 'Mostrar menú' : 'Ampliar vista';
+    }
   });
 }
 
@@ -647,12 +889,15 @@ function tarjetaSubida(s) {
   const mejora = {off:'Sin mejora adicional',ia:'Real-ESRGAN IA',hd:'Realzado HD',sharpen:'Nitidez'}[edicion.upscale] || 'No registrada';
   const tramo = s.clip_inicio != null && s.clip_fin != null ? `${tiempoClip(s.clip_inicio)} – ${tiempoClip(s.clip_fin)} (${Math.round(s.clip_fin-s.clip_inicio)} s)` : 'No registrado';
   const peso = s.bytes == null ? 'No disponible' : `${(s.bytes/1024/1024).toFixed(1)} MB`;
-  const posterAttr = s.tiene_miniatura ? ` poster="/api/bot/miniatura/${id}"` : '';
-  const linkMiniatura = s.tiene_miniatura ? ` · <a href="/api/bot/miniatura/${id}" target="_blank" rel="noopener">Miniatura JPG</a>` : '';
+  const tieneArchivo = s.archivo_existe !== false;
+  const tieneMini = Boolean(s.tiene_miniatura || tieneArchivo);
+  const posterAttr = tieneMini ? ` poster="/api/bot/miniatura/${id}"` : '';
+  const linkMiniatura = tieneMini ? ` · <a href="/api/bot/miniatura/${id}" target="_blank" rel="noopener">${s.tiene_portada_ia ? 'Portada IA JPG' : 'Miniatura JPG'}</a>` : '';
+  const thumbResumen = `<div class="clip-thumb-box${tieneArchivo ? '' : ' sin-img'}">${tieneArchivo ? `<img src="/api/bot/miniatura/${id}" loading="lazy" alt="" onerror="this.parentElement.classList.add('sin-img')"><button type="button" class="clip-thumb-play" title="Vista previa rápida" aria-label="Vista previa rápida de publicación ${id}" onclick="event.preventDefault();event.stopPropagation();if(typeof abrirVistaRapidaBot==='function')abrirVistaRapidaBot(${id})"><span>▶</span></button>` : '<span class="muted" style="font-size:10px">—</span>'}</div>`;
   return `<details class="publicacion-detalle"><summary class="publicacion-resumen">
-    <div><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><div class="publicacion-resumen-meta">${esc(s.cuenta_nombre || 'Cuenta eliminada')} · ${esc(s.plataforma || '')} · ${tramo}${s.tiene_miniatura ? ' · Portada IA' : ''}</div></div>
+    <div class="publicacion-resumen-izq">${thumbResumen}<div style="min-width:0"><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><div class="publicacion-resumen-meta">${esc(s.cuenta_nombre || 'Cuenta eliminada')} · ${esc(s.plataforma || '')} · ${tramo}${s.tiene_portada_ia ? ' · Portada IA' : ''}</div></div></div>
     <div class="publicacion-resumen-estado"><span class="publicacion-estado">${est(s.estado === 'ok' ? 'publicada' : s.estado)}</span><span class="publicacion-toggle"><span class="texto-expandir">Ver detalles ▾</span><span class="texto-contraer">Contraer ▴</span></span></div>
-    </summary><div class="publicacion-cuerpo"><div>${s.archivo_existe !== false ? `<video controls playsinline preload="none"${posterAttr} src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>${linkMiniatura}` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
+    </summary><div class="publicacion-cuerpo"><div>${tieneArchivo ? `<video controls playsinline preload="none"${posterAttr} src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>${linkMiniatura}` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
     <div><div>${plat(s.plataforma)} ${esc({tiktok:"TikTok",youtube:"YouTube",facebook:"Facebook"}[s.plataforma] || "Plataforma no registrada")} · <b>${esc(s.cuenta_nombre || 'Cuenta eliminada')}</b> <span class="muted">· Publicación #${id}</span></div>
     <p class="publicacion-origen">${esc(s.origen || 'Origen no registrado')}${s.canal ? ' · '+esc(s.canal) : ''}${origen ? ` · <a href="${esc(origen)}" target="_blank" rel="noopener">Video original</a>` : ''}</p>
     <p class="publicacion-espera">${esc(s.espera || '')}</p><p class="publicacion-error err">${esc(s.error || '')}</p>
@@ -727,7 +972,7 @@ function tarjetaCuenta(c) {
     <p class="muted">${c.activa ? 'Cuenta activa' : 'Cuenta pausada'} · ${c.hoy}/${c.limite_dia} hoy · ${c.pendientes || 0} pendientes</p>
     <div class="proximo"><b>${faltan === null ? 'Sin hora estimada' : faltan ? 'Turno estimado en '+Math.floor(faltan/60)+' h '+faltan%60+' min' : 'Turno disponible'}</b>
       ${proxima ? '<div class="muted">'+fechaSubida(proxima)+'</div>' : ''}<p>${esc(c.espera || '')}</p>
-      ${siguiente ? `<div class="fila" style="margin-top:6px"><video controls preload="none" src="/api/bot/clip/${Number(siguiente.id)}" aria-label="Próximo clip de ${esc(c.nombre)}"></video><span style="font-size:12px">${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>` : ''}
+      ${siguiente ? `<div class="fila" style="margin-top:6px"><video controls preload="none" poster="/api/bot/miniatura/${Number(siguiente.id)}" src="/api/bot/clip/${Number(siguiente.id)}" aria-label="Próximo clip de ${esc(c.nombre)}"></video><span style="font-size:12px">${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>` : ''}
     </div>
     <div class="acc">
       <button onclick="pausarCuenta(${c.id},${!c.activa})">${c.activa ? 'Pausar cuenta' : 'Activar cuenta'}</button>
@@ -775,7 +1020,7 @@ function pintar() {
   $('avisos-estado').textContent = `${avisos.pendiente || 0} pendientes · ${avisos.enviado || 0} enviados · ${avisos.fallido || 0} fallidos`;
   $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
   pintarYoutubeAuto();
-  $('modo-activo').textContent = 'Modo: ' + ({preparar_primero:'editar cola y publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados',alternar:'alternar edición y subida'}[c.modo_cola] || c.modo_cola);
+  $('modo-activo').textContent = 'Modo: ' + ({alternar:'subir cada clip apenas esté listo',preparar_primero:'editar cola y publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados'}[c.modo_cola] || c.modo_cola);
   pintarPlan();
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
   pintarCuentas();
@@ -795,6 +1040,7 @@ function pintar() {
   const disponibles = new Set(E.subidas.filter(s=>['pendiente','error'].includes(s.estado)).map(s=>s.id));
   for (const id of seleccionCola) if (!disponibles.has(id)) seleccionCola.delete(id);
   pintarSubidas(E.subidas);
+  if (typeof pintarVasosActivos === 'function') pintarVasosActivos(E.vasos_activos || []);
   document.querySelectorAll('[data-seleccion-id]').forEach(el=>el.checked=seleccionCola.has(Number(el.dataset.seleccionId)));
   actualizarSeleccionCola();
   $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
@@ -854,13 +1100,26 @@ async function iniciarLive() {
 }
 async function cargarLives() {
   const data = await api('/api/bot/lives');
-  $('lives').innerHTML = (data.lives || []).map(live => `<tr>
+  $('lives').innerHTML = (data.lives || []).map(live => {
+    const resumenSeg = live.segmentos.map(s => `${esc(({sin_audio:'Sin audio · no se edita',audio_no_verificado:'Audio no verificable · no se edita'})[s.estado] || s.estado)}: ${s.n}`).join(' · ') || 'Esperando el primer segmento';
+    const tira = (live.clips_recientes || []).length ? `<div class="live-clips-tira">${live.clips_recientes.map(seg => {
+      const cap = !!seg.capturando_ahora;
+      const imp = !cap && ['listo','encolado'].includes(seg.estado);
+      const niv = cap ? 42 : imp ? 78 : 100;
+      const badge = cap ? 'Capturando' : imp ? 'A PC…' : (seg.estado === 'procesado' ? 'Listo' : seg.estado);
+      const pie = seg.duracion > 0 ? `${Math.round(seg.duracion)} s` : 'En vivo';
+      const img = seg.thumb_url ? `<img src="${esc(seg.thumb_url)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '';
+      const play = (!cap && seg.video_url) ? `<button type="button" class="live-seg-play" title="Vista previa del tramo capturado" data-v="${esc(seg.video_url)}" data-p="${esc(seg.thumb_url || '')}" data-t="${esc((live.titulo || 'Live') + ' · ' + seg.nombre)}" onclick="abrirVistaRapidaUrlBot(this.dataset.v,this.dataset.p,this.dataset.t,'YouTube Live capturado en esta PC')">▶</button>` : '';
+      return `<div class="live-seg-card" title="${esc(seg.nombre + ' · ' + badge)}">${img}${imp || cap ? `<div class="live-seg-fill" style="height:${niv}%"></div>` : ''}<span class="live-seg-badge">${esc(badge)}</span>${play}<span class="live-seg-foot">${esc(pie)}</span></div>`;
+    }).join('')}</div>` : '';
+    return `<tr>
     <td><a href="${esc(live.url)}" target="_blank" rel="noopener">${esc(live.titulo || 'YouTube Live')}</a>
       <div class="muted">${live.mode === 'ai' ? `IA: ${live.seconds} s por cada ${live.window} s` : `Partes de unos ${live.seconds} s`} · ${live.accounts.map(id => esc((E.cuentas || []).find(c => c.id === id)?.nombre || `Cuenta ${id}`)).join(', ')}</div></td>
     <td>${esc(live.estado)}<div class="muted">${esc(live.detalle)}</div></td>
-    <td>${live.segmentos.map(s => `${esc(({sin_audio:'Sin audio · no se edita',audio_no_verificado:'Audio no verificable · no se edita'})[s.estado] || s.estado)}: ${s.n}`).join('<br>') || 'Esperando el primer segmento'}</td>
+    <td><div>${resumenSeg}</div>${tira}</td>
     <td>${['conectando','capturando','reconectando','deteniendo'].includes(live.estado) ?
-      `<button onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener captura</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No hay capturas activas.</td></tr>';
+      `<button onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener captura</button>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="muted">No hay capturas activas.</td></tr>';
 }
 async function detenerLive(id) { await api(`/api/bot/lives/${id}/detener`, {}); await cargarLives(); }
 async function cfg(cambios) { await api('/api/bot/config', cambios); cargar(); }
@@ -969,9 +1228,18 @@ async function encolar() {
 }
 
 function elegirArchivosLocales() {
-  archivosLocales = Array.from($('local-archivos').files || []).map(file => ({file, estado:'pendiente',
-    clave:Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join(''),
-    mensaje:'Por guardar', datos:null}));
+  if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+    for (const prev of archivosLocales) { if (prev && prev.previewUrl) { try { URL.revokeObjectURL(prev.previewUrl); } catch (_) {} } }
+  }
+  archivosLocales = Array.from($('local-archivos').files || []).map(file => {
+    let previewUrl = '';
+    if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob !== 'undefined' && file instanceof Blob) {
+      try { previewUrl = URL.createObjectURL(file); } catch (_) {}
+    }
+    return {file, estado:'pendiente', pct:0, previewUrl,
+      clave:Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join(''),
+      mensaje:'Por guardar', datos:null};
+  });
   pintarLocales();
 }
 
@@ -983,8 +1251,22 @@ function pintarLocales() {
   const cuentas = (E?.cuentas || []).filter(c => c.plataforma === $('local-plataforma').value);
   selLocal = new Set([...selLocal].filter(id => cuentas.some(c => c.id === id)));
   chips('chips-locales', selLocal, cuentas, bloqueado);
-  $('local-lista').innerHTML = archivosLocales.map(a =>
-    `<div><b>${esc(a.file.name)}</b> · ${esc(a.mensaje)}</div>`).join('');
+  const waveSvg = '<svg class="vaso-ola" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(90,200,250,0.62)" d="M0,8 C30,16 60,0 120,8 C180,16 210,0 240,8 L240,16 L0,16 Z"></path></svg><svg class="vaso-ola atras" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(94,92,230,0.52)" d="M0,8 C40,0 80,16 120,8 C160,0 200,16 240,8 L240,16 L0,16 Z"></path></svg>';
+  $('local-lista').innerHTML = archivosLocales.length ? `<div class="vasos-grid">${archivosLocales.map((a, idx) => {
+    const listo = a.estado === 'guardado';
+    const pct = listo ? 100 : Math.max(a.estado === 'enviando' ? 8 : 0, Math.min(100, Number(a.pct) || 0));
+    const media = a.previewUrl ? `<video class="vaso-video-local" src="${esc(a.previewUrl)}#t=0.2" muted playsinline preload="metadata"></video>` : '';
+    return `<div class="vaso-clip${listo ? ' es-listo' : ''}">
+      ${media}
+      <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
+      <div class="vaso-brillo"></div>
+      <div class="vaso-capa">
+        <div style="display:flex;justify-content:space-between;gap:4px"><span class="vaso-chip">Clip ${idx + 1}</span><span class="vaso-chip">${listo ? 'Listo' : a.estado === 'error' ? 'Error' : pct + '%'}</span></div>
+        <div class="vaso-centro"><div class="vaso-pct">${pct}%</div><div class="vaso-etapa">${esc(a.mensaje)}</div></div>
+        <div class="vaso-pie"><b>${esc(a.file.name)}</b> · ${esc(a.mensaje)}</div>
+      </div>
+    </div>`;
+  }).join('')}</div>` : '';
   $('local-enviar').disabled = enviandoLocales || !archivosLocales.some(a => a.estado !== 'guardado');
   $('local-enviar').textContent = enviandoLocales ? 'Guardando archivos…' :
     archivosLocales.some(a => a.estado === 'error') ? 'Reintentar pendientes' : 'Guardar y añadir a la cola';
@@ -997,10 +1279,16 @@ function enviarArchivoLocal(item) {
     form.append('texto', item.datos.texto);
     const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/bot/archivos');
     xhr.upload.onprogress = event => {
-      item.mensaje = event.lengthComputable ? `Copiando: ${Math.round(event.loaded / event.total * 100)} %` : 'Copiando…';
+      if (event.lengthComputable && event.total > 0) {
+        item.pct = Math.round(event.loaded / event.total * 92);
+        item.mensaje = `Copiando: ${Math.round(event.loaded / event.total * 100)} %`;
+      } else {
+        item.pct = Math.max(item.pct || 0, 25);
+        item.mensaje = 'Copiando…';
+      }
       pintarLocales();
     };
-    xhr.upload.onload = () => { item.mensaje = 'Guardando y creando la cola…'; pintarLocales(); };
+    xhr.upload.onload = () => { item.pct = 96; item.mensaje = 'Guardando y creando la cola…'; pintarLocales(); };
     xhr.onerror = () => reject(new Error('No se pudo confirmar el guardado. Pulsa Reintentar pendientes.'));
     xhr.onabort = () => reject(new Error('Transferencia interrumpida. Puedes reintentar.'));
     xhr.onload = () => {
@@ -1030,10 +1318,11 @@ async function encolarArchivosLocales() {
   pintarLocales();
   try {
     for (const item of pendientes) {
-      item.estado = 'enviando'; item.mensaje = 'Copiando…'; pintarLocales();
+      item.estado = 'enviando'; item.pct = Math.max(item.pct || 0, 6); item.mensaje = 'Copiando…'; pintarLocales();
       try {
         const result = await enviarArchivoLocal(item);
-        item.estado = 'guardado'; item.mensaje = `Guardado · ${result.publicaciones} publicación(es) en cola`;
+        item.estado = 'guardado'; item.pct = 100; item.mensaje = `Guardado · ${result.publicaciones} publicación(es) en cola`;
+        Promise.resolve(cargar()).catch(() => {});
       } catch (error) {
         item.estado = 'error'; item.mensaje = error.message;
       }
@@ -1537,6 +1826,7 @@ function revisarTexto(id) {
   $('texto-titulo').value = lineas.shift() || '';
   $('texto-hashtags').value = /^\s*#/.test(lineas.at(-1) || '') ? lineas.pop() : '';
   $('texto-descripcion').value = lineas.join('\n').trim();
+  $('texto-video').poster = `/api/bot/miniatura/${id}`;
   $('texto-video').src = `/api/bot/clip/${id}`;
   $('texto-estado').textContent = 'Revisando el clip de ' + (s.cuenta_nombre || 'esta cuenta');
   $('texto-dialog').showModal();
@@ -1566,6 +1856,71 @@ window.addEventListener('beforeunload', event => {
   try { if (!editorPromesa && firmaEditor() === editorGuardado) return; } catch (e) {}
   event.preventDefault(); event.returnValue = '';
 });
+let vasosActivosCache = [];
+function pintarVasosActivos(vasos) {
+  const sec = $('vasos-activos-seccion'), grid = $('vasos-activos'), res = $('vasos-activos-resumen');
+  if (!sec || !grid) return;
+  const lista = Array.isArray(vasos) ? vasos : [];
+  vasosActivosCache = lista;
+  sec.hidden = !lista.length;
+  if (!lista.length) { grid.innerHTML = ''; return; }
+  if (res) res.textContent = `${lista.length} clip(s) en proceso`;
+  const waveSvg = '<svg class="vaso-ola" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(90,200,250,0.62)" d="M0,8 C30,16 60,0 120,8 C180,16 210,0 240,8 L240,16 L0,16 Z"></path></svg><svg class="vaso-ola atras" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(94,92,230,0.52)" d="M0,8 C40,0 80,16 120,8 C160,0 200,16 240,8 L240,16 L0,16 Z"></path></svg>';
+  const firma = JSON.stringify(lista);
+  if (grid.dataset.firma === firma) return;
+  grid.dataset.firma = firma;
+  grid.innerHTML = lista.map((v, idx) => {
+    const listo = v.estado === 'listo';
+    const pct = Math.max(0, Math.min(100, Number(v.pct) || 0));
+    const etiqueta = v.tipo === 'subida' ? 'Subiendo' : v.tipo === 'live' ? (listo ? 'Live listo' : 'Live → PC') : (listo ? 'Listo' : 'Cortando');
+    const poster = v.thumb_url ? `<img class="vaso-poster" src="${esc(v.thumb_url)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '';
+    const playBtn = v.video_url ? `<button type="button" class="vaso-play" title="Vista previa del clip" onclick="abrirVistaRapidaVaso(${idx})">▶</button>` : '';
+    return `<div class="vaso-clip${listo ? ' es-listo' : ''}">
+      ${poster}
+      <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
+      <div class="vaso-brillo"></div>
+      <div class="vaso-capa">
+        <div style="display:flex;justify-content:space-between;gap:4px"><span class="vaso-chip">${esc(etiqueta)}</span><span class="vaso-chip">${pct}%</span></div>
+        <div class="vaso-centro">${playBtn || `<div class="vaso-pct">${pct}%</div>`}<div class="vaso-etapa" title="${esc(v.etapa || '')}">${esc(v.etapa || 'Procesando…')}</div></div>
+        <div class="vaso-pie" title="${esc(v.titulo || '')}">${esc(v.titulo || 'Clip')}<div class="muted" style="font-weight:400;font-size:10.5px">${esc(v.subtitulo || '')}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function abrirVistaRapidaUrlBot(videoUrl, posterUrl, titulo, meta) {
+  const dlg = $('vista-rapida-dialog'), vid = $('vista-rapida-video');
+  if (!dlg || !vid || !videoUrl) return;
+  if ($('vista-rapida-titulo')) $('vista-rapida-titulo').textContent = titulo || 'Vista previa del clip';
+  if ($('vista-rapida-meta')) $('vista-rapida-meta').textContent = meta || '';
+  if ($('vista-rapida-abrir')) $('vista-rapida-abrir').href = videoUrl;
+  vid.poster = posterUrl || '';
+  vid.src = videoUrl;
+  if (!dlg.open) dlg.showModal();
+  vid.play().catch(() => {});
+}
+function abrirVistaRapidaVaso(idx) {
+  const v = vasosActivosCache[idx];
+  if (!v || !v.video_url) return;
+  abrirVistaRapidaUrlBot(v.video_url, v.thumb_url || '', v.titulo || 'Clip en proceso', v.subtitulo || v.etapa || '');
+}
+function abrirVistaRapidaBot(id) {
+  const s = (E?.subidas || []).find(x => Number(x.id) === Number(id));
+  const titulo = s ? (s.video_titulo || String(s.texto || '').split('\n')[0] || base(s.archivo)) : `Clip #${id}`;
+  const meta = s ? `${s.cuenta_nombre || 'Cuenta'} · ${s.plataforma || ''}` : '';
+  abrirVistaRapidaUrlBot(`/api/bot/clip/${Number(id)}`, `/api/bot/miniatura/${Number(id)}`, titulo, meta);
+}
+function cerrarVistaRapidaBot() {
+  const dlg = $('vista-rapida-dialog'), vid = $('vista-rapida-video');
+  if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
+  if (dlg && dlg.open) dlg.close();
+}
+$('vista-rapida-dialog')?.addEventListener('close', () => {
+  const vid = $('vista-rapida-video');
+  if (vid) vid.pause();
+});
+function alternarModoInmersivoBot() {
+  try { window.parent?.postMessage({type: 'bot-toggle-immersive'}, '*'); } catch (_) {}
+}
 async function cargarVocesComentario() {
   try {
     const r = await fetch('/api/voces');

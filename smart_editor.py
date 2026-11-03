@@ -21,6 +21,9 @@ from smart_dubbing import dub, validate_options
 
 SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PROGRESS_FILE = os.path.join(paths.TEMP_DIR, "smart_progress.txt")
+CLIPS_STATE_FILE = os.path.join(paths.TEMP_DIR, "smart_clips_state.json")
+LIVE_PREVIEW_DIR = os.path.join(paths.TEMP_DIR, "smart_live_previews")
+_CLIPS_RUNTIME = None
 GROQ_TIMEOUT = (10, 120)
 
 
@@ -220,12 +223,184 @@ def _escribir_wav_estereo_48k(ruta: str, pcm: np.ndarray) -> None:
         w.writeframes(np.ascontiguousarray(pcm, dtype="<i2").tobytes())
 
 
+def _escribir_estado_clips_json():
+    if not isinstance(_CLIPS_RUNTIME, dict):
+        return
+    try:
+        os.makedirs(os.path.dirname(CLIPS_STATE_FILE) or ".", exist_ok=True)
+        tmp = CLIPS_STATE_FILE + f".{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_CLIPS_RUNTIME, f, ensure_ascii=False)
+        os.replace(tmp, CLIPS_STATE_FILE)
+    except Exception:
+        pass
+
+
+def _iniciar_estado_clips(num_estimado=1):
+    global _CLIPS_RUNTIME
+    import time as _time
+    n = max(1, min(24, int(num_estimado or 1)))
+    try:
+        os.makedirs(LIVE_PREVIEW_DIR, exist_ok=True)
+        for fn in os.listdir(LIVE_PREVIEW_DIR):
+            if fn.endswith(".jpg"):
+                try:
+                    os.remove(os.path.join(LIVE_PREVIEW_DIR, fn))
+                except OSError:
+                    pass
+    except Exception:
+        pass
+    _CLIPS_RUNTIME = {
+        "run_id": str(int(_time.time() * 1000)),
+        "updated_at": _time.time(),
+        "global_pct": 2,
+        "stage": "Iniciando Smart Split...",
+        "clips_total": n,
+        "clip_actual": 0,
+        "clip_p0": 0.0,
+        "clip_tramo": 0.0,
+        "clips": [
+            {
+                "index": i + 1,
+                "titulo": f"Clip {i + 1}",
+                "inicio": None,
+                "fin": None,
+                "estado": "preparando",
+                "pct": 4,
+                "etapa": "Analizando video",
+                "archivo": "",
+                "thumb": "",
+            }
+            for i in range(n)
+        ],
+    }
+    _escribir_estado_clips_json()
+
+
+def _fijar_lista_clips(seleccion, base=0.0):
+    if not isinstance(_CLIPS_RUNTIME, dict):
+        return
+    import time as _time
+    nuevos = []
+    for i, c in enumerate(seleccion or []):
+        ini = float(c.get("inicio", 0.0)) + float(base or 0.0)
+        fin = float(c.get("fin", 0.0)) + float(base or 0.0)
+        nuevos.append({
+            "index": i + 1,
+            "titulo": str(c.get("titulo") or f"Clip {i + 1}").strip() or f"Clip {i + 1}",
+            "inicio": round(ini, 2),
+            "fin": round(fin, 2),
+            "estado": "esperando",
+            "pct": 0,
+            "etapa": "En espera de turno",
+            "archivo": "",
+            "thumb": "",
+        })
+    _CLIPS_RUNTIME["clips_total"] = len(nuevos)
+    _CLIPS_RUNTIME["clips"] = nuevos
+    _CLIPS_RUNTIME["updated_at"] = _time.time()
+    _escribir_estado_clips_json()
+
+
+def _activar_clip_runtime(idx, p0, tramo, etapa="Preparando encuadre"):
+    if not isinstance(_CLIPS_RUNTIME, dict):
+        return
+    import time as _time
+    _CLIPS_RUNTIME["clip_actual"] = idx + 1
+    _CLIPS_RUNTIME["clip_p0"] = float(p0)
+    _CLIPS_RUNTIME["clip_tramo"] = max(1.0, float(tramo))
+    clips = _CLIPS_RUNTIME.get("clips") or []
+    if 0 <= idx < len(clips):
+        clips[idx]["estado"] = "llenando"
+        clips[idx]["pct"] = max(int(clips[idx].get("pct") or 0), 6)
+        clips[idx]["etapa"] = etapa
+    _CLIPS_RUNTIME["updated_at"] = _time.time()
+    _escribir_estado_clips_json()
+
+
+def _actualizar_thumb_clip_runtime(idx, thumb_path):
+    if not isinstance(_CLIPS_RUNTIME, dict) or not thumb_path or not os.path.isfile(thumb_path):
+        return
+    import time as _time
+    clips = _CLIPS_RUNTIME.get("clips") or []
+    if 0 <= idx < len(clips):
+        clips[idx]["thumb"] = os.path.abspath(thumb_path)
+        _CLIPS_RUNTIME["updated_at"] = _time.time()
+        _escribir_estado_clips_json()
+
+
+def _completar_clip_runtime(idx, archivo_path, thumb_path=""):
+    if not isinstance(_CLIPS_RUNTIME, dict):
+        return
+    import time as _time
+    clips = _CLIPS_RUNTIME.get("clips") or []
+    if 0 <= idx < len(clips):
+        clips[idx]["estado"] = "listo"
+        clips[idx]["pct"] = 100
+        clips[idx]["etapa"] = "Listo para reproducir"
+        if archivo_path and os.path.isfile(archivo_path):
+            clips[idx]["archivo"] = os.path.abspath(archivo_path)
+        if thumb_path and os.path.isfile(thumb_path):
+            clips[idx]["thumb"] = os.path.abspath(thumb_path)
+        elif archivo_path and os.path.isfile(archivo_path) and not clips[idx].get("thumb"):
+            try:
+                from calidad_video import asegurar_miniatura_video
+                gen_t = asegurar_miniatura_video(archivo_path, cache_dir=LIVE_PREVIEW_DIR)
+                if gen_t:
+                    clips[idx]["thumb"] = os.path.abspath(gen_t)
+            except Exception:
+                pass
+    _CLIPS_RUNTIME["updated_at"] = _time.time()
+    _escribir_estado_clips_json()
+
+
 def write_progress(msg, percent=0):
     try:
         tmp = PROGRESS_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(f"{msg}|{percent}")
         os.replace(tmp, PROGRESS_FILE)
+    except Exception:
+        pass
+    try:
+        if isinstance(_CLIPS_RUNTIME, dict):
+            import time as _time
+            pct_num = int(percent)
+            _CLIPS_RUNTIME["stage"] = str(msg or "")
+            _CLIPS_RUNTIME["global_pct"] = pct_num
+            _CLIPS_RUNTIME["updated_at"] = _time.time()
+            clips = _CLIPS_RUNTIME.get("clips") or []
+            actual = int(_CLIPS_RUNTIME.get("clip_actual") or 0)
+            if pct_num == -1:
+                for c in clips:
+                    if c.get("estado") in ("preparando", "llenando"):
+                        c["estado"] = "error"
+                        c["etapa"] = str(msg or "Error")[:120]
+            elif pct_num >= 100:
+                for c in clips:
+                    if c.get("archivo"):
+                        c["estado"] = "listo"
+                        c["pct"] = 100
+            elif actual == 0 and 0 <= pct_num <= 25:
+                pre_pct = max(4, min(22, int(round(pct_num * 0.85))))
+                limpio = str(msg or "Analizando video").split("...")[0].strip()
+                for c in clips:
+                    if c.get("estado") == "preparando":
+                        c["pct"] = max(int(c.get("pct") or 0), pre_pct)
+                        c["etapa"] = limpio[:60]
+            elif 1 <= actual <= len(clips):
+                c = clips[actual - 1]
+                if c.get("estado") != "listo":
+                    p0 = float(_CLIPS_RUNTIME.get("clip_p0") or 25.0)
+                    tramo = max(1.0, float(_CLIPS_RUNTIME.get("clip_tramo") or 70.0))
+                    local_pct = int(round(((float(percent) - p0) / tramo) * 100.0))
+                    c["estado"] = "llenando"
+                    c["pct"] = max(int(c.get("pct") or 6), min(98, max(6, local_pct)))
+                    etapa_limpia = re.sub(r"\s*·?\s*clip\s+\d+(\s+de\s+\d+)?", "", str(msg or ""), flags=re.I)
+                    etapa_limpia = etapa_limpia.replace("...", "").strip(" ·:")
+                    if etapa_limpia:
+                        c["etapa"] = etapa_limpia[:68]
+            _escribir_estado_clips_json()
     except Exception:
         pass
 
@@ -319,6 +494,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
     seleccion_opciones = dict(moment_focus=moment_focus, context_before_seconds=context_before_seconds, moment_query=moment_query)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
+    _fn_init_clips = globals().get("_iniciar_estado_clips")
+    if callable(_fn_init_clips):
+        _fn_init_clips(num_clips if clip_selection == "ai" else max(1, int(num_clips or 3)))
     write_progress("Iniciando Smart Split...", 3)
     print("Iniciando Smart Split · cortes consecutivos sin selección IA" if clip_selection == "sequential"
           else f"Iniciando Smart Split · motor: {motor['nombre']}")
@@ -403,6 +581,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 raise NoNewClips(ERROR_NUEVOS)
         for c in seleccion:
             print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['titulo']}")
+        _fn_fijar_clips = globals().get("_fijar_lista_clips")
+        if callable(_fn_fijar_clips):
+            _fn_fijar_clips(seleccion, base=base)
 
         orig_w, orig_h = clip.w, clip.h
         fixed_crop_w = max(2, int(round(orig_h * 9 / 16)))
@@ -439,6 +620,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             parte_num = idx + 1
             tramo = 70 / max(len(seleccion), 1)
             p0 = 25 + int(idx * tramo)
+            _fn_activar_clip = globals().get("_activar_clip_runtime")
+            if callable(_fn_activar_clip):
+                _fn_activar_clip(idx, p0, tramo, "Siguiendo caras y hablantes")
 
             # 3. Reencuadre: caras + hablante activo (+ pantalla dividida automática opcional)
             usar_split_auto = bool(auto_split and video_format == "vertical" and encuadre in ("caras", "zoom_dinamico"))
@@ -567,6 +751,33 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         from calidad_video import realzar_detalle_ampliacion
                         recorte = realzar_detalle_ampliacion(recorte, rw / max(fixed_crop_w, 1))
                     return recorte
+
+                try:
+                    _live_dir = globals().get("LIVE_PREVIEW_DIR")
+                    _fn_upd_thumb = globals().get("_actualizar_thumb_clip_runtime")
+                    if _live_dir and callable(_fn_upd_thumb) and hasattr(subclip, "get_frame"):
+                        pw, ph = (360, 640) if final_h >= final_w else (640, 360)
+                        t_snap = min(raw_dur * 0.25, max(0.0, raw_dur - 0.05))
+                        raw_snap = subclip.get_frame(t_snap)
+                        if getattr(raw_snap, "ndim", 0) == 3:
+                            cx_s, modo_s, par_s = (
+                                reencuadre.estado_en(tiempos, centros, modos_cam, pares_cam, t_snap)
+                                if hasattr(reencuadre, "estado_en")
+                                else (reencuadre.centro_en(tiempos, centros, t_snap), "simple", None)
+                            )
+                            modo_ef_s = "dividido" if modo_s == "dividido" else encuadre
+                            snap_rgb = (
+                                _encuadrar(raw_snap, modo_ef_s, cx_s, fixed_crop_w, pw, ph, 1.0, par_s)
+                                if par_s is not None
+                                else _encuadrar(raw_snap, modo_ef_s, cx_s, fixed_crop_w, pw, ph, 1.0)
+                            )
+                            if getattr(snap_rgb, "ndim", 0) == 3:
+                                os.makedirs(_live_dir, exist_ok=True)
+                                snap_path = os.path.join(_live_dir, f"preview_clip_{parte_num}.jpg")
+                                if cv2.imwrite(snap_path, cv2.cvtColor(snap_rgb, cv2.COLOR_RGB2BGR), [int(cv2.IMWRITE_JPEG_QUALITY), 85]):
+                                    _fn_upd_thumb(idx, snap_path)
+                except Exception:
+                    pass
 
                 eventos = []
                 if not usa_linea_tiempo:
@@ -858,6 +1069,10 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         )
                         thumb_jpg_path = saved_jpg or ""
                         thumb_quote = str(quote_meta.get("quote") or "")
+                        if thumb_jpg_path:
+                            _fn_upd_thumb2 = globals().get("_actualizar_thumb_clip_runtime")
+                            if callable(_fn_upd_thumb2):
+                                _fn_upd_thumb2(idx, thumb_jpg_path)
                         if auto_thumbnail == "cover_and_jpg" and getattr(thumb_rgb, "ndim", 0) == 3:
                             audio_ref = getattr(processed_clip, "audio", None)
                             processed_clip = processed_clip.transform(
@@ -898,6 +1113,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     from calidad_video import limpiar_metadatos_mp4
                     limpiar_metadatos_mp4(out_name)
                 generated_files.append(out_name)
+                _fn_done_clip = globals().get("_completar_clip_runtime")
+                if callable(_fn_done_clip):
+                    _fn_done_clip(idx, out_name, thumb_jpg_path)
 
                 # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
                 publicacion = cv.texto_publicacion(info)
@@ -918,20 +1136,34 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             f.write(f"\nDoblaje ({dubbing_language}):\n{translated}\n")
                 except OSError:
                     pass
+                clip_meta_item = {
+                    "archivo": out_name, "titulo": info["titulo"], "descripcion": info["descripcion"],
+                    "hashtags": info["hashtags"], "publicacion": publicacion,
+                    "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
+                    "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report,
+                    "clip_selection": clip_selection, "calidad_origen": calidad_origen,
+                    "moment_focus": moment_focus, "context_before_seconds": context_before_seconds,
+                    "momento_clave": base + info["momento_segundos"] if info.get("momento_segundos") is not None else None,
+                    "contexto_previo_real": info.get("contexto_previo_real"),
+                    "comentario": comm_meta,
+                    "miniatura": thumb_jpg_path,
+                    "miniatura_texto": thumb_quote,
+                }
                 if meta_salida is not None:
-                    meta_salida.append({
-                        "archivo": out_name, "titulo": info["titulo"], "descripcion": info["descripcion"],
-                        "hashtags": info["hashtags"], "publicacion": publicacion,
-                        "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
-                        "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report,
-                        "clip_selection": clip_selection, "calidad_origen": calidad_origen,
-                        "moment_focus": moment_focus, "context_before_seconds": context_before_seconds,
-                        "momento_clave": base + info["momento_segundos"] if info.get("momento_segundos") is not None else None,
-                        "contexto_previo_real": info.get("contexto_previo_real"),
-                        "comentario": comm_meta,
-                        "miniatura": thumb_jpg_path,
-                        "miniatura_texto": thumb_quote,
-                    })
+                    meta_salida.append(clip_meta_item)
+                _fn_hook_ready = globals().get("_HOOK_CLIP_LISTO")
+                if callable(_fn_hook_ready):
+                    try:
+                        _fn_hook_ready(idx, len(seleccion), out_name, clip_meta_item)
+                    except Exception:
+                        pass
+                try:
+                    import json as _json_ready
+                    print("RESULT_CLIP_READY:" + _json_ready.dumps(
+                        {"n": idx, "total": len(seleccion), "archivo": out_name, "meta": clip_meta_item},
+                        ensure_ascii=False), flush=True)
+                except Exception:
+                    pass
 
         write_progress("¡Proceso finalizado con éxito!", 100)
         print("¡Proceso finalizado!")
