@@ -34,6 +34,14 @@ El enlace solo dura mientras estén activos la libreta y el entorno. Google advi
 
 Validación local: `python -m unittest discover -s tests -p 'test_colab_notebook.py'`. Comprueba sintaxis, claves opcionales (sin pedir Hugging Face cuando está desactivado), preparación sin voces, arranque mediante healthcheck, errores del proxy y ocultación de claves en el diagnóstico con servicios simulados. No equivale a una ejecución real de los modelos o del proxy de Google.
 
+## Novedades de originalidad (`Para ti`), miniaturas automáticas, calidad 1080p y seguimiento LR-ASD
+
+- La celda **2B** instala **Modo Comentario IA**, **Miniatura automática con frase interesante del clip**, **Borrado sin pérdida de metadatos MP4**, **calidad NVENC con Adaptive Quantization (`AQ`)** y mejora de descarga HD en YouTube.
+- Cuando el bot de tu PC envía un corte a Colab, Colab fuerza automáticamente **1080p máxima calidad (`quality`)** aunque en tu PC tuvieras un perfil ligero de 720p, y envía de vuelta el clip limpio más su `_miniatura.jpg`.
+- La celda **5C** instala y verifica **LR-ASD** para detectar quién habla realmente en cámara usando GPUs con CUDA 12.6+ (`cu126` o `cu128`).
+- Para narrar el **Modo Comentario IA** con tu voz clonada sin activar doblaje multipersona ni pedir `HF_TOKEN`, pon `PREPARAR_VOZ_CLONADA = True` en la celda `1`.
+- Para aislar la voz limpia con Demucs (`Quitar música original`) o preservar fondo, activa `PREPARAR_FONDO = True` en la celda `1`.
+
 
 ## Seguimiento del hablante con audio y video
 

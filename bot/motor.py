@@ -43,7 +43,8 @@ CONFIG_DEFECTO = {
     "hora_fin": "23:30",
     "max_intentos": 3,
     "preset": NOMBRE_CALIDAD,  # preset de Smart Split si la regla no dice otro
-    "modo_cola": "preparar_primero",
+    "modo_cola": "alternar",
+    "flujo_continuo_v1": True,
     "estimacion_subida_min": 3.0,  # estimación del tiempo de transferencia/publicación
     "proxima_global": 0.0,    # conserva la pausa general si se reinicia la app
     "headless": False,       # False = ves el navegador trabajando
@@ -124,12 +125,14 @@ class Motor:
         self.actividad = "En espera"
         self._stop = threading.Event()
         self._despertar = threading.Event()
+        self._despertar_prep = threading.Event()
         self._cola_lock = threading.RLock()
         self._subida_actual = None
         self._edicion_actual = None
         self._sesiones_guard = threading.Lock()
         self._comprobando = set()
         self._hilo = None
+        self._hilo_prep = None
         self._ultimo_firebase = 0.0
         self._libre_global = self.cfg['proxima_global']
         self._remoto_caido_hasta = 0.0
@@ -149,7 +152,22 @@ class Motor:
     def _leer_cfg(self):
         try:
             with open(self._cfg_ruta, "r", encoding="utf-8") as f:
-                return {**CONFIG_DEFECTO, **json.load(f)}
+                guardado = json.load(f)
+            if not isinstance(guardado, dict):
+                return dict(CONFIG_DEFECTO)
+            cfg = {**CONFIG_DEFECTO, **guardado}
+            if not guardado.get("flujo_continuo_v1"):
+                if guardado.get("modo_cola") == "preparar_primero":
+                    cfg["modo_cola"] = "alternar"
+                cfg["flujo_continuo_v1"] = True
+                try:
+                    tmp = self._cfg_ruta + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as out_f:
+                        json.dump(cfg, out_f, ensure_ascii=False, indent=2)
+                    os.replace(tmp, self._cfg_ruta)
+                except OSError:
+                    pass
+            return cfg
         except (OSError, ValueError):
             return dict(CONFIG_DEFECTO)
 
@@ -204,6 +222,7 @@ class Motor:
         if not nueva['remoto_url'] or nueva['remoto_respaldo_local']:
             self.db.reanudar_remotos()
         self._despertar.set()
+        self._despertar_prep.set()
         if hasattr(self, '_avisos'):
             self._avisos.wake.set()
             if previo['activo'] != nueva['activo'] or previo['modo_cola'] != nueva['modo_cola']:
@@ -326,6 +345,8 @@ class Motor:
         self._stop.clear()
         self._avisos.iniciar()
         self._hilo = threading.Thread(target=self._bucle, daemon=True, name="bot-motor")
+        self._hilo_prep = threading.Thread(target=self._bucle_preparacion, daemon=True, name="bot-preparador")
+        self._hilo_prep.start()
         self._hilo.start()
         self.log("Bot encendido.")
         self.avisar('sistema', f'inicio:{time.time_ns()}', self._resumen_arranque())
@@ -333,9 +354,32 @@ class Motor:
     def detener(self):
         self._stop.set()
         self._despertar.set()
+        self._despertar_prep.set()
         if self._lives:
             self._lives.close()
         self._avisos.cerrar()
+
+    def _bucle_preparacion(self):
+        """Prepara/importa clips en segundo plano para que el primer clip suba mientras se cortan los siguientes."""
+        while not self._stop.is_set():
+            espera = 10
+            try:
+                if self.cfg["activo"] and self.cfg["modo_cola"] != "solo_subir":
+                    excluir_live = self.cfg["modo_cola"] == "preparar_primero"
+                    trabajo = self.db.siguiente_trabajo(
+                        excluir_live=excluir_live,
+                        excluir_populares=not self.cfg["radar_populares"],
+                    )
+                    if trabajo:
+                        self._procesar_trabajo(trabajo)
+                        self._despertar.set()
+                        espera = 1
+            except Exception as e:
+                self.log(f"Error inesperado al preparar: {e}")
+                traceback.print_exc()
+                espera = 20
+            self._despertar_prep.wait(espera)
+            self._despertar_prep.clear()
 
     def lives(self):
         with self._lives_lock:
@@ -368,28 +412,40 @@ class Motor:
             self._despertar.clear()
 
     def _paso(self) -> bool:
-        """Preparar no depende del horario de publicación ni de las sesiones sociales."""
+        """Publica el primer clip apenas llega a esta PC; la edición corre en paralelo cuando el bot está iniciado."""
         modo = self.cfg['modo_cola']
+        prep_paralela = bool(
+            (self._hilo is not None and threading.current_thread() is self._hilo)
+            or (self._hilo_prep and self._hilo_prep.is_alive() and threading.current_thread() is not self._hilo_prep)
+        )
         if modo in ('solo_preparar', 'preparar_primero'):
             # Un live no tiene un final conocido: no retiene indefinidamente las publicaciones.
             excluir_live = modo == 'preparar_primero'
-            trabajo = self.db.siguiente_trabajo(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
-            if trabajo:
-                self._procesar_trabajo(trabajo)
-                return True
+            if not prep_paralela:
+                trabajo = self.db.siguiente_trabajo(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
+                if trabajo:
+                    self._procesar_trabajo(trabajo)
+                    return True
+            else:
+                self._despertar_prep.set()
             if modo == 'solo_preparar' or self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares']):
-                self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
-                                  else 'Preparando primero: esperando el reintento de un video.')
+                if not self._edicion_actual:
+                    self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
+                                      else 'Preparando primero: esperando el reintento de un video.')
                 return False
         sub = self._siguiente_subida()
         if sub:
             self._procesar_subida(sub)
             return True
-        trabajo = self.db.siguiente_trabajo(excluir_populares=not self.cfg['radar_populares']) if modo != 'solo_subir' else None
-        if trabajo:
-            self._procesar_trabajo(trabajo)
-            return True
-        self.actividad = self._motivo_espera()
+        if not prep_paralela:
+            trabajo = self.db.siguiente_trabajo(excluir_populares=not self.cfg['radar_populares']) if modo != 'solo_subir' else None
+            if trabajo:
+                self._procesar_trabajo(trabajo)
+                return True
+        elif modo != 'solo_subir':
+            self._despertar_prep.set()
+        if not self._edicion_actual:
+            self.actividad = self._motivo_espera()
         if self.actividad.startswith('Fuera de horario') and self.db.subidas_pendientes():
             self.avisar('sistema', f"horario:{datetime.now():%Y-%m-%d}:{self.cfg['hora_inicio']}:{self.cfg['hora_fin']}",
                         f"Quedan {cantidad(len(self.db.subidas_pendientes()), 'subida')} en cola. "
@@ -429,6 +485,10 @@ class Motor:
         self.db.editar_cuenta(cid, **cambios)
         self.despertar()
 
+    @staticmethod
+    def _exige_reciente(c):
+        return bool(c and (c.get('monetizada') or c.get('proteger_fyp')))
+
     def destinos_radar(self, item, popular=False, solo_libres=False):
         regla = self.destino_para(item.get('source_channel') or item.get('channel', ''),
                                  item.get('platform'), item.get('channel_id', '')) or {}
@@ -437,9 +497,9 @@ class Motor:
             c = self.db.cuenta(cid)
             if not c or not c['activa']:
                 continue
-            if popular and (c['plataforma'] != 'tiktok' or c.get('monetizada')):
+            if popular and (c['plataforma'] != 'tiktok' or self._exige_reciente(c)):
                 continue
-            if not popular and self.cfg['radar_populares_configurado'] and c['plataforma'] == 'tiktok' and not c.get('monetizada'):
+            if not popular and self.cfg['radar_populares_configurado'] and c['plataforma'] == 'tiktok' and not self._exige_reciente(c):
                 continue
             if item.get('radar_cuenta') and int(item['radar_cuenta']) != cid:
                 continue
@@ -491,7 +551,7 @@ class Motor:
                 self.log(f"En cola ({origen}): {titulo or url} · {t['preset']} → {len(t['cuentas'])} cuenta(s)")
                 self._aviso_trabajo(t, 'cola', 'Ya lo añadí a la cola. Falta editarlo y guardar los clips.' if cortar else
                                     'Ya lo añadí a la cola. Falta descargarlo completo; no se harán cortes.', 'cola')
-        self._despertar.set()
+        self.despertar()
         return ids if devolver_ids else (ids[0] if ids else None)
 
     def desde_radar(self, item: dict):
@@ -526,7 +586,7 @@ class Motor:
         anterior = self.db.trabajo_por_clave(clave)
         if anterior and (anterior['estado'] == 'sin_destino' or
                          (anterior['estado'] == 'omitido' and not self._es_viejo(item)
-                          and not str(anterior.get('error', '')).startswith('Cuenta monetizada'))):
+                          and not str(anterior.get('error', '')).startswith(('Cuenta monetizada', 'Protección Para ti')))):
             regla = self.destino_para(canal, item.get('platform'), item.get('channel_id', ''))
             if anterior['estado'] == 'omitido' or (regla and regla.get('cuentas')):
                 self.db.reabrir_radar(clave)
@@ -565,16 +625,18 @@ class Motor:
         return max(0.0, (time.time() - fecha.timestamp()) / 60)
 
     def _filtrar_monetizadas(self, item, cuentas):
-        """Las cuentas monetizadas solo reciben videos muy recientes del radar."""
+        """Las cuentas monetizadas o con protección Para ti solo reciben videos muy recientes del radar."""
         limite = self.cfg['monetizada_max_min']
         edad = self._edad_min(item)
         if edad is not None and edad <= limite:
             return list(cuentas), ''
-        permitidas = [cid for cid in cuentas if not (self.db.cuenta(cid) or {}).get('monetizada')]
+        objetos = [(cid, self.db.cuenta(cid) or {}) for cid in cuentas]
+        permitidas = [cid for cid, c in objetos if not self._exige_reciente(c)]
+        etiqueta = 'Cuenta monetizada' if any(c.get('monetizada') for _, c in objetos) else 'Protección Para ti'
         if edad is None:
-            motivo = 'Cuenta monetizada: no se pudo comprobar la hora de publicación; solo recibe videos verificados recientes.'
+            motivo = f'{etiqueta}: no se pudo comprobar la hora de publicación; solo recibe videos verificados recientes.'
         else:
-            motivo = (f'Cuenta monetizada: el video se publicó hace {duracion(edad * 60)}; '
+            motivo = (f'{etiqueta}: el video se publicó hace {duracion(edad * 60)}; '
                       f'solo recibe videos de los últimos {limite} min.')
         return permitidas, motivo
 
@@ -600,7 +662,7 @@ class Motor:
             cuentas = self.db.trabajo(tid)['cuentas']
             self.log(f'Archivo local guardado: {nombre} → {len(cuentas)} cuenta(s). En cola de publicación.')
             self._aviso_trabajo(self.db.trabajo(tid), 'listo', f"Ya guardé tu archivo en la PC. Añadí {cantidad(len(cuentas), 'subida')} a la cola.\n" + self._estado_publicacion(), 'cola')
-        self._despertar.set()
+        self.despertar()
         guardado = self.db.trabajo(tid)
         return {'id': tid, 'publicaciones': len(guardado['cuentas']), 'repetido': not nuevo}
 
@@ -683,8 +745,9 @@ class Motor:
             if not self.cfg['radar_populares']:
                 self.db.marcar_trabajo(t['id'], 'pendiente', 'Radar de populares en pausa. Trabajo conservado.')
                 return
-            if any((self.db.cuenta(cid) or {}).get('monetizada') for cid in t['cuentas']):
-                self.db.marcar_trabajo(t['id'], 'omitido', 'Cuenta monetizada: se usa solo contenido reciente.')
+            if any(self._exige_reciente(self.db.cuenta(cid)) for cid in t['cuentas']):
+                etiqueta = 'Cuenta monetizada' if any((self.db.cuenta(cid) or {}).get('monetizada') for cid in t['cuentas']) else 'Protección Para ti'
+                self.db.marcar_trabajo(t['id'], 'omitido', f'{etiqueta}: se usa solo contenido reciente.')
                 return
         guardados = archivos.leer_preparados(self.carpeta_clips(t))
         if guardados:
@@ -726,9 +789,26 @@ class Motor:
                     if os.path.commonpath([root, local]) != root or not os.path.isfile(local):
                         raise RuntimeError('No se encuentra el segmento local del live.')
                 opciones = json.loads(t.get('opciones') or '{}') or (self.cargar_preset(t['preset']) or {})
+                carpeta_t = self.carpeta_clips(t)
+
+                def _al_clip_local_listo(ev_clip):
+                    try:
+                        idx_c = int(ev_clip.get('n', 0))
+                        tot_c = max(1, int(ev_clip.get('total') or 1))
+                        ruta_c = ev_clip.get('archivo') or ''
+                        meta_c = ev_clip.get('meta') or {}
+                        if not ruta_c or not os.path.isfile(ruta_c) or self._edicion_cancelada():
+                            return
+                        pub_c = crear_publicacion(meta_c)
+                        destino_c = archivos.conservar_uno(carpeta_t, idx_c, ruta_c, pub_c, meta_c)
+                        self._encolar_clip_listo(t, idx_c, tot_c, destino_c, pub_c, meta_c)
+                    except Exception as err_p:
+                        self.log(f"Aviso al adelantar clip local {ev_clip.get('n', 0) + 1}: {err_p}")
+
                 datos = {**opciones, "bot_unique": not bool(local),
                          "excluded_ranges": self.db.intervalos_usados(t['url'], None, t['id']) if not local else [],
                          "_cancel_event": self._edicion_actual[1] if self._edicion_actual else None,
+                         "_on_clip_ready": _al_clip_local_listo,
                          "source": local or t["url"],
                          "download_quality": "best", "subir_tiktok": False, "subir_youtube": False,
                          "subir_facebook": False, "_lanzar_error": True}
@@ -777,6 +857,35 @@ class Motor:
 
     def carpeta_clips(self, t):
         return os.path.join(self.carpeta, 'bot_clips', f"trabajo_{t['id']}")
+
+    def _encolar_clip_listo(self, t, indice, total_estimado, ruta_destino, publicacion, meta_clip=None):
+        """Encola inmediatamente un clip recién importado para empezar a subirlo sin esperar al resto."""
+        if self._edicion_cancelada() or not self.db.trabajo(t['id']):
+            return []
+        pub = publicacion
+        if t.get('archivo_local') and json.loads(t.get('opciones') or '{}').get('clip_selection') == 'sequential':
+            pub = t['titulo']
+        texto = self._texto(pub, t, int(indice), max(1, int(total_estimado or 1)))
+        subidas_clip = [(cid, ruta_destino, texto) for cid in t['cuentas']]
+        intervalos = None
+        if t['cortar'] and not t.get('archivo_local'):
+            meta_d = meta_clip if isinstance(meta_clip, dict) else {}
+            ini, fin_t = meta_d.get('inicio'), meta_d.get('fin')
+            if ini is None or fin_t is None:
+                return []
+            try:
+                intervalos = {ruta_destino: (float(ini), float(fin_t))}
+            except (TypeError, ValueError):
+                return []
+        try:
+            nuevas = self.db.encolar_clip_parcial(t['id'], subidas_clip, intervalos)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.log(f'No se adelantó el clip {int(indice) + 1}: {exc}')
+            return []
+        if nuevas:
+            self.log(f"Clip {int(indice) + 1} importado en esta PC y listo para subir ({os.path.basename(ruta_destino)}).")
+            self._despertar.set()
+        return nuevas
 
     def _finalizar_clips(self, t, clips):
         subidas = []
@@ -828,7 +937,7 @@ class Motor:
         cantidad_reanudada = self.db.reanudar_remotos()
         if cantidad_reanudada:
             self.log(f'Servidor recuperado: {cantidad_reanudada} trabajo(s) vuelven a la cola sin perder sus ajustes.')
-            self._despertar.set()
+            self.despertar()
         if self._remoto_avisado:
             self._remoto_avisado = False
             self.avisar('sistema', f'colab:conectado:{time.time_ns()}', 'El servidor de cortes volvió a responder. Los próximos videos desde enlace podrán editarse ahí. Los segmentos de live se editan en tu PC.', True)
@@ -871,6 +980,10 @@ class Motor:
             self.actividad = f"Cortando en el servidor remoto: {nombre} · {texto}"
             self._remoto_estado = "Trabajando ✅"
 
+        def _al_importar_remoto(destino, pub, meta_c, idx_n, tot_n):
+            self._encolar_clip_listo(t, idx_n, tot_n, destino, pub, meta_c)
+
+        cli.al_bajar_clip = _al_importar_remoto
         try:
             datos.update(bot_unique=True, excluded_ranges=self.db.intervalos_usados(t['url'], None, t['id']))
             if not jid:
@@ -985,8 +1098,9 @@ class Motor:
             if not self.cfg['radar_populares']:
                 return 'Radar de populares en pausa. La cola se conserva.'
             destino = cuenta or self.db.cuenta(s['cuenta_id'])
-            if destino and destino.get('monetizada'):
-                return 'Cuenta monetizada: este clip de populares queda bloqueado; se usa contenido reciente.'
+            if self._exige_reciente(destino):
+                etiqueta = 'Cuenta monetizada' if destino.get('monetizada') else 'Protección Para ti'
+                return f'{etiqueta}: este clip de populares queda bloqueado; se usa contenido reciente.'
         """Motivo visible para una publicación pendiente, sin cambiar sus tiempos."""
         ahora = time.time() if ahora is None else ahora
         if not self.cfg['activo']:
@@ -1149,9 +1263,9 @@ class Motor:
         trabajo_radar = self.db.trabajo(s['trabajo_id']) if s.get('trabajo_id') else None
         if trabajo_radar and trabajo_radar.get('origen') == 'radar_populares':
             control.permiso_publicar = lambda: bool(self.cfg['radar_populares'] and
-                not (self.db.cuenta(s['cuenta_id']) or {}).get('monetizada', True))
+                not self._exige_reciente(self.db.cuenta(s['cuenta_id']) or {'monetizada': True}))
             if not control.permiso_publicar():
-                self.db.marcar_subida(s['id'], 'pendiente', error='Populares en pausa o cuenta monetizada. No se publicará este clip.')
+                self.db.marcar_subida(s['id'], 'pendiente', error='Populares en pausa o cuenta monetizada / Protección Para ti. No se publicará este clip.')
                 return
         mod = POR_NOMBRE[cuenta["plataforma"]]
         nombre = f"{mod.NOMBRE} · {cuenta['nombre']}"
@@ -1174,6 +1288,19 @@ class Motor:
                 mensaje = 'Controles de cuenta monetizada: ' + ' '.join(motivos)
                 self.db.marcar_subida(s['id'], 'error', error=mensaje)
                 self._aviso_subida(s, 'monetizacion', mensaje, 'errores', True)
+                return
+        elif cuenta['plataforma'] == 'tiktok' and cuenta.get('proteger_fyp'):
+            motivos_fyp = []
+            try:
+                duplicado = self.db.conflicto_archivo_monetizado(s['id'], etiqueta='Protección Para ti')
+                if duplicado:
+                    motivos_fyp.append(duplicado)
+            except OSError:
+                motivos_fyp.append('No se pudo comprobar la huella del archivo.')
+            if motivos_fyp:
+                mensaje = 'Controles Para ti: ' + ' '.join(motivos_fyp)
+                self.db.marcar_subida(s['id'], 'error', error=mensaje)
+                self._aviso_subida(s, 'proteger_fyp', mensaje, 'errores', True)
                 return
         for aviso in calidad.get('advertencias', []) + calidad.get('origen', {}).get('advertencias', []):
             self.log('Calidad: ' + aviso)
@@ -1582,6 +1709,10 @@ class Motor:
         pendientes = self.db.subidas_pendientes()
         for s in pendientes:
             s['archivo_existe'] = os.path.isfile(s['archivo'])
+            s['tiene_portada_ia'] = bool(
+                s.get('archivo') and os.path.isfile(os.path.splitext(s['archivo'])[0] + '_miniatura.jpg')
+            )
+            s['tiene_miniatura'] = bool(s['archivo_existe'])
         plan = estimar(pendientes, cuentas, self.cfg, time.time(), self._libre_global)
         plan['por_preparar'] = self.db.por_preparar()
         plan['esperando_remoto'] = self.db.esperando_remotos()
@@ -1615,8 +1746,14 @@ class Motor:
             except OSError:
                 subida['bytes'], subida['archivo_existe'] = None, False
                 subida['calidad'] = {}
+            subida['tiene_portada_ia'] = bool(
+                subida.get('archivo') and os.path.isfile(os.path.splitext(subida['archivo'])[0] + '_miniatura.jpg')
+            )
+            subida['tiene_miniatura'] = bool(subida['archivo_existe'])
             if subida['estado'] == 'pendiente':
                 subida['espera'] = self._motivo_subida(subida, por_cuenta.get(subida['cuenta_id']), ahora)
+        trabajos_rec = self.db.trabajos_recientes()
+        vasos_activos = self._construir_vasos_activos(trabajos_rec, recientes, ahora)
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
             "remoto": self._remoto_estado,
@@ -1628,14 +1765,152 @@ class Motor:
             "en_horario": any(_en_horario(*horario(c, self.cfg)) for c in cuentas if c['activa']),
             "cuentas": cuentas,
             "reglas": self.db.reglas(),
-            "trabajos": self.db.trabajos_recientes(),
+            "trabajos": trabajos_rec,
             "subidas": recientes,
+            "vasos_activos": vasos_activos,
             "resumen": self.db.resumen(),
             "registro": list(self.registro)[-80:],
         }
 
+    def _construir_vasos_activos(self, trabajos, subidas, ahora):
+        import re as _re
+        vasos = []
+        ed_tid = self._edicion_actual[0] if self._edicion_actual else None
+        trabajo_activo = next((t for t in trabajos if t['id'] == ed_tid or t.get('estado') in ('cortando', 'descargando')), None)
+        if trabajo_activo:
+            leido_local = False
+            es_live_job = bool(trabajo_activo.get('origen') == 'live' or trabajo_activo.get('archivo_local'))
+            thumb_trabajo_base = (
+                f"/api/bot/trabajos/{trabajo_activo['id']}/miniatura?t={int(trabajo_activo.get('actualizado') or 0)}"
+                if (es_live_job and os.path.isfile(trabajo_activo.get('archivo_local') or ''))
+                else ''
+            )
+            if not trabajo_activo.get('remoto_id'):
+                try:
+                    import paths as _paths
+                    st_path = os.path.join(_paths.TEMP_DIR, 'smart_clips_state.json')
+                    if os.path.isfile(st_path):
+                        with open(st_path, 'r', encoding='utf-8') as f:
+                            st = json.load(f)
+                        if isinstance(st, dict) and ahora - float(st.get('updated_at') or 0) < 900:
+                            for c in (st.get('clips') or []):
+                                idx = int(c.get('index') or 1)
+                                listo = c.get('estado') == 'listo' and bool(c.get('archivo'))
+                                tiene_th = bool(c.get('thumb')) or listo
+                                thumb_u = (
+                                    f"/api/smart_split_live/thumb/{idx}?r={st.get('run_id', '')}&p={int(c.get('pct') or 0)}"
+                                    if tiene_th else thumb_trabajo_base
+                                )
+                                vasos.append({
+                                    'id': f"corte_{trabajo_activo['id']}_{idx}",
+                                    'tipo': 'live' if es_live_job else 'corte',
+                                    'titulo': c.get('titulo') or f"Clip {idx}",
+                                    'subtitulo': trabajo_activo.get('titulo') or trabajo_activo.get('url') or 'Smart Split',
+                                    'estado': c.get('estado') or 'llenando',
+                                    'pct': max(0, min(100, int(c.get('pct') or 0))),
+                                    'etapa': c.get('etapa') or 'Procesando…',
+                                    'thumb_url': thumb_u,
+                                    'video_url': f"/api/smart_split_live/video/{idx}?r={st.get('run_id', '')}" if listo else '',
+                                })
+                            leido_local = bool(vasos)
+                except Exception:
+                    pass
+            if trabajo_activo.get('remoto_id'):
+                carpeta_imp = self.carpeta_clips(trabajo_activo)
+                if os.path.isdir(carpeta_imp):
+                    archivos_imp = sorted(
+                        fn for fn in os.listdir(carpeta_imp)
+                        if fn.lower().endswith(('.mp4', '.mov')) and not fn.endswith('.part')
+                    )
+                    for idx_i, fn_i in enumerate(archivos_imp):
+                        vasos.append({
+                            'id': f"remoto_imp_{trabajo_activo['id']}_{idx_i}",
+                            'tipo': 'corte',
+                            'titulo': f"Clip {idx_i + 1} · ya en tu PC",
+                            'subtitulo': trabajo_activo.get('titulo') or 'Colab GPU → PC',
+                            'estado': 'listo',
+                            'pct': 100,
+                            'etapa': 'Importado · listo para subir',
+                            'thumb_url': f"/api/bot/trabajos/{trabajo_activo['id']}/miniatura?n={idx_i}",
+                            'video_url': f"/api/bot/trabajos/{trabajo_activo['id']}/clip?n={idx_i}",
+                        })
+            if not leido_local:
+                act = str(self.actividad or '')
+                m_pct = _re.search(r'(\d{1,3})\s*%', act)
+                pct_val = max(8, min(96, int(m_pct.group(1)))) if m_pct else (22 if trabajo_activo.get('estado') == 'descargando' else 48)
+                etapa = act.split('·', 1)[1].strip() if '·' in act else ('Descargando video base' if trabajo_activo.get('estado') == 'descargando' else 'Cortando siguiente clip…')
+                vasos.append({
+                    'id': f"trabajo_{trabajo_activo['id']}",
+                    'tipo': 'live' if es_live_job else 'corte',
+                    'titulo': trabajo_activo.get('titulo') or trabajo_activo.get('url') or f"Trabajo #{trabajo_activo['id']}",
+                    'subtitulo': 'Colab GPU' if trabajo_activo.get('remoto_id') else ('Live → Esta PC' if es_live_job else 'Esta PC'),
+                    'estado': 'llenando',
+                    'pct': pct_val,
+                    'etapa': etapa[:72],
+                    'thumb_url': thumb_trabajo_base,
+                    'video_url': '',
+                })
+        # Tramos de YouTube Live capturándose o importándose a la cola de la PC
+        try:
+            if self._lives is not None:
+                live_info = self._lives.state().get('lives') or []
+                ids_activos_v = {trabajo_activo['id']} if trabajo_activo else set()
+                agregados_live = 0
+                for ses in live_info:
+                    for seg_c in (ses.get('clips_recientes') or []):
+                        if agregados_live >= 4:
+                            break
+                        tid_seg = seg_c.get('trabajo_id')
+                        if tid_seg and tid_seg in ids_activos_v:
+                            continue
+                        est_seg_l = seg_c.get('estado')
+                        if est_seg_l not in ('capturando', 'listo', 'encolado'):
+                            continue
+                        if tid_seg:
+                            tr_fila = self.db.trabajo(tid_seg)
+                            if tr_fila and tr_fila.get('estado') == 'listo':
+                                continue
+                        pct_l = 38 if seg_c.get('capturando_ahora') else (68 if est_seg_l == 'listo' else 82)
+                        etapa_l = ('Capturando señal en vivo…' if seg_c.get('capturando_ahora')
+                                   else 'Importando tramo del live a la PC…')
+                        vasos.append({
+                            'id': f"live_{ses['id']}_{seg_c['nombre']}",
+                            'tipo': 'live',
+                            'titulo': f"{ses.get('titulo') or 'YouTube Live'} · {seg_c['nombre'].split('_')[-1].split('.')[0]}",
+                            'subtitulo': 'YouTube Live → Esta PC',
+                            'estado': 'llenando',
+                            'pct': pct_l,
+                            'etapa': etapa_l,
+                            'thumb_url': seg_c.get('thumb_url') or '',
+                            'video_url': seg_c.get('video_url') or '',
+                        })
+                        agregados_live += 1
+        except Exception:
+            pass
+        for s in subidas:
+            if s.get('estado') == 'subiendo':
+                transcurrido = max(2.0, ahora - float(s.get('actualizado') or ahora))
+                est_seg = max(20.0, float(self.cfg.get('estimacion_subida_min') or 1.5) * 60.0)
+                pct_sub = max(14, min(94, int(round((transcurrido / est_seg) * 90.0)) + 12))
+                sid = int(s['id'])
+                texto_s = (s.get('texto') or '').splitlines()
+                titulo_s = s.get('video_titulo') or (texto_s[0] if texto_s else f"Publicación #{sid}")
+                vasos.append({
+                    'id': f"subida_{sid}",
+                    'tipo': 'subida',
+                    'titulo': titulo_s,
+                    'subtitulo': f"{s.get('cuenta_nombre') or 'Cuenta'} · {s.get('plataforma') or ''}",
+                    'estado': 'subiendo',
+                    'pct': pct_sub,
+                    'etapa': 'Publicando en plataforma…',
+                    'thumb_url': f"/api/bot/miniatura/{sid}" if s.get('tiene_miniatura') else '',
+                    'video_url': f"/api/bot/clip/{sid}" if s.get('archivo_existe') else '',
+                })
+        return vasos
+
     def despertar(self):
         self._despertar.set()
+        self._despertar_prep.set()
 
 
 # ---- instancia única -----------------------------------------------------

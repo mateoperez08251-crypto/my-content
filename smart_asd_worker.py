@@ -6,11 +6,14 @@ import json
 import math
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import urllib.request
 import wave
+
+SIN_VENTANA = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 REVISION = '1b6dcd2d8fc2895683de6508ec6294ec47d388ca'
 WEIGHT_BLOB = 'd724be582f6d34f1b099657235dedafa0668fd82'
@@ -60,16 +63,16 @@ def load_model():
     return model.cuda().eval(), head.cuda().eval()
 
 
-def box_at(rows, times, t, max_gap=0.36):
+def box_at(rows, times, t, max_gap=0.55):
     """Interpolate only within a continuous face track; never bridge a long occlusion."""
     i = bisect.bisect_right(times, t) - 1
     if i < 0:
-        return rows[0][1:] if times and times[0] - t <= 0.045 else None
+        return rows[0][1:] if times and times[0] - t <= 0.08 else None
     if i == len(rows) - 1:
-        return rows[i][1:] if t - times[i] <= 0.045 else None
+        return rows[i][1:] if t - times[i] <= 0.08 else None
     gap = times[i + 1] - times[i]
     if gap > max_gap:
-        return rows[i][1:] if t - times[i] <= 0.045 else None
+        return rows[i][1:] if t - times[i] <= 0.08 else None
     alpha = (t - times[i]) / gap if gap else 0
     return [(1-alpha)*a + alpha*b for a,b in zip(rows[i][1:],rows[i+1][1:])]
 
@@ -124,17 +127,24 @@ def infer(job):
     width = 960
     height = max(2, round(job['height'] / job['width'] * width / 2)*2)
     frame_bytes = width * height
-    ffmpeg = job.get('ffmpeg', 'ffmpeg')
+    ffmpeg = job.get('ffmpeg') or 'ffmpeg'
+    if not os.path.isfile(ffmpeg) and not shutil.which(ffmpeg):
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            pass
     with tempfile.TemporaryDirectory(prefix='smart_asd_audio_') as tmp:
         wav = Path(tmp) / 'audio.wav'
         subprocess.run([ffmpeg,'-nostdin','-v','error','-y','-ss',str(job['start']),'-i',job['video'],
-            '-t',str(duration),'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le',str(wav)], check=True, timeout=600)
+            '-t',str(duration),'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le',str(wav)],
+            check=True, timeout=600, creationflags=SIN_VENTANA)
         with wave.open(str(wav),'rb') as stream:
             audio = np.frombuffer(stream.readframes(stream.getnframes()),dtype='<i2').copy()
         cmd = [ffmpeg,'-nostdin','-v','error','-ss',str(job['start']),'-i',job['video'],'-t',str(duration),
                '-an','-vf',f'fps=25,scale={width}:{height}','-pix_fmt','gray','-f','rawvideo','pipe:1']
         with tempfile.TemporaryFile() as error_log:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=error_log)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=error_log, creationflags=SIN_VENTANA)
             frame_index, chunk_frames = 0, 150  # six-second batches, bounded image memory
             try:
                 while True:
@@ -160,13 +170,15 @@ def infer(job):
                         break
                     for pid, images in faces.items():
                         for a,b in runs(sorted(images)):
-                            if b-a < 10:
+                            if b-a < 6:
                                 continue
                             begin = (first+a)*640
                             signal = audio[begin:(first+b)*640]
                             needed = (b-a)*640 + 400
                             signal = np.pad(signal,(0,max(0,needed-len(signal))))
                             features = python_speech_features.mfcc(signal,16000,numcep=13,winlen=.025,winstep=.010)[:(b-a)*4]
+                            if len(features) < (b-a)*4:
+                                features = np.pad(features, ((0, (b-a)*4 - len(features)), (0, 0)), mode='edge')
                             visual = np.stack([images[i] for i in range(a,b)])
                             with torch.inference_mode():
                                 av = model.forward_audio_frontend(torch.tensor(features,dtype=torch.float32,device='cuda')[None])
@@ -200,9 +212,9 @@ def main():
         print('LR-ASD: pesos completos y prueba CUDA correctos.')
         return
     path = Path(sys.argv[1])
-    job = json.loads(path.read_text())
+    job = json.loads(path.read_text(encoding='utf-8'))
     result = infer(job)
-    Path(job['result']).write_text(json.dumps(result,allow_nan=False))
+    Path(job['result']).write_text(json.dumps(result,allow_nan=False), encoding='utf-8')
 
 if __name__ == '__main__':
     main()

@@ -7,346 +7,737 @@
 <link rel="icon" type="image/svg+xml" href="/static/icons/my-content.svg">
 <link rel="alternate icon" href="/static/icons/my-content.ico">
 <meta name="theme-color" content="#0B1525">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <style>
-:root{--bg:#07080b;--panel:#111318;--borde:#23262e;--texto:#e8ecf2;--suave:#8b93a3;--acento:#00f2fe;
---ok:#4ade80;--mal:#f87171;--aviso:#fbbf24;--azul:#60a5fa}
+:root{
+  --bg:#05070c;--panel:rgba(20,25,37,.66);--panel-solid:#121724;--panel-elev:rgba(34,42,60,.74);
+  --borde:rgba(255,255,255,.09);--borde-luz:rgba(255,255,255,.15);
+  --texto:#f5f7fb;--suave:#94a3b8;--acento:#5ac8fa;--acento-azul:#0a84ff;--acento-suave:rgba(10,132,255,.16);
+  --ok:#30d158;--mal:#ff453a;--aviso:#ff9f0a;--azul:#64d2ff;
+  --spring:cubic-bezier(.22,1,.36,1)
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--texto);font:14px/1.45 Inter,sans-serif}
-header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--borde);
-position:sticky;top:0;background:rgba(7,8,11,.92);backdrop-filter:blur(8px);z-index:5;flex-wrap:wrap}
-header h1{font:700 20px Outfit,sans-serif;margin:0;display:flex;align-items:center;gap:8px}
-#actividad{color:var(--suave);flex:1;min-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#actividad b{color:var(--texto);font-weight:500}
-main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr));gap:16px;padding:18px 22px;max-width:1500px;margin:auto}
-.card{min-width:0;overflow-x:auto;background:var(--panel);border:1px solid var(--borde);border-radius:12px;padding:16px}
-.card h2{font:600 15px Outfit,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:8px}
-.card h2 small{font:400 12px Inter;color:var(--suave);margin-left:auto}
+body{
+  margin:0;background:var(--bg);color:var(--texto);
+  font:13.5px/1.48 -apple-system,BlinkMacSystemFont,"SF Pro Display","Plus Jakarta Sans",Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;letter-spacing:-.01em;min-height:100vh;position:relative;overflow-x:hidden
+}
+body::before,body::after{
+  content:"";position:fixed;width:580px;height:580px;border-radius:50%;filter:blur(135px);
+  pointer-events:none;z-index:-1;opacity:.16
+}
+body::before{top:-180px;left:-140px;background:#0a84ff}
+body::after{bottom:-200px;right:-140px;background:#5e5ce6}
+body.modo-embed .volver-app{display:none}
+body:not(.modo-embed) .solo-embed{display:none}
+
+/* Cabecera translúcida Apple Liquid Glass */
+header{
+  display:flex;align-items:center;gap:12px;padding:12px 22px;border-bottom:1px solid var(--borde);
+  position:sticky;top:0;background:rgba(9,12,20,.74);backdrop-filter:blur(32px) saturate(185%);
+  -webkit-backdrop-filter:blur(32px) saturate(185%);z-index:25;flex-wrap:wrap;
+  box-shadow:inset 0 -1px 0 rgba(255,255,255,.03)
+}
+header h1{
+  font:700 17.5px/1.2 "Plus Jakarta Sans",-apple-system,sans-serif;margin:0;
+  display:flex;align-items:center;gap:9px;letter-spacing:-.022em;color:#fff
+}
+#actividad{
+  color:var(--suave);flex:1;min-width:180px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:rgba(255,255,255,.045);border:1px solid var(--borde);border-radius:99px;padding:6px 14px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07)
+}
+#actividad b{color:var(--texto);font-weight:600}
+
+/* Control segmentado estilo macOS / iOS */
+.bot-nav-wrap{
+  position:sticky;top:57px;z-index:22;background:rgba(9,12,20,.68);
+  backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);
+  border-bottom:1px solid var(--borde);padding:8px 22px
+}
+.bot-tabs{
+  display:inline-flex;gap:4px;max-width:100%;overflow-x:auto;scrollbar-width:none;
+  background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.075);
+  border-radius:14px;padding:4px;box-shadow:inset 0 1px 2px rgba(0,0,0,.35)
+}
+.bot-tabs::-webkit-scrollbar{display:none}
+.bot-tab{
+  background:transparent;border:1px solid transparent;color:var(--suave);border-radius:10px;
+  padding:7px 14px;font:500 13px inherit;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+  transition:all .26s var(--spring)
+}
+.bot-tab:hover{color:var(--texto);background:rgba(255,255,255,.05)}
+.bot-tab.activa{
+  background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.08));
+  border-color:rgba(255,255,255,.16);color:#fff;font-weight:600;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 4px 12px rgba(0,0,0,.28)
+}
+.tab-badge{
+  font-size:11px;padding:1px 7px;border-radius:99px;background:rgba(255,255,255,.09);
+  color:var(--texto);font-variant-numeric:tabular-nums
+}
+.bot-tab.activa .tab-badge{background:var(--acento-azul);color:#fff}
+
+main{max-width:1420px;margin:0 auto;padding:20px 22px 44px}
+.vista-panel{display:none;gap:16px}
+.vista-panel.activa{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));animation:appleFadeIn .32s var(--spring)}
+@keyframes appleFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.col-12{grid-column:span 12}
+.col-7{grid-column:span 7}
+.col-6{grid-column:span 6}
+.col-5{grid-column:span 5}
+@media(max-width:960px){.col-7,.col-6,.col-5{grid-column:span 12}}
+
+/* Superficies Liquid Glass */
+.card{
+  min-width:0;background:var(--panel);backdrop-filter:blur(28px) saturate(175%);
+  -webkit-backdrop-filter:blur(28px) saturate(175%);border:1px solid var(--borde);border-radius:20px;
+  padding:18px 20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 18px 42px -12px rgba(0,0,0,.48);
+  transition:border-color .28s ease,box-shadow .28s ease
+}
+.card h2{
+  font:600 15.5px/1.25 "Plus Jakarta Sans",-apple-system,sans-serif;letter-spacing:-.018em;
+  margin:0 0 12px;display:flex;align-items:center;gap:8px;color:#fff
+}
+.card h2 small{font:400 12px inherit;color:var(--suave);margin-left:auto;letter-spacing:0}
 .ancho{grid-column:1/-1}
-input,select,textarea{background:#0b0d11;border:1px solid var(--borde);color:var(--texto);border-radius:8px;
-padding:8px 10px;font:inherit;width:100%}
+
+input,select,textarea{
+  background:rgba(8,11,18,.62);border:1px solid rgba(255,255,255,.11);color:var(--texto);border-radius:12px;
+  padding:8px 12px;font:inherit;width:100%;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.28)
+}
+input:focus,select:focus,textarea:focus{
+  outline:none;border-color:rgba(90,200,250,.65);background:rgba(12,17,28,.85);
+  box-shadow:0 0 0 3px rgba(10,132,255,.22)
+}
 textarea{resize:vertical;min-height:62px}
-label{font-size:12px;color:var(--suave);display:block;margin:8px 0 4px}
+label{font-size:12px;font-weight:500;color:var(--suave);display:block;margin:7px 0 4px}
 .fila{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .fila>*{flex:1}
-button{background:#1b1f27;color:var(--texto);border:1px solid var(--borde);border-radius:8px;padding:7px 12px;
-font:500 13px Inter;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto}
-button:hover{border-color:#3a3f4b}
-button.prim{background:var(--acento);color:#001014;border:0;font-weight:600}
-button.peligro:hover{border-color:var(--mal);color:var(--mal)}
-button.mini{padding:4px 8px;font-size:12px}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.chip{border:1px solid var(--borde);border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;user-select:none}
-.chip.on{border-color:var(--acento);color:var(--acento);background:rgba(0,242,254,.08)}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;color:var(--suave);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--borde)}
-td{padding:7px 8px;border-bottom:1px solid #181b22;vertical-align:top}
+
+button{
+  background:var(--panel-elev);color:var(--texto);border:1px solid rgba(255,255,255,.11);border-radius:12px;
+  padding:7px 13px;font:500 12.5px inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  white-space:nowrap;flex:0 0 auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.09);
+  transition:transform .2s var(--spring),background .2s ease,border-color .2s ease,box-shadow .2s ease
+}
+button:hover:not(:disabled){border-color:rgba(255,255,255,.24);background:rgba(50,62,88,.82);transform:translateY(-1px)}
+button:active:not(:disabled){transform:scale(.98)}
+button:disabled{opacity:.48;cursor:not-allowed}
+button.prim{
+  background:linear-gradient(135deg,#38bdf8 0%,#0a84ff 100%);color:#fff;border:1px solid rgba(255,255,255,.22);
+  font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.32),0 8px 20px -4px rgba(10,132,255,.45)
+}
+button.prim:hover:not(:disabled){filter:brightness(1.07);box-shadow:inset 0 1px 0 rgba(255,255,255,.38),0 10px 24px -4px rgba(10,132,255,.6)}
+button.peligro:hover:not(:disabled){border-color:rgba(255,69,58,.55);background:rgba(255,69,58,.14);color:#ff6961}
+button.mini{padding:5px 9px;font-size:11.5px;border-radius:9px}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.chip{
+  border:1px solid var(--borde);border-radius:99px;padding:5px 12px;font-size:12px;cursor:pointer;
+  user-select:none;background:rgba(10,14,24,.65);transition:all .22s var(--spring)
+}
+.chip:hover{border-color:rgba(255,255,255,.22)}
+.chip.on{
+  border-color:rgba(90,200,250,.55);color:#fff;
+  background:linear-gradient(135deg,rgba(10,132,255,.32),rgba(90,200,250,.18));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18)
+}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--suave);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--borde)}
+td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
 td.acc{white-space:nowrap;text-align:right}
-.est{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
-.e-ok,.e-listo,.e-publicada{color:var(--ok)} .e-error,.e-sin_login,.e-sin_destino{color:var(--mal)}
-.e-pendiente{color:var(--suave)} .e-subiendo,.e-cortando,.e-descargando{color:var(--azul)} .e-omitido{color:#555} .e-revisar,.e-sin_comprobar,.e-cancelando{color:var(--aviso)}
+.est{
+  font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;
+  border:1px solid currentColor;background:rgba(255,255,255,.03);white-space:nowrap
+}
+.e-ok,.e-listo,.e-publicada{color:var(--ok);background:rgba(48,209,88,.1)}
+.e-error,.e-sin_login,.e-sin_destino{color:var(--mal);background:rgba(255,69,58,.1)}
+.e-pendiente{color:#cbd5e1}
+.e-subiendo,.e-cortando,.e-descargando{color:var(--azul);background:rgba(100,210,255,.12)}
+.e-omitido{color:#64748b}
+.e-revisar,.e-sin_comprobar,.e-cancelando{color:var(--aviso);background:rgba(255,159,10,.12)}
 .plat{display:inline-flex;align-items:center;gap:4px}
 .muted{color:var(--suave);font-size:12px}
 .err{color:var(--mal);font-size:12px;max-width:380px;word-break:break-word}
-.tabla-scroll{max-height:420px;overflow:auto}
-#registro{background:#05060a;border:1px solid var(--borde);border-radius:8px;padding:10px;height:220px;overflow:auto;
-font:12px/1.5 ui-monospace,Consolas,monospace;color:#9ae6b4;white-space:pre-wrap}
-.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}
-.switch input{width:auto}
-.ajustes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px 12px}
-.metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}
-.metrica{padding:14px;background:#11151d;border:1px solid var(--borde);border-radius:10px}
-.metrica b{display:block;font-size:25px;color:var(--acento)}
-.ayuda{font-size:13px;line-height:1.6;color:var(--suave)}
-.rango label{margin:0;font-size:12px}
+.tabla-scroll{max-height:340px;overflow:auto}
+#registro{
+  background:rgba(5,7,13,.78);border:1px solid var(--borde);border-radius:14px;padding:12px;height:195px;overflow:auto;
+  font:11.5px/1.55 "SF Mono",ui-monospace,Consolas,monospace;color:#86efac;white-space:pre-wrap
+}
+
+/* Interruptor nativo estilo iOS */
+.switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12.5px;color:var(--texto);user-select:none}
+.switch input[type=checkbox]{
+  appearance:none;-webkit-appearance:none;width:36px;height:21px;border-radius:99px;
+  background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.14);position:relative;
+  cursor:pointer;flex:0 0 36px;margin:0;transition:background .25s var(--spring),border-color .25s ease;box-shadow:none;padding:0
+}
+.switch input[type=checkbox]::after{
+  content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+  background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .25s var(--spring)
+}
+.switch input[type=checkbox]:checked{background:var(--ok);border-color:rgba(255,255,255,.22)}
+.switch input[type=checkbox]:checked::after{transform:translateX(15px)}
+
+.ajustes{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px}
+.metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:0}
+.metrica{
+  padding:13px 15px;background:var(--panel);backdrop-filter:blur(22px);border:1px solid var(--borde);
+  border-radius:16px;font-size:12px;color:var(--suave);box-shadow:inset 0 1px 0 rgba(255,255,255,.1)
+}
+.metrica b{
+  display:block;font:700 22px/1.15 "Plus Jakarta Sans",-apple-system,sans-serif;
+  color:#fff;margin-bottom:3px;font-variant-numeric:tabular-nums
+}
+.ayuda{font-size:12.5px;line-height:1.55;color:var(--suave);margin:6px 0}
+.ayuda-plegable{margin-top:10px;border-top:1px solid var(--borde);padding-top:8px}
+.ayuda-plegable>summary{cursor:pointer;font-size:12px;color:var(--suave);user-select:none;list-style:none;display:inline-flex;align-items:center;gap:5px}
+.ayuda-plegable>summary::-webkit-details-marker{display:none}
+.ayuda-plegable>summary:hover{color:var(--texto)}
+
+.grupo-edicion{border:1px solid var(--borde);border-radius:16px;background:rgba(255,255,255,.02);margin-top:12px;overflow:hidden}
+.grupo-edicion>summary{
+  cursor:pointer;padding:12px 16px;font:600 13.5px "Plus Jakarta Sans",-apple-system,sans-serif;color:var(--texto);
+  display:flex;align-items:center;justify-content:space-between;list-style:none;user-select:none;background:rgba(255,255,255,.025)
+}
+.grupo-edicion>summary::-webkit-details-marker{display:none}
+.grupo-edicion>summary span.sub{font:400 11.5px Inter,sans-serif;color:var(--suave)}
+.grupo-edicion-cuerpo{padding:13px 16px 16px;border-top:1px solid var(--borde)}
+
+.rango label{margin:0;font-size:11.5px}
 .rango>div{flex:1;min-width:60px}
-#sub-preview{flex:0 0 96px;width:96px;height:144px;max-width:96px;object-fit:contain;border-radius:8px;background:#05060a;border:1px solid var(--borde)}
+#sub-preview{flex:0 0 84px;width:84px;height:126px;max-width:84px;object-fit:contain;border-radius:12px;background:#05060a;border:1px solid var(--borde)}
 #ed-resumen{flex:1 1 200px;min-width:0;margin:0}
-#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1b1f27;border:1px solid var(--borde);
-padding:10px 16px;border-radius:8px;display:none;z-index:9}
-a{color:var(--acento)}
-dialog.cookies-dialog{width:min(520px,calc(100% - 24px));max-height:90vh;color:var(--texto);padding:20px}
-dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
-.subidas-seccion h2{font:600 18px Inter,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:8px}.subidas-seccion h2 small{font:400 12px Inter;color:var(--suave);margin-left:auto}
-.subidas-controles button{flex:0 0 auto}
-.subidas-lista{display:grid;gap:10px;margin-top:14px}
-.publicacion{background:var(--panel);border:1px solid var(--borde);border-radius:10px;overflow:hidden}
-.publicacion-resumen{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:14px 16px;cursor:pointer;list-style:none}
-.publicacion-resumen::-webkit-details-marker{display:none}
-.publicacion-resumen:focus-visible{outline:2px solid var(--acento);outline-offset:-3px}
-.publicacion-resumen h3{font-size:14px;margin:0 0 5px}
-.publicacion-resumen-meta{font-size:12px;color:var(--suave)}
-.publicacion-resumen-estado{display:flex;gap:12px;align-items:center;white-space:nowrap}
-.publicacion-toggle{font-size:12px;color:var(--acento)}
-.publicacion-detalle:not([open]) .texto-contraer,.publicacion-detalle[open] .texto-expandir{display:none}
-.publicacion-cuerpo{display:grid;grid-template-columns:96px minmax(0,1fr);gap:18px;border-top:1px solid var(--borde);padding:14px 16px}
-.historial-subidas{margin-top:12px}
-.historial-subidas>summary{cursor:pointer;font-size:16px;font-weight:600;padding:12px 0}
-.publicacion video{width:100%;max-height:170px;aspect-ratio:9/16;object-fit:contain;background:var(--bg);border-radius:6px}
-.publicacion h3{font:600 17px/1.4 Inter,sans-serif;margin:0;overflow-wrap:anywhere}
-.publicacion-cabecera{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px}
-.publicacion-datos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px;margin:18px 0}
-.publicacion-datos dt{font-size:12px;color:var(--suave);margin-bottom:4px}
-.publicacion-datos dd{margin:0;font-size:13px;overflow-wrap:anywhere}
-.publicacion-texto{white-space:pre-wrap;overflow-wrap:anywhere;max-width:75ch;margin:6px 0 16px}
-.publicacion-espera{color:var(--aviso);margin:8px 0}
-.publicacion .err{max-width:75ch}
-.publicacion-acciones{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-.publicacion-acciones button{min-height:36px}
-.publicacion-origen{font-size:12px;color:var(--suave);overflow-wrap:anywhere}
-.publicacion-falta{color:var(--suave);padding:22px 10px;border:1px dashed var(--borde);border-radius:6px}
-.publicacion-vacia{padding:22px;color:var(--suave);border:1px dashed var(--borde);border-radius:8px}
-@media(max-width:650px){.publicacion-cuerpo{grid-template-columns:1fr;padding:12px;gap:12px}.publicacion-resumen{flex-wrap:wrap;padding:12px;gap:8px}.publicacion video{max-height:150px;width:100px;aspect-ratio:9/16}.publicacion-datos{grid-template-columns:repeat(2,minmax(0,1fr))}.publicacion-cabecera{flex-wrap:wrap}.publicacion-acciones button{min-height:44px}}
+#toast{
+  position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:rgba(22,28,42,.88);
+  backdrop-filter:blur(24px);border:1px solid rgba(90,200,250,.38);padding:10px 18px;border-radius:99px;
+  display:none;z-index:99;box-shadow:0 16px 40px rgba(0,0,0,.55);font-weight:500
+}
+a{color:var(--acento);text-decoration:none}
+a:hover{text-decoration:underline}
+
+dialog.cookies-dialog,#texto-dialog,#vista-rapida-dialog{
+  color:var(--texto);background:rgba(18,23,35,.9);backdrop-filter:blur(32px) saturate(185%);
+  -webkit-backdrop-filter:blur(32px) saturate(185%);border:1px solid var(--borde-luz);border-radius:22px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 32px 80px rgba(0,0,0,.75)
+}
+dialog.cookies-dialog{width:min(510px,calc(100% - 24px));max-height:90vh;padding:20px}
+dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
 .cookies-dialog h2{justify-content:space-between}
 .cookies-dialog button:disabled{opacity:.5;cursor:wait}
 #cookies-descarga-servidor{overflow-wrap:anywhere}
-@media(max-width:520px){main{grid-template-columns:1fr;padding:12px}header{padding:12px}}
-.cuentas-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
-.cuenta-panel{border:1px solid var(--borde);border-radius:12px;padding:16px;background:#0b0d11;min-width:0}
-.cuenta-panel h3{font:600 18px Outfit;margin:0 0 10px}.cuenta-panel p{overflow-wrap:anywhere}
-.cuenta-panel .proximo{padding:12px;border:1px solid #263847;border-radius:8px;margin:12px 0}
-.cuenta-panel video{width:80px;max-height:120px;background:#05060a;border-radius:6px}
-.cuenta-panel .acc{display:flex;gap:8px;flex-wrap:wrap}.cuenta-panel input{min-width:0}
-#texto-dialog{width:min(700px,95vw);max-height:90vh;overflow:auto;color:var(--texto);background:var(--panel)}
-#texto-dialog::backdrop{background:rgba(0,0,0,.8)}#texto-dialog video{max-height:230px;max-width:100%;display:block;margin:auto}
-.cola-toolbar input[type=checkbox],.seleccion-clip input{width:auto}
+
+/* === Vasos de Cristal Activos ("Estilo Llenando Vaso" en tiempo real) === */
+.vasos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,190px));gap:14px;margin-top:10px}
+.vaso-clip{
+  position:relative;aspect-ratio:9/16;border-radius:20px;overflow:hidden;isolation:isolate;
+  background:linear-gradient(160deg,rgba(255,255,255,.08),rgba(12,16,26,.88));
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:inset 0 1.5px 1px rgba(255,255,255,.28),inset 0 -8px 18px rgba(0,0,0,.55),0 14px 32px rgba(0,0,0,.45);
+  transition:transform .32s var(--spring),border-color .3s ease
+}
+.vaso-clip:hover{transform:translateY(-3px);border-color:rgba(90,200,250,.48)}
+.vaso-clip.es-listo{border-color:rgba(48,209,88,.48)}
+.vaso-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.48;z-index:0;transition:opacity .4s ease}
+.vaso-clip.es-listo .vaso-poster{opacity:.92}
+.vaso-video-local{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.58;z-index:0;pointer-events:none}
+.vaso-clip.es-listo .vaso-video-local{opacity:.92}
+.vaso-liquido{
+  position:absolute;left:0;right:0;bottom:0;height:0%;z-index:1;
+  background:linear-gradient(180deg,rgba(90,200,250,.60) 0%,rgba(10,132,255,.55) 50%,rgba(94,92,230,.68) 100%);
+  backdrop-filter:blur(4px) saturate(160%);-webkit-backdrop-filter:blur(4px) saturate(160%);
+  box-shadow:inset 0 2px 8px rgba(255,255,255,.35),0 -6px 18px rgba(10,132,255,.3);
+  transition:height .8s var(--spring),background .4s ease
+}
+.vaso-clip.es-listo .vaso-liquido{background:linear-gradient(180deg,rgba(48,209,88,.18),rgba(10,132,255,.14));backdrop-filter:none}
+.vaso-olas{position:absolute;top:-14px;left:0;width:200%;height:16px;overflow:hidden;pointer-events:none}
+.vaso-clip.es-listo .vaso-olas{display:none}
+.vaso-ola{width:100%;height:100%;display:block;animation:olaBot 3.6s linear infinite}
+.vaso-ola.atras{position:absolute;top:2px;left:0;opacity:.55;animation:olaBot 5.4s linear infinite reverse}
+@keyframes olaBot{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.vaso-burbujas{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.vaso-burbujas i{
+  position:absolute;bottom:-8px;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.48);
+  animation:burbujaBot 3s ease-in infinite
+}
+.vaso-burbujas i:nth-child(1){left:24%;animation-delay:0s}
+.vaso-burbujas i:nth-child(2){left:56%;width:7px;height:7px;animation-delay:1s}
+.vaso-burbujas i:nth-child(3){left:78%;width:4px;height:4px;animation-delay:1.9s}
+@keyframes burbujaBot{0%{transform:translateY(0);opacity:0}25%{opacity:.7}100%{transform:translateY(-170px);opacity:0}}
+.vaso-brillo{
+  position:absolute;inset:0;z-index:2;pointer-events:none;
+  background:linear-gradient(115deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,.02) 34%,transparent 62%,rgba(255,255,255,.06) 100%)
+}
+.vaso-capa{
+  position:relative;z-index:3;height:100%;padding:10px 11px;display:flex;flex-direction:column;justify-content:space-between;
+  background:linear-gradient(180deg,rgba(4,7,14,.55) 0%,rgba(4,7,14,.1) 46%,rgba(4,7,14,.8) 100%)
+}
+.vaso-chip{
+  font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:99px;background:rgba(8,12,22,.68);
+  border:1px solid rgba(255,255,255,.15);color:#f8fafc;backdrop-filter:blur(10px)
+}
+.vaso-centro{margin:auto 0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:5px}
+.vaso-pct{font:700 24px/1 "Plus Jakarta Sans",-apple-system,sans-serif;color:#fff;font-variant-numeric:tabular-nums;text-shadow:0 3px 12px rgba(0,0,0,.55)}
+.vaso-etapa{font-size:11px;color:#e2e8f0;background:rgba(6,10,18,.56);padding:3px 8px;border-radius:8px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vaso-play{
+  width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.32);
+  background:rgba(15,23,42,.7);backdrop-filter:blur(12px);color:#fff;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;font-size:16px
+}
+.vaso-play:hover{background:var(--acento-azul);transform:scale(1.08)}
+.vaso-pie{font-size:11.5px;font-weight:600;color:#fff;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 2px 6px rgba(0,0,0,.7)}
+.live-clips-tira{display:flex;gap:8px;overflow-x:auto;padding:8px 0 2px;scrollbar-width:thin}
+.live-seg-card{
+  position:relative;width:62px;height:108px;flex:0 0 62px;border-radius:12px;overflow:hidden;
+  background:linear-gradient(155deg,#131b2c,#080c15);border:1px solid rgba(255,255,255,.15);
+  box-shadow:0 6px 16px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.12)
+}
+.live-seg-card img{width:100%;height:100%;object-fit:cover;display:block}
+.live-seg-fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(10,132,255,.32),rgba(48,209,88,.45));pointer-events:none;transition:height .5s var(--spring)}
+.live-seg-badge{position:absolute;top:4px;left:4px;right:4px;font-size:9.5px;font-weight:700;padding:2px 5px;border-radius:99px;background:rgba(6,10,18,.74);color:#f8fafc;text-align:center;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live-seg-foot{position:absolute;left:4px;right:4px;bottom:4px;font-size:9.5px;font-weight:600;color:#fff;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,.85)}
+.live-seg-play{position:absolute;inset:0;border:0;border-radius:0;padding:0;background:rgba(6,10,18,.18);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+.live-seg-play:hover{background:rgba(10,132,255,.4);transform:none}
+
+/* Tarjetas de cola de subidas con Miniatura 9:16 Visible */
+.subidas-seccion h2{font:600 15.5px "Plus Jakarta Sans",-apple-system,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.subidas-seccion h2 small{font:400 12px inherit;color:var(--suave);margin-left:auto}
+.subidas-controles button{flex:0 0 auto}
+.subidas-lista{display:grid;gap:10px;margin-top:12px}
+.publicacion{
+  background:rgba(14,19,30,.72);border:1px solid var(--borde);border-radius:16px;overflow:hidden;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07);transition:border-color .24s ease,transform .24s var(--spring)
+}
+.publicacion:hover{border-color:rgba(255,255,255,.17)}
+.publicacion-resumen{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 14px;cursor:pointer;list-style:none}
+.publicacion-resumen::-webkit-details-marker{display:none}
+.publicacion-resumen:focus-visible{outline:2px solid var(--acento);outline-offset:-3px}
+.publicacion-resumen-izq{display:flex;align-items:center;gap:13px;min-width:0;flex:1}
+.clip-thumb-box{
+  position:relative;width:50px;height:88px;flex:0 0 50px;border-radius:11px;overflow:hidden;
+  background:linear-gradient(145deg,#131a29,#090d16);border:1px solid rgba(255,255,255,.14);
+  box-shadow:0 6px 16px rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center
+}
+.clip-thumb-box img{width:100%;height:100%;object-fit:cover;display:block}
+.clip-thumb-box.sin-img img{display:none}
+.clip-thumb-play{
+  position:absolute;inset:0;background:rgba(4,8,16,.28);color:#fff;border:0;border-radius:0;padding:0;
+  display:flex;align-items:center;justify-content:center;opacity:.88;transition:opacity .2s ease,background .2s ease
+}
+.clip-thumb-box:hover .clip-thumb-play{opacity:1;background:rgba(10,132,255,.45);transform:none}
+.clip-thumb-play span{
+  width:24px;height:24px;border-radius:50%;background:rgba(10,14,24,.72);backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,.3);display:inline-flex;align-items:center;justify-content:center;font-size:11px
+}
+.publicacion-resumen h3{font:600 14px/1.35 inherit;margin:0 0 3px;overflow-wrap:anywhere;color:#fff}
+.publicacion-resumen-meta{font-size:12px;color:var(--suave)}
+.publicacion-resumen-estado{display:flex;gap:10px;align-items:center;white-space:nowrap}
+.publicacion-toggle{font-size:12px;color:var(--acento);font-weight:500}
+.publicacion-detalle:not([open]) .texto-contraer,.publicacion-detalle[open] .texto-expandir{display:none}
+.publicacion-cuerpo{display:grid;grid-template-columns:116px minmax(0,1fr);gap:18px;border-top:1px solid var(--borde);padding:15px 16px;background:rgba(7,10,17,.45)}
+.historial-subidas{margin-top:6px}
+.historial-subidas>summary{cursor:pointer;font:600 14px "Plus Jakarta Sans",sans-serif;padding:8px 0;color:var(--suave)}
+.publicacion video{width:100%;max-height:206px;aspect-ratio:9/16;object-fit:cover;background:#04060b;border-radius:12px;border:1px solid var(--borde)}
+.publicacion-cabecera{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px}
+.publicacion-datos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 16px;margin:12px 0}
+.publicacion-datos dt{font-size:11.5px;color:var(--suave);margin-bottom:2px}
+.publicacion-datos dd{margin:0;font-size:12.5px;overflow-wrap:anywhere}
+.publicacion-texto{white-space:pre-wrap;overflow-wrap:anywhere;max-width:75ch;margin:4px 0 12px;font-size:12.5px}
+.publicacion-espera{color:var(--aviso);margin:6px 0;font-size:12px}
+.publicacion .err{max-width:75ch}
+.publicacion-acciones{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.publicacion-acciones button{min-height:33px}
+.publicacion-origen{font-size:12px;color:var(--suave);overflow-wrap:anywhere;margin:4px 0}
+.publicacion-falta{color:var(--suave);padding:18px 8px;border:1px dashed var(--borde);border-radius:12px;font-size:12px;text-align:center}
+.publicacion-vacia{padding:22px;color:var(--suave);border:1px dashed var(--borde);border-radius:14px;text-align:center;margin:0}
+
+/* Tarjetas compactas de cuentas con miniatura del próximo clip */
+.cuentas-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(305px,100%),1fr));gap:14px}
+.cuenta-panel{
+  border:1px solid var(--borde);border-radius:18px;padding:15px 16px;background:rgba(13,18,28,.72);
+  min-width:0;display:flex;flex-direction:column;gap:9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)
+}
+.cuenta-cabecera{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cuenta-panel h3{font:600 15.5px "Plus Jakarta Sans",sans-serif;margin:0;display:flex;align-items:center;gap:6px;color:#fff}
+.cuenta-panel p{overflow-wrap:anywhere;margin:2px 0}
+.cuenta-panel .proximo{
+  padding:10px 12px;border:1px solid rgba(90,200,250,.22);
+  background:linear-gradient(145deg,rgba(10,132,255,.08),rgba(90,200,250,.03));border-radius:13px;font-size:12px
+}
+.cuenta-panel video{width:62px;height:110px;object-fit:cover;background:#05060a;border-radius:10px;flex:0 0 62px;border:1px solid rgba(255,255,255,.14)}
+.cuenta-panel .acc{display:flex;gap:6px;flex-wrap:wrap}
+.cuenta-panel input{min-width:0}
+.cuenta-avanzado{border-top:1px solid var(--borde);padding-top:8px;margin-top:2px}
+.cuenta-avanzado>summary{cursor:pointer;font-size:12px;color:var(--acento);list-style:none;user-select:none;display:flex;align-items:center;justify-content:space-between;font-weight:500}
+.cuenta-avanzado>summary::-webkit-details-marker{display:none}
+
+#texto-dialog{width:min(680px,95vw);max-height:90vh;overflow:auto;padding:20px}
+#texto-dialog video{max-height:240px;max-width:100%;display:block;margin:auto;border-radius:12px}
+#vista-rapida-dialog{width:min(430px,94vw);padding:0;overflow:hidden}
+.cola-toolbar{background:rgba(255,255,255,.03);padding:9px 12px;border-radius:13px;border:1px solid var(--borde);margin-top:10px}
+
+@media(prefers-reduced-motion:reduce){
+  .vaso-ola,.vaso-burbujas i,.vista-panel.activa{animation:none!important}
+  .vaso-liquido,.vaso-clip,button,.publicacion{transition:none!important}
+}
+@media(max-width:650px){
+  .publicacion-cuerpo{grid-template-columns:1fr;padding:12px;gap:12px}
+  .publicacion-resumen{flex-wrap:wrap;padding:11px;gap:8px}
+  .publicacion video{max-height:170px;width:96px}
+  .publicacion-datos{grid-template-columns:repeat(2,minmax(0,1fr))}
+  main{padding:12px}header{padding:10px 14px}.bot-nav-wrap{padding:6px 14px;top:52px}
+}
 </style>
 </head>
 <body>
 <header>
-  <h1><img src="/static/icons/bot.svg" width="32" height="32" alt=""> Bot de subida</h1>
+  <h1><img src="/static/icons/bot.svg" width="26" height="26" alt=""> Bot de subida</h1>
   <div id="actividad">Cargando…</div>
   <label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Encendido</label>
-  <a href="/"><button><i class="ph ph-arrow-left"></i> Volver</button></a>
+  <button type="button" id="btn-bot-inmersivo" class="solo-embed" onclick="alternarModoInmersivoBot()" title="Ocultar o mostrar la barra lateral del programa">
+    <i class="ph ph-corners-out"></i> <span id="lbl-bot-inmersivo">Ampliar vista</span>
+  </button>
+  <a href="/bot" target="_blank" rel="noopener" class="solo-embed"><button type="button" title="Abrir en pestaña del navegador"><i class="ph ph-arrow-square-out"></i></button></a>
+  <a href="/" class="volver-app"><button type="button"><i class="ph ph-arrow-left"></i> Volver</button></a>
 </header>
 
+<div class="bot-nav-wrap">
+  <nav class="bot-tabs" aria-label="Secciones del bot">
+    <button type="button" class="bot-tab activa" data-vista="cola" onclick="cambiarPestanaBot('cola')">
+      <i class="ph-duotone ph-queue"></i> Cola y actividad <span class="tab-badge" id="badge-cola">0</span>
+    </button>
+    <button type="button" class="bot-tab" data-vista="anadir" onclick="cambiarPestanaBot('anadir')">
+      <i class="ph-duotone ph-plus-circle"></i> Añadir videos
+    </button>
+    <button type="button" class="bot-tab" data-vista="cuentas" onclick="cambiarPestanaBot('cuentas')">
+      <i class="ph-duotone ph-users-three"></i> Cuentas y reglas <span class="tab-badge" id="badge-cuentas">0</span>
+    </button>
+    <button type="button" class="bot-tab" data-vista="edicion" onclick="cambiarPestanaBot('edicion')">
+      <i class="ph-duotone ph-magic-wand"></i> Edición IA
+    </button>
+    <button type="button" class="bot-tab" data-vista="sistema" onclick="cambiarPestanaBot('sistema')">
+      <i class="ph-duotone ph-cpu"></i> Ritmo, Colab y avisos
+    </button>
+  </nav>
+</div>
+
 <main>
-  <section class="card ancho" id="cuentas-seccion">
-    <h2><i class="ph-duotone ph-user-circle"></i> Cuentas <small>Inicia sesión una vez por cuenta</small></h2>
-    <p class="muted" id="carpeta-datos" style="overflow-wrap:anywhere"></p>
-    <p class="muted">Sesión abre una ventana propia en la PC donde ejecutas la app, aunque tengas «Navegador oculto» activado. El bot usa su propio perfil por cuenta y actúa dentro del navegador sin mover tu cursor del escritorio. Inicia sesión y cierra esa ventana para guardar la sesión.</p>
-    <p class="muted">También puedes importar cookies JSON o Netscape de tu propia cuenta y pulsar Comprobar sesión. Las cookies se guardan en el perfil de esa cuenta; no garantizan evitar verificaciones o bloqueos.</p>
-    <div id="cuentas" class="cuentas-grid"></div>
-    <div class="fila" style="margin-top:12px">
-      <select id="c-plat" style="max-width:130px"><option value="tiktok">TikTok</option>
-        <option value="youtube">YouTube</option><option value="facebook">Facebook</option></select>
-      <input id="c-nombre" placeholder="Nombre (ej. TikTok Bromas)">
-      <input id="c-limite" type="number" min="1" value="6" style="max-width:80px" title="Máximo de subidas por día">
-      <button onclick="crearCuenta()"><i class="ph ph-plus"></i> Añadir</button>
-    </div>
-    <input id="c-url" style="margin-top:8px" placeholder="Facebook: enlace para crear Reels de tu página (opcional)">
-  </section>
+  <!-- VISTA 3: CUENTAS Y REGLAS -->
+  <div class="vista-panel" id="vista-cuentas" data-vista-panel="cuentas">
+    <section class="card col-7" id="cuentas-seccion">
+      <h2><i class="ph-duotone ph-user-circle"></i> Cuentas <small>Sesión independiente por perfil</small></h2>
+      <div id="cuentas" class="cuentas-grid"></div>
+      <div class="fila" style="margin-top:12px">
+        <select id="c-plat" style="max-width:125px"><option value="tiktok">TikTok</option>
+          <option value="youtube">YouTube</option><option value="facebook">Facebook</option></select>
+        <input id="c-nombre" placeholder="Nombre (ej. TikTok Clips)">
+        <input id="c-limite" type="number" min="1" value="6" style="max-width:76px" title="Máximo de subidas por día">
+        <button onclick="crearCuenta()" class="prim"><i class="ph ph-plus"></i> Añadir</button>
+      </div>
+      <input id="c-url" style="margin-top:6px" placeholder="Facebook: enlace para crear Reels de tu página (opcional)">
+      <details class="ayuda-plegable">
+        <summary><i class="ph ph-info"></i> Cómo funcionan las sesiones y cookies</summary>
+        <p class="muted" id="carpeta-datos" style="overflow-wrap:anywhere"></p>
+        <p class="muted">«Iniciar sesión» abre una ventana propia en esta PC sin mover tu cursor. Inicia sesión y ciérrala para guardar el perfil. También puedes importar cookies JSON/Netscape y pulsar «Comprobar sesión».</p>
+      </details>
+    </section>
 
+    <section class="card col-5">
+      <h2><i class="ph-duotone ph-signpost"></i> Reglas automáticas por canal</h2>
+      <div class="tabla-scroll"><table><thead><tr><th>Canal</th><th>Destino</th><th>Preset</th><th></th></tr></thead><tbody id="reglas"></tbody></table></div>
+      <label>Canal (@usuario o enlace · usa * para cualquier otro)</label>
+      <input id="r-origen" placeholder="@canal o *">
+      <div class="chips" id="chips-regla"></div>
+      <div class="fila" style="margin-top:8px">
+        <input list="smart-presets" id="r-preset" placeholder="Preset (vacío = general)">
+        <input id="r-texto" placeholder="Texto fijo (opcional)">
+      </div>
+      <div class="fila" style="margin-top:8px">
+        <label class="switch"><input type="checkbox" id="r-cortar" checked> Cortar en clips</label>
+        <button onclick="guardarRegla()" class="prim"><i class="ph ph-floppy-disk"></i> Guardar regla</button>
+      </div>
+    </section>
+  </div>
 
-  <section class="card ancho" id="preparacion">
-    <h2>1. Editar con Smart Split y guardar en esta PC</h2>
-    <p class="ayuda">Los videos se preparan sin esperar al horario de publicación. Cada trabajo conserva los ajustes que elegiste al añadirlo. Los clips terminados quedan en esta PC y se pueden publicar aunque Colab se apague.</p>
-    <div class="ajustes">
-      <div><label for="modo_cola">Qué debe hacer el bot</label><select id="modo_cola">
-        <option value="preparar_primero">Editar toda la cola y después publicar</option>
-        <option value="solo_preparar">Solo editar y guardar · no publicar</option>
-        <option value="solo_subir">Solo publicar los clips guardados</option>
-        <option value="alternar">Alternar edición y publicación</option>
-      </select></div>
-      <div><label for="ed-cuenta">Editar configuración de</label><select id="ed-cuenta" onchange="cambiarCuentaEdicion(this.value)"><option value="">General · cuentas sin preset propio</option></select></div>
-      <div><label for="preset">Preset de Smart Split</label><select id="preset" onchange="cambiarPresetEdicion(this.value)"></select></div>
-      <div><label for="preset-nombre">Guardar estos ajustes con el nombre</label><input id="preset-nombre" value="bot_calidad"></div>
-    </div>
-    <div class="fila" style="margin:12px 0"><button onclick="guardarModo()">Aplicar modo elegido</button><span class="muted" id="modo-activo"></span></div>
-    <div class="ajustes" id="editor-preset">
-      <div><label for="ed-inicio">Empezar a editar desde</label><input id="ed-inicio" type="text" value="00:00" placeholder="02:30" aria-describedby="ed-inicio-ayuda"><p class="muted" id="ed-inicio-ayuda">Minutos:segundos (02:30), horas:minutos:segundos o segundos. 00:00 usa el inicio del video.</p></div>
-      <div><label for="ed-modo">Cómo elegir las partes</label><select id="ed-modo" onchange="modoEdicion()"><option value="sequential">Partes consecutivas desde el inicio elegido</option><option value="ai">Elegir mejores momentos con IA</option></select></div>
-      <div id="ed-momentos"><label for="ed-enfoque">Qué momentos buscar</label><select id="ed-enfoque"><option value="general">Mejores momentos generales</option><option value="humor">Humor, bromas y risas en la transcripción</option><option value="drama">Drama, tensión e historias emotivas</option><option value="humor_drama">Humor y drama</option></select><label for="ed-contexto">Contexto antes del momento (s)</label><input id="ed-contexto" type="number" min="0" max="45" step="1" value="8"><label for="ed-tema">Tema o frase del diálogo (opcional)</label><input id="ed-tema" maxlength="300" placeholder="Ej.: la anécdota del viaje"><p class="muted">Incluye el planteamiento antes del remate y conserva el cierre. Se guía por la transcripción: la risa sin palabras puede no detectarse. Los clips válidos se aceptan automáticamente; la vista previa es opcional. El bot conserva los horarios y pausas de publicación.</p></div>
-      <div><label for="ed-duracion">Segundos por parte</label><input id="ed-duracion" type="number" min="1" max="600" value="60" oninput="modoEdicion()"></div>
-      <div><label for="ed-cantidad">Clips por video · solo en modo IA</label><input id="ed-cantidad" type="number" min="1" max="100" value="3"></div>
-      <div><label for="ed-motor">Motor de edición</label><select id="ed-motor"><option value="pro">Pro · GPT-OSS 120B + Whisper Large V3</option><option value="equilibrado">Equilibrado · GPT-OSS 20B + Whisper Large V3</option><option value="ligero">Rápido · Llama 8B + Whisper Turbo</option></select></div>
-      <div><label for="ed-transcripcion">Transcripción</label><select id="ed-transcripcion"><option value="groq">Groq · modelo del motor elegido</option><option value="local">Whisper local · requiere modelo instalado</option></select></div>
-      <div><label for="ed-whisper">Modelo Whisper local</label><select id="ed-whisper"><option value="large-v3">Large V3 · precisión</option><option value="turbo">Large V3 Turbo · rapidez</option><option value="auto">Automático</option></select></div>
-      <div><label for="ed-formato">Formato</label><select id="ed-formato"><option value="vertical_blur">9:16 · video completo y fondo difuminado</option><option value="vertical">9:16 · seguir al hablante</option><option value="horizontal">16:9 · horizontal</option></select></div>
-      <div><label for="ed-calidad">Exportación</label><select id="ed-calidad"><option value="quality">Calidad máxima · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p</option></select></div>
-      <div><label for="ed-upscale">Mejorar imagen</label><select id="ed-upscale"><option value="off">Sin ampliación adicional</option><option value="sharpen">Nitidez suave</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN · GPU; avisa y detiene si no puede aplicar IA</option></select></div>
-      <div><label for="ed-subs">Subtítulos</label><select id="ed-subs" onchange="vistaSubtitulos()"><option value="si">Activados</option><option value="no">Desactivados</option></select></div>
-      <div><label for="ed-estilo">Estilo de subtítulos</label><select id="ed-estilo" onchange="vistaSubtitulos()">
-        <option value="karaoke">Karaoke</option><option value="una_palabra">Una palabra</option><option value="pop_art">Pop Art</option><option value="resaltador">Resaltador</option><option value="bubblegum">Bubblegum</option><option value="caja_frase">Frase con fondo</option><option value="neon">Neón</option><option value="terror">Terror</option><option value="cuento">Cuento</option><option value="documental">Documental</option><option value="noticias">Noticias</option><option value="minimal">Minimal</option>
-      </select></div>
-      <div><label for="ed-fuente">Fuente</label><select id="ed-fuente"><option value="">La del estilo</option><option value="montserrat">Montserrat</option><option value="anton">Anton</option><option value="bebas">Bebas Neue</option><option value="poppins">Poppins</option><option value="bangers">Bangers</option><option value="playfair">Playfair Display</option><option value="nunito">Nunito</option></select></div>
-      <div><label for="ed-escala">Tamaño de subtítulos (%)</label><input id="ed-escala" type="number" min="50" max="150" value="100"></div>
-    </div>
-    <div class="fila" style="margin-top:12px"><img id="sub-preview" src="/static/presets/sub_karaoke.webp" width="96" height="144" loading="lazy" alt="Ejemplo del estilo de subtítulos"><p class="ayuda" id="ed-resumen"></p></div>
-    <p class="ayuda">Pro es la opción de calidad disponible en esta app. En partes consecutivas no se usa IA para elegir momentos. Groq requiere tu clave en el equipo que edita; si falla un modelo, Smart Split puede usar uno de respaldo. La ampliación IA no recupera detalle que no tenga el original.</p>
-    <p class="ayuda">Los ajustes se guardan solos y se aplican al siguiente video, sin reiniciar. Puedes guardar varios presets con nombres distintos y elegir uno para cada cuenta. Si varias cuentas usan el mismo nombre, comparten sus ajustes, pero reciben partes distintas del video. Usa otro nombre para crear una variante. Se usan en nuevos videos de enlaces y del Radar, tanto en esta PC como en Colab. Los lives usan el preset elegido en su apartado; el tiempo de inicio no se repite en cada segmento. Los archivos que subes sin editar no llevan estos ajustes. Si el video acaba antes del tiempo elegido, se avisa y no se corta desde cero.</p>
-    <div class="fila"><button class="prim" onclick="guardarPresetBot()">Guardar edición ahora</button><button id="ed-heredar" hidden onclick="heredarEdicionCuenta()">Usar regla/general en esta cuenta</button><button onclick="cargarPresets(true)">Actualizar presets</button><a href="/" target="_blank" rel="noopener">Abrir Smart Split completo para más ajustes</a></div>
-    <p class="muted" id="preset-estado" aria-live="polite"></p>
-    <div class="metricas" id="inventario"></div>
-    <p class="muted" id="carpeta-clips" style="overflow-wrap:anywhere"></p>
-    <p class="ayuda">“Editar toda la cola” espera también los reintentos de edición. Si sigues añadiendo videos, la publicación puede retrasarse. Los lives alternan corte y publicación porque no tienen un final conocido. Para revisar el resultado primero, usa “Solo editar y guardar”. Los trabajos con error se muestran en la cola.</p>
-  </section>
-  <section class="card ancho" id="seccion-lives">
-    <h2><i class="ph-duotone ph-broadcast"></i> YouTube Live → clips</h2>
-    <p class="muted">Pega la URL de un live activo. La captura continúa mientras los segmentos cerrados se procesan y pasan a la cola de subida. Empieza desde la señal disponible ahora, sin recuperar el historial del live.</p>
-    <input id="live-url" type="url" placeholder="https://www.youtube.com/watch?v=..." aria-label="URL de YouTube Live">
-    <div class="fila" style="margin-top:8px">
-      <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies de YouTube</button>
-      <span class="muted">Para lives, guarda las cookies en «Esta PC», aunque tengas Colab conectado. Se comparten con Smart Split y los enlaces.</span>
-    </div>
-    <div class="ajustes">
-      <div><label for="live-mode">Cómo cortar</label><select id="live-mode" onchange="modoLive()">
-        <option value="sequential">Partes consecutivas · sin selección IA</option>
-        <option value="ai">Mejores momentos con IA</option></select></div>
-      <div><label for="live-seconds">Duración del clip (s)</label><input id="live-seconds" type="number" min="10" max="300" value="60" onchange="modoLive()"></div>
-      <div id="live-window-group" hidden><label for="live-window">Analizar cada (s)</label><input id="live-window" type="number" min="120" max="900" value="180"></div>
-      <div><label for="live-preset">Preset de Smart Split</label><input id="live-preset" list="smart-presets" placeholder="Vacío = modo ligero sin subtítulos"></div>
-      <div><label for="live-buffer">Búfer máximo (MiB)</label><input id="live-buffer" type="number" min="256" max="16384" value="1024"></div>
-    </div>
-    <p id="live-mode-hint" class="muted">Cortes de duración aproximada, según los fotogramas clave de la señal. La última parte puede ser más corta. Sin preset se usa fondo difuminado a 720p, audio original y sin subtítulos.</p>
-    <label>Cuentas que recibirán los clips</label><div id="chips-live" class="chips"></div>
-    <div class="fila" style="margin-top:10px">
-      <input id="live-text" placeholder="Texto o hashtags adicionales (opcional)">
-      <button id="live-start" class="prim" onclick="iniciarLive()">Capturar y encolar para subir</button>
-    </div>
-    <p class="muted">Las subidas respetan las sesiones, horarios y pausas del bot; pueden acumular retraso. Los segmentos del live se procesan en esta PC. Detener captura conserva los clips ya encolados.</p>
-    <table><thead><tr><th>Transmisión</th><th>Captura</th><th>Segmentos</th><th></th></tr></thead><tbody id="lives"></tbody></table>
-  </section>
-  <section class="card">
-    <h2><i class="ph-duotone ph-link"></i> 2. Añadir videos desde enlaces</h2>
-    <textarea id="urls" placeholder="Pega uno o varios enlaces (uno por línea)"></textarea>
-    <div class="fila" style="margin-top:8px">
-      <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies</button>
-      <span class="muted">¿YouTube pide iniciar sesión? Carga tus cookies de descarga, como en Smart Split.</span>
-    </div>
-    <label>¿A qué cuentas? (si no eliges, usa las reglas)</label>
-    <div class="chips" id="chips-url"></div>
-    <label for="url-preset">Edición para estos videos</label><select id="url-preset"><option value="">Usar edición de cada cuenta (o regla/general)</option></select>
-    <p class="muted">Con “Cortar” activado se usa la edición de cada cuenta. Cada cuenta recibe fragmentos distintos, aunque use el mismo preset. Elegir un preset aquí lo aplica a todas las cuentas de estos enlaces. Los trabajos ya añadidos conservan sus ajustes.</p>
-    <p class="muted">Con “Mejores momentos con IA”, cada clip lleva su título de la IA sin guiones bajos, seguido de su descripción y hashtags.</p>
-    <div class="fila" style="margin-top:10px">
-      <label class="switch"><input type="checkbox" id="cortar" checked> Cortar en clips (Smart Split)</label>
-      <input id="texto-url" placeholder="Texto o hashtags fijos (opcional)">
-      <button id="encolar-enlaces" class="prim" onclick="encolar()"><i class="ph ph-plus"></i> Añadir a la cola</button>
-    </div>
-  </section>
+  <!-- VISTA 4: EDICIÓN IA (SMART SPLIT) -->
+  <div class="vista-panel" id="vista-edicion" data-vista-panel="edicion">
+    <section class="card col-12" id="preparacion">
+      <h2><i class="ph-duotone ph-magic-wand"></i> 1. Editar con Smart Split y guardar en esta PC <small id="modo-activo"></small></h2>
+      <div class="ajustes">
+        <div><label for="modo_cola">Modo de trabajo del bot</label><select id="modo_cola">
+          <option value="alternar">Subir cada clip apenas esté listo en la PC (flujo continuo)</option>
+          <option value="preparar_primero">Editar toda la cola y después publicar</option>
+          <option value="solo_preparar">Solo editar y guardar · no publicar</option>
+          <option value="solo_subir">Solo publicar los clips guardados</option>
+        </select></div>
+        <div><label for="ed-cuenta">Configuración de cuenta</label><select id="ed-cuenta" onchange="cambiarCuentaEdicion(this.value)"><option value="">General · cuentas sin preset propio</option></select></div>
+        <div><label for="preset">Preset activo</label><select id="preset" onchange="cambiarPresetEdicion(this.value)"></select></div>
+        <div><label for="preset-nombre">Guardar preset como</label><input id="preset-nombre" value="bot_calidad"></div>
+      </div>
+      <div class="fila" style="margin:10px 0">
+        <button onclick="guardarModo()">Aplicar modo</button>
+        <button class="prim" onclick="guardarPresetBot()"><i class="ph ph-floppy-disk"></i> Guardar edición ahora</button>
+        <button id="ed-heredar" hidden onclick="heredarEdicionCuenta()">Usar regla/general en esta cuenta</button>
+        <button onclick="cargarPresets(true)">Actualizar presets</button>
+        <span class="muted" id="preset-estado" aria-live="polite" style="flex:2"></span>
+      </div>
 
-  <section class="card" id="seccion-locales">
-    <h2><i class="ph-duotone ph-file-video"></i> Subir archivos de mi PC</h2>
-    <p class="ayuda">Elige videos ya terminados, la plataforma y sus cuentas. Se guardará una copia en la carpeta de datos del bot y se publicarán tal como están, sin cortar ni usar Colab.</p>
-    <label for="local-archivos">Uno o varios videos MP4 o MOV · máximo 4 GiB cada uno</label>
-    <input id="local-archivos" type="file" multiple accept=".mp4,.mov,video/mp4,video/quicktime" onchange="elegirArchivosLocales()">
-    <label for="local-plataforma">Plataforma de destino</label>
-    <select id="local-plataforma" onchange="selLocal.clear(); pintarLocales()"><option value="tiktok">TikTok</option><option value="youtube">YouTube</option><option value="facebook">Facebook</option></select>
-    <label>Cuentas de esa plataforma que recibirán cada video</label><div id="chips-locales" class="chips"></div>
-    <label for="local-texto">Texto y hashtags para estos videos (opcional)</label>
-    <textarea id="local-texto" maxlength="10000" placeholder="Si lo dejas vacío, se usa el nombre de cada video sin extensión y con espacios en lugar de _."></textarea>
-    <p class="muted">Cada video genera una publicación por cuenta elegida. Se respetan el horario, las pausas y el límite diario. En “Solo editar y guardar” quedan guardados sin publicarse; usa “Solo publicar los clips guardados” para subirlos.</p>
-    <div id="local-lista" class="ayuda" aria-live="polite"></div>
-    <button class="prim" id="local-enviar" onclick="encolarArchivosLocales()" disabled>Guardar y añadir a la cola</button>
-    <p class="muted">Mientras se copian, mantén la app abierta. Un reintento conserva el destino y evita duplicar el archivo en la cola. Para otro lote, vuelve a elegir archivos.</p>
-  </section>
+      <div id="editor-preset">
+        <details class="grupo-edicion" open>
+          <summary><span>A · Selección de momentos y transcripción</span><span class="sub">Inicio, modo IA, duración y motor</span></summary>
+          <div class="grupo-edicion-cuerpo">
+            <div class="ajustes">
+              <div><label for="ed-inicio">Empezar desde</label><input id="ed-inicio" type="text" value="00:00" placeholder="02:30" aria-describedby="ed-inicio-ayuda"><span class="muted" id="ed-inicio-ayuda">MM:SS o segundos</span></div>
+              <div><label for="ed-modo">Cómo elegir partes</label><select id="ed-modo" onchange="modoEdicion()"><option value="sequential">Partes consecutivas</option><option value="ai">Mejores momentos con IA</option></select></div>
+              <div><label for="ed-duracion">Segundos por clip</label><input id="ed-duracion" type="number" min="1" max="600" value="60" oninput="modoEdicion()"></div>
+              <div><label for="ed-cantidad">Clips por video (IA)</label><input id="ed-cantidad" type="number" min="1" max="100" value="3"></div>
+              <div><label for="ed-motor">Motor IA</label><select id="ed-motor"><option value="pro">Pro · GPT-OSS 120B + Whisper V3</option><option value="equilibrado">Equilibrado · GPT-OSS 20B</option><option value="ligero">Rápido · Llama 8B + Turbo</option></select></div>
+              <div><label for="ed-transcripcion">Transcripción</label><select id="ed-transcripcion"><option value="groq">Groq en la nube</option><option value="local">Whisper local</option></select></div>
+              <div><label for="ed-whisper">Modelo Whisper local</label><select id="ed-whisper"><option value="large-v3">Large V3 · precisión</option><option value="turbo">Turbo · rapidez</option><option value="auto">Automático</option></select></div>
+            </div>
+            <div id="ed-momentos" class="ajustes" style="margin-top:8px">
+              <div><label for="ed-enfoque">Qué momentos buscar</label><select id="ed-enfoque"><option value="general">Mejores momentos generales</option><option value="humor">Humor, bromas y risas</option><option value="drama">Drama, tensión e historias</option><option value="humor_drama">Humor y drama</option></select></div>
+              <div><label for="ed-contexto">Contexto previo (s)</label><input id="ed-contexto" type="number" min="0" max="45" step="1" value="8"></div>
+              <div><label for="ed-tema">Tema o frase clave (opcional)</label><input id="ed-tema" maxlength="300" placeholder="Ej.: la anécdota del viaje"></div>
+            </div>
+          </div>
+        </details>
 
-  <section class="card">
-    <h2><i class="ph-duotone ph-signpost"></i> Reglas: qué canal va a qué cuentas</h2>
-    <table><thead><tr><th>Canal detectado</th><th>Sube a</th><th>Preset</th><th></th></tr></thead><tbody id="reglas"></tbody></table>
-    <label>Canal (@usuario o enlace). Pon * para "cualquier otro canal"</label>
-    <input id="r-origen" placeholder="@bromaslachelchaelkuni5017 o *">
-    <div class="chips" id="chips-regla"></div>
-    <div class="fila" style="margin-top:8px">
-      <input list="smart-presets" id="r-preset" placeholder="Preset de Smart Split (vacío = el de ajustes)">
-      <input id="r-texto" placeholder="Texto fijo (opcional)">
-    </div>
-    <div class="fila" style="margin-top:8px">
-      <label class="switch"><input type="checkbox" id="r-cortar" checked> Cortar en clips</label>
-      <button onclick="guardarRegla()"><i class="ph ph-floppy-disk"></i> Guardar regla</button>
-    </div>
-  </section>
+        <details class="grupo-edicion" open>
+          <summary><span>B · Encuadre al hablante, calidad, subtítulos y miniatura</span><span class="sub">1080p, seguimiento labial, portada con frase y metadatos</span></summary>
+          <div class="grupo-edicion-cuerpo">
+            <div class="ajustes">
+              <div><label for="ed-formato">Formato y encuadre</label><select id="ed-formato"><option value="vertical_blur">9:16 · completo + fondo difuminado</option><option value="vertical">9:16 · seguir a quien habla</option><option value="horizontal">16:9 · horizontal</option></select></div>
+              <div><label for="ed-calidad">Calidad de exportación</label><select id="ed-calidad"><option value="quality">Calidad máxima · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p (en Colab sube a 1080p)</option></select></div>
+              <div><label for="ed-upscale">Nitidez / escalado</label><select id="ed-upscale"><option value="off">Automático limpio</option><option value="sharpen">Nitidez suave</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN IA (GPU)</option></select></div>
+              <div><label for="ed-miniatura">Miniatura automática con frase</label><select id="ed-miniatura"><option value="off">Sin miniatura extra</option><option value="cover_and_jpg">Portada en video + JPG con frase</option><option value="jpg_only">Solo imagen JPG con frase</option></select></div>
+              <div><label for="ed-borrar-meta">Limpieza de metadatos</label><select id="ed-borrar-meta"><option value="si">Borrar metadatos del MP4 (activo)</option><option value="no">Conservar metadatos</option></select></div>
+              <div><label for="ed-subs">Subtítulos</label><select id="ed-subs" onchange="vistaSubtitulos()"><option value="si">Activados</option><option value="no">Desactivados</option></select></div>
+              <div><label for="ed-estilo">Estilo de subtítulos</label><select id="ed-estilo" onchange="vistaSubtitulos()">
+                <option value="karaoke">Karaoke</option><option value="una_palabra">Una palabra</option><option value="pop_art">Pop Art</option><option value="resaltador">Resaltador</option><option value="bubblegum">Bubblegum</option><option value="caja_frase">Frase con fondo</option><option value="neon">Neón</option><option value="terror">Terror</option><option value="cuento">Cuento</option><option value="documental">Documental</option><option value="noticias">Noticias</option><option value="minimal">Minimal</option>
+              </select></div>
+              <div><label for="ed-fuente">Fuente</label><select id="ed-fuente"><option value="">La del estilo</option><option value="montserrat">Montserrat</option><option value="anton">Anton</option><option value="bebas">Bebas Neue</option><option value="poppins">Poppins</option><option value="bangers">Bangers</option><option value="playfair">Playfair Display</option><option value="nunito">Nunito</option></select></div>
+              <div><label for="ed-escala">Tamaño subtítulos (%)</label><input id="ed-escala" type="number" min="50" max="150" value="100"></div>
+            </div>
+            <div class="fila" style="margin-top:10px">
+              <img id="sub-preview" src="/static/presets/sub_karaoke.webp" width="84" height="126" loading="lazy" alt="Ejemplo del estilo de subtítulos">
+              <p class="ayuda" id="ed-resumen"></p>
+            </div>
+          </div>
+        </details>
 
-  <section class="card ancho">
-    <h2><i class="ph-duotone ph-sliders"></i> 3. Horario y ritmo de publicación</h2>
-    <p class="ayuda">Elige cada cuántos minutos u horas publica cada cuenta y su horario permitido. El bot espera y luego publica; debe seguir abierto para hacerlo. Solo se sube un clip a la vez. El intervalo empieza al terminar la subida y usa la hora de la PC.</p>
-    <div class="ajustes">
-      <div><label>Pausa entre cualquier publicación (min)</label><div class="fila rango"><div><label for="pausa_min">Mínima</label><input id="pausa_min" type="number" min="0" max="1440"></div><div><label for="pausa_max">Máxima</label><input id="pausa_max" type="number" min="0" max="1440"></div></div></div>
-      <div><label for="max_intentos">Máximo de intentos por subida</label><input id="max_intentos" type="number" min="1" max="20"></div>
-      <div><label for="monetizada_max_min">Radar → cuentas monetizadas: solo videos de los últimos (min)</label><input id="monetizada_max_min" type="number" min="5" max="1440" value="60"></div>
-      <div><label for="estimacion_subida_min">Minutos para subir cada clip (estimación)</label><input id="estimacion_subida_min" type="number" min="0.1" max="180" step="0.5"></div>
-      <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
-        <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
-    </div>
-    <p class="ayuda">Ejemplo: cuenta A cada 30 minutos y cuenta B cada 2 horas. Cambiar la unidad convierte el valor sin cambiar la espera. Inicio y fin iguales permiten publicar las 24 horas. La pausa general también se respeta. La primera subida entra al estar lista si la cuenta no tiene una pausa pendiente.</p>
-    <div id="plan-cola" aria-live="polite"></div>
-    <div class="tabla-scroll"><table><thead><tr><th>Cuenta</th><th>Intervalo</th><th>Desde / hasta</th><th>Máximo al día</th><th>Hoy / quedan</th><th>Fin estimado</th></tr></thead><tbody id="plan-cuentas"></tbody></table></div>
-    <p class="ayuda">El cálculo usa los clips ya editados y los ajustes guardados. El rango compara pausas mínimas y máximas; no incluye edición pendiente, cortes de conexión, verificaciones ni reintentos futuros. Los videos sin editar todavía no tienen una cantidad exacta de partes.</p>
-    <label style="margin-top:12px">Servidor de cortes — opcional. Los clips ya guardados no lo necesitan.</label>
-    <div class="fila">
-      <input id="remoto_url" placeholder="https://xxxx.trycloudflare.com (vacío = cortar en esta PC)">
-      <input id="remoto_clave" type="password" placeholder="Contraseña de la app en Colab" style="max-width:220px">
-      <button onclick="probarRemoto()"><i class="ph ph-plugs-connected"></i> Probar</button>
-      <a href="https://colab.research.google.com/github/mateoperez08251-crypto/my-content/blob/main/colab/My_Content_Colab.ipynb"
-         target="_blank" rel="noopener"><button><i class="ph ph-arrow-square-out"></i> Abrir Colab</button></a>
-    </div>
-    <div class="muted" id="remoto-estado" style="margin-top:4px"></div>
-    <label class="switch"><input type="checkbox" id="remoto_respaldo_local"> Intentar editar en esta PC si el servidor se desconecta</label>
-    <p class="muted">Déjalo desmarcado en equipos sin GPU NVIDIA: el bot guarda los trabajos, sigue subiendo clips ya preparados y comprueba la conexión cada 5 minutos. Reanuda la edición cuando vuelve el servidor. Si Colab elimina la sesión, inicia una nueva y actualiza el enlace; este control no puede volver a crear la máquina de Google.</p>
-    <p class="ayuda">Colab: ejecuta las celdas 1–6 y la 6C para obtener la URL de Cloudflare, sin cuenta ni token. Pega la dirección https://….trycloudflare.com y la contraseña de la celda 4; pulsa Probar. Al reiniciar la celda 6, repite 6C y copia la URL nueva. El enlace del proxy de Google sirve para abrir la interfaz.</p>
-    <div class="fila" style="margin-top:12px">
-      <label class="switch"><input type="checkbox" id="radar_auto"> Radar de la PC → cola</label>
-      <label class="switch"><input type="checkbox" id="firebase_auto"> Radar de la nube → cola</label>
-      <label class="switch"><input type="checkbox" id="headless"> Navegador oculto</label>
-      <button class="prim" onclick="guardarAjustes()"><i class="ph ph-floppy-disk"></i> Guardar</button>
-    </div>
-  </section>
+        <details class="grupo-edicion">
+          <summary><span>C · Originalidad para TikTok (Narrador IA, remezcla y audio)</span><span class="sub">Diferenciación creativa para el feed Para ti</span></summary>
+          <div class="grupo-edicion-cuerpo">
+            <div class="ajustes">
+              <div><label for="ed-comentario">Comentario / Narrador IA</label><select id="ed-comentario" onchange="vistaComentario()"><option value="off">Sin comentario IA</option><option value="intro">Solo presentación inicial (3–5 s)</option><option value="intro_outro">Presentación + opinión/debate final</option></select></div>
+              <div><label for="ed-cold-open">Adelanto del clímax (Cold Open)</label><select id="ed-cold-open"><option value="no">Desactivado</option><option value="si">Activado · 2–3 s con ADELANTO</option></select></div>
+              <div><label for="ed-jump-cuts">Recorte de silencios y zoom</label><select id="ed-jump-cuts"><option value="no">Desactivado</option><option value="si">Activado · ritmo ágil + zoom</option></select></div>
+              <div><label for="ed-auto-split">Pantalla dividida en diálogos</label><select id="ed-auto-split"><option value="no">Desactivado</option><option value="si">Activado · 2 hablantes arriba/abajo</option></select></div>
+              <div><label for="ed-ambiente">Música ambiente generada</label><select id="ed-ambiente"><option value="off">Sin ambiente generado</option><option value="auto">Automática según el estilo</option><option value="suave">Suave</option><option value="alegre">Alegre / comedia</option><option value="epico">Épica / impacto</option><option value="energica">Enérgica</option><option value="misterio">Misterio / intriga</option><option value="terror">Tensión / terror</option><option value="noticias">Informativa</option></select></div>
+              <div><label for="ed-limpiar-voz">Quitar música original (Demucs)</label><select id="ed-limpiar-voz"><option value="no">Conservar mezcla original</option><option value="si">Aislar voz limpia con IA</option></select></div>
+            </div>
+            <div id="ed-comentario-opciones" class="ajustes" style="margin-top:8px">
+              <div><label for="ed-comentario-estilo">Enfoque del comentario</label><select id="ed-comentario-estilo"><option value="gancho">Gancho de intriga</option><option value="opinion">Opinión directa</option><option value="contexto">Contexto rápido</option><option value="debate">Debate / pregunta final</option></select></div>
+              <div><label for="ed-comentario-voz">Voz del narrador</label><select id="ed-comentario-voz"><option value="male">Voz neuronal masculina</option><option value="female">Voz neuronal femenina</option></select></div>
+            </div>
+          </div>
+        </details>
+      </div>
 
-  <section class="ancho subidas-seccion">
-    <h2><i class="ph-duotone ph-upload-simple"></i> Subidas <small id="res-subidas"></small></h2>
-    <div class="fila"><button id="lanzar-subidas" class="prim" onclick="lanzarSubidasGuardadas()">Lanzar subidas guardadas</button><span id="lanzar-subidas-estado" class="muted" aria-live="polite"></span></div>
-    <p class="ayuda">Activa el bot en «Solo publicar clips guardados» y pone en marcha las publicaciones pendientes. El primer clip listo entra al turno si esa cuenta no tiene una pausa anterior. Respeta el horario, la sesión, los límites y los reintentos. La tarea en curso termina antes. Para volver a editar, cambia el modo en el apartado 1.</p>
-    <p class="muted">Cada tarjeta corresponde a un clip y una cuenta. La vista previa es el archivo guardado en esta PC. “Publicada” indica confirmación de la plataforma o revisión manual; el enlace aparece cuando la plataforma lo devuelve.</p>
-    <div class="fila subidas-controles" style="margin-top:10px"><button onclick="expandirSubidas(true)">Expandir todo</button><button onclick="expandirSubidas(false)">Contraer todo</button></div>
-    <div class="fila cola-toolbar"><label for="cola-cuenta">Filtrar por cuenta</label><select id="cola-cuenta" onchange="pintarSubidas(E.subidas)"><option value="">Todas las cuentas</option></select><button onclick="seleccionarVisibles()">Seleccionar pendientes visibles</button><button onclick="seleccionCola.clear(); pintar();">Limpiar selección</button><button class="peligro" id="cola-borrar-lote" onclick="borrarSeleccionados()" disabled>Retirar seleccionados</button><span id="cola-seleccion" aria-live="polite"></span></div>
-    <p class="muted">Las flechas cambian el orden global de los clips pendientes. Cada cuenta sigue respetando su horario y sus pausas.</p>
-    <div id="subidas" class="subidas-lista" role="list" aria-label="Publicaciones por cuenta"></div>
-  </section>
+      <details class="ayuda-plegable">
+        <summary><i class="ph ph-question"></i> Notas sobre guardado automático y presets por cuenta</summary>
+        <p class="ayuda">Los ajustes se guardan solos y aplican a los próximos videos sin reiniciar. Si varias cuentas comparten preset, cada una recibe partes distintas del video. <a href="/" target="_blank" rel="noopener">Abrir Smart Split completo</a>.</p>
+      </details>
+    </section>
+  </div>
 
-  <section class="card ancho" id="avisos-bot">
-    <h2><img src="/static/icons/avisos.svg" width="28" height="28" alt=""> Avisos del bot por WhatsApp y correo</h2>
-    <p class="ayuda">Usa el número, la API y el correo que ya guardaste en Radar. Las publicaciones confirmadas y los fallos tienen prioridad. Los demás eventos se agrupan; cada resumen muestra cantidades y los últimos ejemplos. Los envíos se separan al menos un minuto.</p>
-    <div class="ajustes">
-      <label><input type="checkbox" id="avisos_activos"> Activar avisos del bot</label>
-      <label><input type="checkbox" id="avisos_cola"> Videos y clips en cola, guardados y retirados</label>
-      <label><input type="checkbox" id="avisos_progreso"> Preparación e inicio de subida</label>
-      <label><input type="checkbox" id="avisos_publicados"> Publicación confirmada</label>
-      <label><input type="checkbox" id="avisos_errores"> Fallos, reintentos y sesión pendiente</label>
-      <label><input type="checkbox" id="avisos_lives"> Inicio, reconexión y fin del live</label>
-      <label><input type="checkbox" id="avisos_sistema"> Encendido, pausa y conexión de Colab</label>
-      <div><label for="avisos_intervalo_min">Agrupar avisos normales cada (min)</label><input id="avisos_intervalo_min" type="number" min="1" max="60" value="5"></div>
+  <!-- VISTA 2: AÑADIR CONTENIDO (ENLACES, PC Y LIVES) -->
+  <div class="vista-panel" id="vista-anadir" data-vista-panel="anadir">
+    <section class="card col-12" id="seccion-lives" style="order:3">
+      <h2><i class="ph-duotone ph-broadcast"></i> Capturar YouTube Live en directo <small>Procesamiento continuo por tramos</small></h2>
+      <div class="fila">
+        <input id="live-url" type="url" placeholder="https://www.youtube.com/watch?v=... (URL de live activo)" aria-label="URL de YouTube Live" style="flex:3">
+        <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies de YouTube</button>
+      </div>
+      <div class="ajustes" style="margin-top:6px">
+        <div><label for="live-mode">Cómo cortar</label><select id="live-mode" onchange="modoLive()">
+          <option value="sequential">Partes consecutivas</option>
+          <option value="ai">Mejores momentos con IA</option></select></div>
+        <div><label for="live-seconds">Duración del clip (s)</label><input id="live-seconds" type="number" min="10" max="300" value="60" onchange="modoLive()"></div>
+        <div id="live-window-group" hidden><label for="live-window">Analizar cada (s)</label><input id="live-window" type="number" min="120" max="900" value="180"></div>
+        <div><label for="live-preset">Preset de Smart Split</label><input id="live-preset" list="smart-presets" placeholder="Vacío = modo ligero"></div>
+        <div><label for="live-buffer">Búfer máx. (MiB)</label><input id="live-buffer" type="number" min="256" max="16384" value="1024"></div>
+      </div>
+      <label>Cuentas de destino</label><div id="chips-live" class="chips"></div>
+      <div class="fila" style="margin-top:8px">
+        <input id="live-text" placeholder="Texto o hashtags adicionales (opcional)">
+        <button id="live-start" class="prim" onclick="iniciarLive()"><i class="ph ph-record"></i> Capturar y encolar</button>
+      </div>
+      <details class="ayuda-plegable">
+        <summary><i class="ph ph-info"></i> Detalles de captura Live y cookies</summary>
+        <p class="muted">Para lives, guarda las cookies en «Esta PC», aunque tengas Colab conectado. Se comparten con Smart Split y los enlaces.</p>
+        <p id="live-mode-hint" class="muted">Cortes de duración aproximada, según los fotogramas clave de la señal.</p>
+      </details>
+      <div class="tabla-scroll" style="margin-top:8px"><table><thead><tr><th>Transmisión</th><th>Captura</th><th>Segmentos</th><th></th></tr></thead><tbody id="lives"></tbody></table></div>
+    </section>
+
+    <section class="card col-6" style="order:1">
+      <h2><i class="ph-duotone ph-link"></i> 2. Añadir videos desde enlaces</h2>
+      <textarea id="urls" placeholder="Pega uno o varios enlaces (YouTube, TikTok, etc., uno por línea)"></textarea>
+      <div class="fila" style="margin-top:6px">
+        <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies</button>
+        <span class="muted">Si YouTube pide sesión, conecta o sube tus cookies aquí.</span>
+      </div>
+      <label>Cuentas destino (vacío = usar reglas)</label>
+      <div class="chips" id="chips-url"></div>
+      <label for="url-preset">Edición para estos enlaces</label>
+      <select id="url-preset"><option value="">Usar edición de cada cuenta (o regla/general)</option></select>
+      <div class="fila" style="margin-top:10px">
+        <label class="switch"><input type="checkbox" id="cortar" checked> Cortar con Smart Split</label>
+        <input id="texto-url" placeholder="Hashtags o texto fijo (opcional)">
+        <button id="encolar-enlaces" class="prim" onclick="encolar()"><i class="ph ph-plus"></i> Añadir a la cola</button>
+      </div>
+    </section>
+
+    <section class="card col-6" id="seccion-locales" style="order:2">
+      <h2><i class="ph-duotone ph-file-video"></i> Subir archivos listos de mi PC</h2>
+      <label for="local-archivos">Videos MP4 o MOV · hasta 4 GiB cada uno (sin recorte)</label>
+      <input id="local-archivos" type="file" multiple accept=".mp4,.mov,video/mp4,video/quicktime" onchange="elegirArchivosLocales()">
+      <div class="ajustes" style="margin-top:4px">
+        <div><label for="local-plataforma">Plataforma</label>
+          <select id="local-plataforma" onchange="selLocal.clear(); pintarLocales()"><option value="tiktok">TikTok</option><option value="youtube">YouTube</option><option value="facebook">Facebook</option></select></div>
+        <div><label>Cuentas destino</label><div id="chips-locales" class="chips"></div></div>
+      </div>
+      <label for="local-texto">Descripción y hashtags (opcional)</label>
+      <textarea id="local-texto" maxlength="10000" placeholder="Vacío = usa el nombre limpio del archivo."></textarea>
+      <div id="local-lista" class="ayuda" aria-live="polite"></div>
+      <button class="prim" id="local-enviar" onclick="encolarArchivosLocales()" disabled><i class="ph ph-upload-simple"></i> Guardar y añadir a la cola</button>
+    </section>
+  </div>
+
+  <!-- VISTA 5: SISTEMA (RITMO, COLAB GPU Y AVISOS) -->
+  <div class="vista-panel" id="vista-sistema" data-vista-panel="sistema">
+    <section class="card col-7">
+      <h2><i class="ph-duotone ph-sliders"></i> 3. Horario, ritmo y automatización</h2>
+      <div class="ajustes">
+        <div><label>Pausa global entre subidas (min)</label><div class="fila rango"><div><label for="pausa_min">Mín.</label><input id="pausa_min" type="number" min="0" max="1440"></div><div><label for="pausa_max">Máx.</label><input id="pausa_max" type="number" min="0" max="1440"></div></div></div>
+        <div><label for="max_intentos">Intentos máx.</label><input id="max_intentos" type="number" min="1" max="20"></div>
+        <div><label for="monetizada_max_min">Radar reciente máx. (min)</label><input id="monetizada_max_min" type="number" min="5" max="1440" value="60"></div>
+        <div><label for="estimacion_subida_min">Tiempo subida est. (min)</label><input id="estimacion_subida_min" type="number" min="0.1" max="180" step="0.5"></div>
+        <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
+          <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
+      </div>
+      <div class="fila" style="margin-top:12px">
+        <label class="switch"><input type="checkbox" id="radar_auto"> Radar PC → cola</label>
+        <label class="switch"><input type="checkbox" id="firebase_auto"> Radar nube → cola</label>
+        <label class="switch"><input type="checkbox" id="headless"> Navegador oculto</label>
+        <button class="prim" onclick="guardarAjustes()"><i class="ph ph-floppy-disk"></i> Guardar ritmo</button>
+      </div>
+      <div id="plan-cola" class="ayuda" aria-live="polite" style="margin-top:10px"></div>
+      <div class="tabla-scroll"><table><thead><tr><th>Cuenta</th><th>Intervalo</th><th>Horario</th><th>Límite</th><th>Hoy / cola</th><th>Fin estimado</th></tr></thead><tbody id="plan-cuentas"></tbody></table></div>
+    </section>
+
+    <section class="card col-5">
+      <h2><i class="ph-duotone ph-cloud-lightning"></i> Servidor GPU remoto (Colab)</h2>
+      <p class="muted" style="margin-top:0">En Colab los clips se renderizan automáticamente en <b>1080p máxima calidad (NVENC AQ)</b> y sin metadatos antes de enviarse a tu PC.</p>
+      <label for="remoto_url">URL del túnel Cloudflare de Colab</label>
+      <input id="remoto_url" placeholder="https://xxxx.trycloudflare.com (vacío = editar en esta PC)">
+      <label for="remoto_clave">Contraseña de la celda 4 en Colab</label>
+      <div class="fila">
+        <input id="remoto_clave" type="password" placeholder="Contraseña de Colab">
+        <button onclick="probarRemoto()"><i class="ph ph-plugs-connected"></i> Probar</button>
+        <a href="https://colab.research.google.com/github/mateoperez08251-crypto/my-content/blob/main/colab/My_Content_Colab.ipynb"
+           target="_blank" rel="noopener"><button type="button"><i class="ph ph-arrow-square-out"></i> Colab</button></a>
+      </div>
+      <div class="muted" id="remoto-estado" style="margin:6px 0"></div>
+      <label class="switch"><input type="checkbox" id="remoto_respaldo_local"> Editar en esta PC si Colab se desconecta</label>
+      <div style="margin-top:10px"><button class="prim" onclick="guardarAjustes()"><i class="ph ph-floppy-disk"></i> Guardar conexión</button></div>
+
+      <hr style="border:0;border-top:1px solid var(--borde);margin:14px 0">
+      <div id="avisos-bot">
+        <h2><img src="/static/icons/avisos.svg" width="22" height="22" alt=""> Avisos WhatsApp y correo</h2>
+        <div class="ajustes">
+          <label class="switch"><input type="checkbox" id="avisos_activos"> Activar avisos</label>
+          <label class="switch"><input type="checkbox" id="avisos_cola"> Cola y retiros</label>
+          <label class="switch"><input type="checkbox" id="avisos_progreso"> Inicio de subida</label>
+          <label class="switch"><input type="checkbox" id="avisos_publicados"> Publicadas</label>
+          <label class="switch"><input type="checkbox" id="avisos_errores"> Errores y sesión</label>
+          <label class="switch"><input type="checkbox" id="avisos_lives"> Estado de Lives</label>
+          <label class="switch"><input type="checkbox" id="avisos_sistema"> Sistema y Colab</label>
+          <div><label for="avisos_intervalo_min">Agrupar cada (min)</label><input id="avisos_intervalo_min" type="number" min="1" max="60" value="5"></div>
+        </div>
+        <div class="fila" style="margin-top:8px">
+          <button class="prim" onclick="guardarAvisos()">Guardar avisos</button>
+          <span id="avisos-estado" class="muted" aria-live="polite" style="flex:2"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- VISTA 1 (POR DEFECTO): COLA DE SUBIDAS Y ACTIVIDAD -->
+  <div class="vista-panel activa" id="vista-cola" data-vista-panel="cola">
+    <div class="col-12">
+      <div class="metricas" id="inventario"></div>
+      <p class="muted" id="carpeta-clips" style="overflow-wrap:anywhere;margin:6px 2px 0"></p>
     </div>
-    <button class="prim" onclick="guardarAvisos()">Guardar avisos</button>
-    <p id="avisos-estado" class="muted" aria-live="polite"></p>
-    <p class="muted">Requiere My Content abierto. Un aviso enviado significa que el proveedor lo aceptó, no que lo hayas leído. Si la app se cerró durante un envío, ese aviso queda para revisar y no se repite automáticamente.</p>
-  </section>
 
-  <section class="card">
-    <h2><i class="ph-duotone ph-film-reel"></i> Videos en cola <small id="res-trabajos"></small></h2>
-    <div class="tabla-scroll"><table><thead><tr><th>Video</th><th>Origen</th><th>Estado</th><th></th></tr></thead>
-    <tbody id="trabajos"></tbody></table></div>
-  </section>
+    <section class="card col-12 subidas-seccion" id="vasos-activos-seccion" hidden>
+      <h2><i class="ph-duotone ph-drop-half-bottom"></i> Procesando ahora · Llenando clips <small id="vasos-activos-resumen"></small></h2>
+      <div id="vasos-activos" class="vasos-grid" aria-live="polite"></div>
+    </section>
 
-  <section class="card">
-    <h2><i class="ph-duotone ph-terminal-window"></i> Registro</h2>
-    <div id="registro"></div>
-  </section>
-  <section class="ancho subidas-seccion" id="historial-publicadas" hidden>
-    <details class="historial-subidas" id="publicadas-desplegable">
-      <summary>Publicadas <span id="res-publicadas" class="muted"></span> · expandir / contraer</summary>
-      <div id="subidas-publicadas" class="subidas-lista" role="list" aria-label="Publicaciones completadas"></div>
-    </details>
-  </section>
+    <section class="card col-12 subidas-seccion">
+      <h2><i class="ph-duotone ph-upload-simple"></i> Clips listos y en cola <small id="res-subidas"></small></h2>
+      <div class="fila">
+        <button id="lanzar-subidas" class="prim" onclick="lanzarSubidasGuardadas()"><i class="ph-bold ph-play"></i> Lanzar subidas guardadas</button>
+        <button type="button" onclick="cambiarPestanaBot('anadir')"><i class="ph ph-plus"></i> Añadir videos</button>
+        <button onclick="expandirSubidas(true)">Expandir todo</button>
+        <button onclick="expandirSubidas(false)">Contraer todo</button>
+        <span id="lanzar-subidas-estado" class="muted" aria-live="polite"></span>
+      </div>
+      <div class="fila cola-toolbar">
+        <label for="cola-cuenta" style="margin:0">Cuenta:</label>
+        <select id="cola-cuenta" onchange="pintarSubidas(E.subidas)" style="max-width:210px"><option value="">Todas las cuentas</option></select>
+        <button onclick="seleccionarVisibles()">Seleccionar visibles</button>
+        <button onclick="seleccionCola.clear(); pintar();">Limpiar</button>
+        <button class="peligro" id="cola-borrar-lote" onclick="borrarSeleccionados()" disabled>Retirar seleccionados</button>
+        <span id="cola-seleccion" class="muted" aria-live="polite"></span>
+      </div>
+      <div id="subidas" class="subidas-lista" role="list" aria-label="Publicaciones por cuenta"></div>
+    </section>
+
+    <section class="card col-7">
+      <h2><i class="ph-duotone ph-film-reel"></i> Videos preparándose <small id="res-trabajos"></small></h2>
+      <div class="tabla-scroll"><table><thead><tr><th>Video</th><th>Origen</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="trabajos"></tbody></table></div>
+    </section>
+
+    <section class="card col-5">
+      <h2><i class="ph-duotone ph-terminal-window"></i> Registro en vivo</h2>
+      <div id="registro"></div>
+    </section>
+
+    <section class="card col-12 subidas-seccion" id="historial-publicadas" hidden>
+      <details class="historial-subidas" id="publicadas-desplegable">
+        <summary>Publicadas recientemente <span id="res-publicadas" class="muted"></span> · mostrar / ocultar</summary>
+        <div id="subidas-publicadas" class="subidas-lista" role="list" aria-label="Publicaciones completadas"></div>
+      </details>
+    </section>
+  </div>
 </main>
+
 <dialog class="card cookies-dialog" id="cookies-descarga-modal" aria-labelledby="cookies-descarga-titulo">
   <h2 id="cookies-descarga-titulo">🍪 Cookies de YouTube
     <button type="button" onclick="cerrarCookiesDescarga()" aria-label="Cerrar cookies">Cerrar</button>
   </h2>
   <div class="ayuda" id="yt-auto">
     <b>YouTube automático (recomendado)</b>
-    <p class="muted">Inicia sesión una sola vez en la ventana del bot y ciérrala. Después el bot renueva las cookies cada 6 horas y cuando YouTube bloquea una descarga, y las envía a esta PC y a Colab. Usa una cuenta de Google secundaria.</p>
+    <p class="muted">Inicia sesión una sola vez en la ventana del bot y ciérrala. Después el bot renueva las cookies cada 6 horas y las envía a esta PC y a Colab.</p>
     <p id="yt-auto-estado" role="status" aria-live="polite"></p>
     <div class="fila">
       <button type="button" id="yt-auto-conectar" class="prim" onclick="youtubeAuto('conectar')">Conectar YouTube</button>
@@ -354,30 +745,47 @@ dialog.cookies-dialog::backdrop{background:rgba(0,0,0,.72)}
       <button type="button" id="yt-auto-cerrar" onclick="youtubeAuto('cerrar')" hidden>Terminé de iniciar sesión</button>
     </div>
   </div>
-  <p class="ayuda">O carga manualmente las cookies de tu sesión de YouTube. Son las mismas que usa Smart Split para descargar videos.</p>
+  <p class="ayuda">O carga manualmente un archivo de cookies (.txt Netscape o .json):</p>
   <label for="cookies-descarga-destino">¿Dónde se descarga el video?</label>
   <select id="cookies-descarga-destino" onchange="cambiarDestinoCookies()">
     <option value="pc">Esta PC</option><option value="colab">Colab · servidor de cortes</option>
   </select>
   <p class="muted" id="cookies-descarga-servidor"></p>
   <p id="cookies-descarga-estado" role="status" aria-live="polite"></p>
-  <label for="cookies-descarga-archivo">Archivo .txt (Netscape) o .json · máximo 2 MiB</label>
+  <label for="cookies-descarga-archivo">Archivo .txt o .json · máximo 2 MiB</label>
   <input id="cookies-descarga-archivo" type="file" accept=".txt,.json,text/plain,application/json">
   <div class="fila" style="margin-top:12px">
     <button id="cookies-descarga-guardar" class="prim" onclick="peticionCookiesDescarga('POST')">Guardar cookies</button>
     <button id="cookies-descarga-quitar" class="peligro" onclick="peticionCookiesDescarga('DELETE')">Quitar cookies</button>
   </div>
-  <p class="muted">Para lives, elige Esta PC. Para videos que se descargan en el servidor de cortes, elige Colab. El archivo se enviará solo al destino elegido. Las cookies pueden caducar; guardarlas no confirma que YouTube permita la descarga.</p>
 </dialog>
+
 <dialog id="texto-dialog">
   <h2>Revisar antes de publicar</h2>
-  <p class="muted">Estos cambios afectan solo a este clip y esta cuenta. Puedes pausar la cuenta mientras lo revisas.</p>
+  <p class="muted">Estos cambios afectan solo a este clip y esta cuenta.</p>
   <video id="texto-video" controls playsinline preload="none"></video>
   <label for="texto-titulo">Título</label><input id="texto-titulo">
   <label for="texto-descripcion">Descripción</label><textarea id="texto-descripcion"></textarea>
   <label for="texto-hashtags">Hashtags</label><input id="texto-hashtags">
   <p id="texto-estado" aria-live="polite"></p>
-  <div class="fila"><button onclick="cerrarTexto()">Cerrar</button><button id="texto-guardar" class="prim" onclick="guardarTexto()">Guardar texto</button></div>
+  <div class="fila" style="margin-top:10px"><button onclick="cerrarTexto()">Cerrar</button><button id="texto-guardar" class="prim" onclick="guardarTexto()">Guardar texto</button></div>
+</dialog>
+
+<dialog id="vista-rapida-dialog" aria-labelledby="vista-rapida-titulo">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid var(--borde)">
+    <div style="min-width:0">
+      <div id="vista-rapida-titulo" style="font:600 14px 'Plus Jakarta Sans',-apple-system,sans-serif;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Vista previa del clip</div>
+      <div id="vista-rapida-meta" class="muted" style="font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+    </div>
+    <button type="button" class="mini" onclick="cerrarVistaRapidaBot()" aria-label="Cerrar vista previa">✕</button>
+  </div>
+  <div style="background:#03050a;display:flex;justify-content:center;align-items:center">
+    <video id="vista-rapida-video" controls playsinline preload="none" style="width:100%;max-height:74vh;aspect-ratio:9/16;object-fit:contain;background:#000"></video>
+  </div>
+  <div class="fila" style="padding:11px 16px;justify-content:space-between;border-top:1px solid var(--borde)">
+    <a id="vista-rapida-abrir" href="#" target="_blank" rel="noopener" style="font-size:12.5px">Abrir archivo completo ↗</a>
+    <button type="button" onclick="cerrarVistaRapidaBot()">Cerrar</button>
+  </div>
 </dialog>
 <div id="toast"></div>
 <datalist id="smart-presets"></datalist>
@@ -394,6 +802,7 @@ const cookiesPendientes = new Set();
 const cierresPendientes = new Set();
 const pruebasPendientes = new Set();
 const seleccionCola = new Set();
+const cuentasAvanzadoAbierto = new Set();
 let textoEdicion = null;
 let presetsGuardados = {}, presetBase = {}, presetCargado = false;
 
@@ -402,6 +811,25 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const est = e => `<span class="est e-${esc(e)}">${NOMBRE_EST[e] || esc(e)}</span>`;
 const plat = p => `<span class="plat"><i class="ph ${ICON[p] || 'ph-globe'}"></i></span>`;
 const base = r => esc(String(r || '').split(/[\\/]/).pop());
+
+function cambiarPestanaBot(nombre) {
+  const vistas = ['cola','anadir','cuentas','edicion','sistema'];
+  const destino = vistas.includes(nombre) ? nombre : 'cola';
+  document.querySelectorAll('[data-vista]').forEach(b => b.classList.toggle('activa', b.dataset.vista === destino));
+  document.querySelectorAll('[data-vista-panel]').forEach(p => p.classList.toggle('activa', p.dataset.vistaPanel === destino));
+}
+if (typeof window !== 'undefined' && typeof URLSearchParams !== 'undefined') {
+  const params = new URLSearchParams(window.location?.search || '');
+  if (params.get('embed') === '1') document.body?.classList.add('modo-embed');
+  const hashVista = String(window.location?.hash || '').replace(/^#/, '');
+  if (['cola','anadir','cuentas','edicion','sistema'].includes(hashVista)) cambiarPestanaBot(hashVista);
+  window.addEventListener?.('message', ev => {
+    if (ev?.data?.type === 'bot-switch-tab' && ev.data.tab) cambiarPestanaBot(ev.data.tab);
+    if (ev?.data?.type === 'bot-immersive-state' && $('lbl-bot-inmersivo')) {
+      $('lbl-bot-inmersivo').textContent = ev.data.immersive ? 'Mostrar menú' : 'Ampliar vista';
+    }
+  });
+}
 
 function toast(t, mal) { const el = $('toast'); el.textContent = t; el.style.color = mal ? 'var(--mal)' : '';
   el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => el.style.display = 'none', 3500); }
@@ -461,16 +889,21 @@ function tarjetaSubida(s) {
   const mejora = {off:'Sin mejora adicional',ia:'Real-ESRGAN IA',hd:'Realzado HD',sharpen:'Nitidez'}[edicion.upscale] || 'No registrada';
   const tramo = s.clip_inicio != null && s.clip_fin != null ? `${tiempoClip(s.clip_inicio)} – ${tiempoClip(s.clip_fin)} (${Math.round(s.clip_fin-s.clip_inicio)} s)` : 'No registrado';
   const peso = s.bytes == null ? 'No disponible' : `${(s.bytes/1024/1024).toFixed(1)} MB`;
+  const tieneArchivo = s.archivo_existe !== false;
+  const tieneMini = Boolean(s.tiene_miniatura || tieneArchivo);
+  const posterAttr = tieneMini ? ` poster="/api/bot/miniatura/${id}"` : '';
+  const linkMiniatura = tieneMini ? ` · <a href="/api/bot/miniatura/${id}" target="_blank" rel="noopener">${s.tiene_portada_ia ? 'Portada IA JPG' : 'Miniatura JPG'}</a>` : '';
+  const thumbResumen = `<div class="clip-thumb-box${tieneArchivo ? '' : ' sin-img'}">${tieneArchivo ? `<img src="/api/bot/miniatura/${id}" loading="lazy" alt="" onerror="this.parentElement.classList.add('sin-img')"><button type="button" class="clip-thumb-play" title="Vista previa rápida" aria-label="Vista previa rápida de publicación ${id}" onclick="event.preventDefault();event.stopPropagation();if(typeof abrirVistaRapidaBot==='function')abrirVistaRapidaBot(${id})"><span>▶</span></button>` : '<span class="muted" style="font-size:10px">—</span>'}</div>`;
   return `<details class="publicacion-detalle"><summary class="publicacion-resumen">
-    <div><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><div class="publicacion-resumen-meta">${esc(s.cuenta_nombre || 'Cuenta eliminada')} · ${esc(s.plataforma || '')} · ${tramo}</div></div>
+    <div class="publicacion-resumen-izq">${thumbResumen}<div style="min-width:0"><h3 id="subida-titulo-${id}">${esc(titulo)}</h3><div class="publicacion-resumen-meta">${esc(s.cuenta_nombre || 'Cuenta eliminada')} · ${esc(s.plataforma || '')} · ${tramo}${s.tiene_portada_ia ? ' · Portada IA' : ''}</div></div></div>
     <div class="publicacion-resumen-estado"><span class="publicacion-estado">${est(s.estado === 'ok' ? 'publicada' : s.estado)}</span><span class="publicacion-toggle"><span class="texto-expandir">Ver detalles ▾</span><span class="texto-contraer">Contraer ▴</span></span></div>
-    </summary><div class="publicacion-cuerpo"><div>${s.archivo_existe !== false ? `<video controls playsinline preload="none" src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
+    </summary><div class="publicacion-cuerpo"><div>${tieneArchivo ? `<video controls playsinline preload="none"${posterAttr} src="/api/bot/clip/${id}" aria-label="Vista previa: ${esc(titulo)}"></video><a href="/api/bot/clip/${id}" target="_blank" rel="noopener">Abrir clip</a>${linkMiniatura}` : '<div class="publicacion-falta">El archivo ya no está en esta PC.</div>'}</div>
     <div><div>${plat(s.plataforma)} ${esc({tiktok:"TikTok",youtube:"YouTube",facebook:"Facebook"}[s.plataforma] || "Plataforma no registrada")} · <b>${esc(s.cuenta_nombre || 'Cuenta eliminada')}</b> <span class="muted">· Publicación #${id}</span></div>
     <p class="publicacion-origen">${esc(s.origen || 'Origen no registrado')}${s.canal ? ' · '+esc(s.canal) : ''}${origen ? ` · <a href="${esc(origen)}" target="_blank" rel="noopener">Video original</a>` : ''}</p>
     <p class="publicacion-espera">${esc(s.espera || '')}</p><p class="publicacion-error err">${esc(s.error || '')}</p>
     <dl class="publicacion-datos"><div><dt>Parte del video original</dt><dd>${tramo}</dd></div><div><dt>Preset de esta cuenta</dt><dd>${esc(s.preset || 'Sin edición / no registrado')}</dd></div>
     <div><dt>Perfil de exportación solicitado</dt><dd>${esc(perfil)}</dd></div><div><dt>Mejora solicitada</dt><dd>${esc(mejora)}</dd></div>
-    <div><dt>Subtítulos</dt><dd>${edicion.show_subtitles === false ? 'Desactivados' : edicion.style ? esc(edicion.style) : 'No registrados'}</dd></div>
+    <div><dt>Subtítulos</dt><dd>${edicion.show_subtitles === false ? 'Desactivados' : edicion.style ? esc(edicion.style) : 'No registrados'}${edicion.commentary_mode && edicion.commentary_mode !== 'off' ? ' · Comentario IA (' + esc(edicion.commentary_mode) + ')' : ''}</dd></div>
     <div><dt>Archivo guardado</dt><dd>${esc(base(s.archivo))} · ${peso}</dd></div>
     <div><dt>Añadido a la cola</dt><dd>${fechaSubida(s.creado)}</dd></div><div><dt>Última actualización</dt><dd class="publicacion-fecha">${fechaSubida(s.actualizado)}</dd></div>
     <div><dt>Intentos de subida</dt><dd>${Number(s.intentos)||0} de ${Number(E?.config?.max_intentos)||3}</dd></div>
@@ -533,37 +966,43 @@ function tarjetaCuenta(c) {
   const siguiente = c.siguiente;
   const unidad = c.intervalo_unidad || 'horas';
   const intervalo = Number(((c.intervalo_horas ?? 1) * (unidad === 'minutos' ? 60 : 1)).toFixed(8));
-  return `<article class="cuenta-panel" id="cuenta-${c.id}"><h3>${plat(c.plataforma)} ${esc(c.nombre)}</h3>
-    <p>${est(c.estado)} · ${c.activa ? 'Cuenta activa' : 'Cuenta pausada'} · ${c.hoy}/${c.limite_dia} publicadas hoy · ${c.pendientes || 0} pendientes</p>
-    <div class="ajustes">
-      <div><label for="cuenta-intervalo-${c.id}">Publicar cada</label><input id="cuenta-intervalo-${c.id}" type="number" min="0" max="${unidad === 'minutos' ? 10080 : 168}" step="any" value="${intervalo}" data-unidad="${unidad}" onchange="guardarIntervalo(${c.id},this)"></div>
-      <div><label for="cuenta-unidad-${c.id}">Unidad del intervalo</label><select id="cuenta-unidad-${c.id}" onchange="cambiarUnidadIntervalo(${c.id},this)"><option value="minutos" ${unidad === 'minutos' ? 'selected' : ''}>Minutos</option><option value="horas" ${unidad === 'horas' ? 'selected' : ''}>Horas</option></select></div>
-      <div><label for="cuenta-limite-${c.id}">Máximo diario</label><input id="cuenta-limite-${c.id}" type="number" min="1" max="1000" value="${c.limite_dia}" onchange="guardarLimite(${c.id},this.value)"></div>
-      <div><label for="cuenta-inicio-${c.id}">Subir desde</label><input id="cuenta-inicio-${c.id}" type="time" value="${esc(c.hora_inicio || '08:00')}" onchange="guardarRitmo(${c.id},'hora_inicio',this)"></div>
-      <div><label for="cuenta-fin-${c.id}">Hasta</label><input id="cuenta-fin-${c.id}" type="time" value="${esc(c.hora_fin || '23:30')}" onchange="guardarRitmo(${c.id},'hora_fin',this)"></div>
-    </div>
-    ${c.plataforma === 'tiktok' ? `<label><input type="checkbox" ${c.monetizada ? 'checked' : ''} aria-describedby="monetizada-ayuda-${c.id}" onchange="guardarMonetizada(${c.id},this)"> Controles para cuenta monetizada</label><p class="muted" id="monetizada-ayuda-${c.id}">Bloquea archivos idénticos ya registrados por el bot y exige 61 s, 1080p y 24 fps. Del radar solo recibe videos publicados en los últimos ${esc(E.config.monetizada_max_min ?? 60)} min y no recibe populares. No comprueba copias en todo TikTok ni garantiza originalidad o monetización.</p>` : ''}
+  const abierto = typeof cuentasAvanzadoAbierto !== 'undefined' && cuentasAvanzadoAbierto.has(c.id) ? ' open' : '';
+  return `<article class="cuenta-panel" id="cuenta-${c.id}">
+    <div class="cuenta-cabecera"><h3>${plat(c.plataforma)} ${esc(c.nombre)}</h3>${est(c.estado)}</div>
+    <p class="muted">${c.activa ? 'Cuenta activa' : 'Cuenta pausada'} · ${c.hoy}/${c.limite_dia} hoy · ${c.pendientes || 0} pendientes</p>
     <div class="proximo"><b>${faltan === null ? 'Sin hora estimada' : faltan ? 'Turno estimado en '+Math.floor(faltan/60)+' h '+faltan%60+' min' : 'Turno disponible'}</b>
-      ${proxima ? '<div>'+fechaSubida(proxima)+'</div>' : ''}<p>${esc(c.espera || '')}</p>
-      ${siguiente ? `<div class="fila"><video controls preload="none" src="/api/bot/clip/${Number(siguiente.id)}" aria-label="Próximo clip de ${esc(c.nombre)}"></video><span>${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>` : ''}
-      <p class="muted">La hora es orientativa; depende de las subidas anteriores y de la conexión.</p></div>
+      ${proxima ? '<div class="muted">'+fechaSubida(proxima)+'</div>' : ''}<p>${esc(c.espera || '')}</p>
+      ${siguiente ? `<div class="fila" style="margin-top:6px"><video controls preload="none" poster="/api/bot/miniatura/${Number(siguiente.id)}" src="/api/bot/clip/${Number(siguiente.id)}" aria-label="Próximo clip de ${esc(c.nombre)}"></video><span style="font-size:12px">${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>` : ''}
+    </div>
     <div class="acc">
       <button onclick="pausarCuenta(${c.id},${!c.activa})">${c.activa ? 'Pausar cuenta' : 'Activar cuenta'}</button>
       <button onclick="verColaCuenta(${c.id})">Ver cola</button>
-      ${siguiente ? `<button onclick="adelantarClip(${Number(siguiente.id)})">Subir siguiente ahora</button>` : ''}
+      ${siguiente ? `<button class="prim" onclick="adelantarClip(${Number(siguiente.id)})">Subir siguiente ahora</button>` : ''}
       <button onclick="login(${c.id})" ${loginPendientes.has(c.id) ? 'disabled' : ''}>Iniciar sesión</button>
-      <button onclick="probar(${c.id})" ${c.abierta || c.comprobando || pruebasPendientes.has(c.id) ? 'disabled' : ''}>${c.comprobando ? 'Comprobando…' : 'Comprobar sesión'}</button>
-      <button onclick="cerrarVentana(${c.id})" ${puedeCerrar(c) ? '' : 'disabled'}>Cerrar ventana de sesión</button>
-      <button onclick="importarCookies(${c.id})">Importar cookies</button>
-      <button onclick="cambiarCuentaEdicion('${c.id}',true)">Edición: ${esc(c.preset_corte || 'Regla/general')}</button>
-      <button class="peligro" onclick="borrarCuenta(${c.id})">Borrar cuenta</button>
-    </div></article>`;
+    </div>
+    <details class="cuenta-avanzado"${abierto} ontoggle="if(typeof cuentasAvanzadoAbierto!=='undefined'){this.open?cuentasAvanzadoAbierto.add(${c.id}):cuentasAvanzadoAbierto.delete(${c.id});}">
+      <summary><span>Horario, sesión y opciones avanzadas</span><span>▾</span></summary>
+      <div class="ajustes" style="margin-top:8px">
+        <div><label for="cuenta-intervalo-${c.id}">Publicar cada</label><input id="cuenta-intervalo-${c.id}" type="number" min="0" max="${unidad === 'minutos' ? 10080 : 168}" step="any" value="${intervalo}" data-unidad="${unidad}" onchange="guardarIntervalo(${c.id},this)"></div>
+        <div><label for="cuenta-unidad-${c.id}">Unidad</label><select id="cuenta-unidad-${c.id}" onchange="cambiarUnidadIntervalo(${c.id},this)"><option value="minutos" ${unidad === 'minutos' ? 'selected' : ''}>Minutos</option><option value="horas" ${unidad === 'horas' ? 'selected' : ''}>Horas</option></select></div>
+        <div><label for="cuenta-limite-${c.id}">Máximo diario</label><input id="cuenta-limite-${c.id}" type="number" min="1" max="1000" value="${c.limite_dia}" onchange="guardarLimite(${c.id},this.value)"></div>
+        <div><label for="cuenta-inicio-${c.id}">Subir desde</label><input id="cuenta-inicio-${c.id}" type="time" value="${esc(c.hora_inicio || '08:00')}" onchange="guardarRitmo(${c.id},'hora_inicio',this)"></div>
+        <div><label for="cuenta-fin-${c.id}">Hasta</label><input id="cuenta-fin-${c.id}" type="time" value="${esc(c.hora_fin || '23:30')}" onchange="guardarRitmo(${c.id},'hora_fin',this)"></div>
+      </div>
+      ${c.plataforma === 'tiktok' ? `<div style="margin-top:8px"><label class="switch"><input type="checkbox" ${c.monetizada ? 'checked' : ''} aria-describedby="monetizada-ayuda-${c.id}" onchange="guardarMonetizada(${c.id},this)"> Controles para cuenta monetizada (+61 s)</label><p class="muted" id="monetizada-ayuda-${c.id}">Exige 61 s, 1080p y videos recientes del Radar (${esc(E.config?.monetizada_max_min ?? 60)} min).</p><label class="switch"><input type="checkbox" ${c.proteger_fyp ? 'checked' : ''} aria-describedby="fyp-ayuda-${c.id}" onchange="guardarProtegerFyp(${c.id},this)"> Protección Para ti (permite clips cortos)</label><p class="muted" id="fyp-ayuda-${c.id}">Evita repetidos y populares antiguos sin exigir 61 s.</p></div>` : ''}
+      <div class="acc" style="margin-top:8px">
+        <button onclick="probar(${c.id})" ${c.abierta || c.comprobando || pruebasPendientes.has(c.id) ? 'disabled' : ''}>${c.comprobando ? 'Comprobando…' : 'Comprobar sesión'}</button>
+        <button onclick="cerrarVentana(${c.id})" ${puedeCerrar(c) ? '' : 'disabled'}>Cerrar ventana de sesión</button>
+        <button onclick="importarCookies(${c.id})">Importar cookies</button>
+        <button onclick="cambiarCuentaEdicion('${c.id}',true)">Edición: ${esc(c.preset_corte || 'Regla/general')}</button>
+        <button class="peligro" onclick="borrarCuenta(${c.id})">Borrar cuenta</button>
+      </div>
+    </details></article>`;
 }
 function pintarCuentas() {
   const panel = $('cuentas');
-  // No reemplazar campos que se están editando ni vistas previas en reproducción.
   if (panel.contains(document.activeElement) || [...panel.querySelectorAll('video')].some(v=>!v.paused)) return;
-  panel.innerHTML = E.cuentas.map(tarjetaCuenta).join('') || '<p>Añade tu primera cuenta.</p>';
+  panel.innerHTML = E.cuentas.map(tarjetaCuenta).join('') || '<p class="muted">Añade tu primera cuenta para empezar.</p>';
 }
 function pintar() {
   const c = E.config;
@@ -578,10 +1017,10 @@ function pintar() {
     $('avisos_intervalo_min').value = c.avisos_intervalo_min ?? 5;
   }
   const avisos = E.avisos || {};
-  $('avisos-estado').textContent = `${avisos.pendiente || 0} eventos pendientes · ${avisos.enviado || 0} eventos enviados · ${avisos.fallido || 0} fallidos · ${avisos.revisar || 0} por revisar tras reinicio. Si fallan, revisa la API y el número en Radar.`;
+  $('avisos-estado').textContent = `${avisos.pendiente || 0} pendientes · ${avisos.enviado || 0} enviados · ${avisos.fallido || 0} fallidos`;
   $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
   pintarYoutubeAuto();
-  $('modo-activo').textContent = 'Modo guardado: ' + ({preparar_primero:'editar toda la cola y después publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados',alternar:'alternar edición y publicación'}[c.modo_cola] || c.modo_cola);
+  $('modo-activo').textContent = 'Modo: ' + ({alternar:'subir cada clip apenas esté listo',preparar_primero:'editar cola y publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados'}[c.modo_cola] || c.modo_cola);
   pintarPlan();
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
   pintarCuentas();
@@ -591,7 +1030,7 @@ function pintar() {
     <td>${esc(r.preset || 'por defecto')}${r.cortar ? '' : ' · sin cortar'}</td>
     <td class="acc"><button class="mini" onclick="editarRegla(${r.id})"><i class="ph ph-pencil"></i></button>
       <button class="mini peligro" onclick="borrarRegla(${r.id})"><i class="ph ph-trash"></i></button></td></tr>`
-  ).join('') || '<tr><td colspan="4" class="muted">Sin reglas: lo del radar no tendrá destino. Crea al menos la regla *.</td></tr>';
+  ).join('') || '<tr><td colspan="4" class="muted">Sin reglas: crea al menos * para los canales del Radar.</td></tr>';
   const filtro = $('cola-cuenta');
   if (filtro && document.activeElement !== filtro) {
     const actual = filtro.value;
@@ -601,6 +1040,7 @@ function pintar() {
   const disponibles = new Set(E.subidas.filter(s=>['pendiente','error'].includes(s.estado)).map(s=>s.id));
   for (const id of seleccionCola) if (!disponibles.has(id)) seleccionCola.delete(id);
   pintarSubidas(E.subidas);
+  if (typeof pintarVasosActivos === 'function') pintarVasosActivos(E.vasos_activos || []);
   document.querySelectorAll('[data-seleccion-id]').forEach(el=>el.checked=seleccionCola.has(Number(el.dataset.seleccionId)));
   actualizarSeleccionCola();
   $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
@@ -609,11 +1049,13 @@ function pintar() {
     <td class="muted">${t.origen === 'local' ? 'Archivo de tu PC · sin cortes' : `${esc(t.origen)}<br>Preset: ${esc(t.preset)}`}</td><td>${est(t.estado)}</td>
     <td class="acc">${['error','sin_destino','omitido'].includes(t.estado) ? `<button class="mini" onclick="accion('trabajos',${t.id},'reintentar')"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
       <button class="mini peligro" onclick="accion('trabajos',${t.id},'borrar')"><i class="ph ph-trash"></i></button></td></tr>`
-  ).join('') || '<tr><td colspan="4" class="muted">La cola está vacía.</td></tr>';
+  ).join('') || '<tr><td colspan="4" class="muted">No hay videos preparándose.</td></tr>';
   const rs = E.resumen.subidas || {};
   $('res-subidas').textContent = `${rs.ok || 0} subidas · ${rs.pendiente || 0} en cola · ${rs.error || 0} con error`;
   const rt = E.resumen.trabajos || {};
   $('res-trabajos').textContent = `${rt.pendiente || 0} por preparar`;
+  if ($('badge-cola')) $('badge-cola').textContent = String((rs.pendiente || 0) + (rt.pendiente || 0));
+  if ($('badge-cuentas')) $('badge-cuentas').textContent = String((E.cuentas || []).length);
   const reg = $('registro'), abajo = reg.scrollTop + reg.clientHeight >= reg.scrollHeight - 20;
   reg.textContent = E.registro.join('\n');
   if (abajo) reg.scrollTop = reg.scrollHeight;
@@ -626,7 +1068,6 @@ async function cargar() {
   try {
     const version = editorVersion, result = await api('/api/bot/estado');
     if (E && version !== editorVersion) {
-      // Una consulta iniciada antes de guardar no devuelve la cuenta al preset anterior.
       result.config.preset = E.config.preset;
       const asignados = new Map(E.cuentas.map(c => [c.id, c.preset_corte]));
       for (const cuenta of result.cuentas) if (asignados.has(cuenta.id)) cuenta.preset_corte = asignados.get(cuenta.id);
@@ -659,13 +1100,26 @@ async function iniciarLive() {
 }
 async function cargarLives() {
   const data = await api('/api/bot/lives');
-  $('lives').innerHTML = (data.lives || []).map(live => `<tr>
+  $('lives').innerHTML = (data.lives || []).map(live => {
+    const resumenSeg = live.segmentos.map(s => `${esc(({sin_audio:'Sin audio · no se edita',audio_no_verificado:'Audio no verificable · no se edita'})[s.estado] || s.estado)}: ${s.n}`).join(' · ') || 'Esperando el primer segmento';
+    const tira = (live.clips_recientes || []).length ? `<div class="live-clips-tira">${live.clips_recientes.map(seg => {
+      const cap = !!seg.capturando_ahora;
+      const imp = !cap && ['listo','encolado'].includes(seg.estado);
+      const niv = cap ? 42 : imp ? 78 : 100;
+      const badge = cap ? 'Capturando' : imp ? 'A PC…' : (seg.estado === 'procesado' ? 'Listo' : seg.estado);
+      const pie = seg.duracion > 0 ? `${Math.round(seg.duracion)} s` : 'En vivo';
+      const img = seg.thumb_url ? `<img src="${esc(seg.thumb_url)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '';
+      const play = (!cap && seg.video_url) ? `<button type="button" class="live-seg-play" title="Vista previa del tramo capturado" data-v="${esc(seg.video_url)}" data-p="${esc(seg.thumb_url || '')}" data-t="${esc((live.titulo || 'Live') + ' · ' + seg.nombre)}" onclick="abrirVistaRapidaUrlBot(this.dataset.v,this.dataset.p,this.dataset.t,'YouTube Live capturado en esta PC')">▶</button>` : '';
+      return `<div class="live-seg-card" title="${esc(seg.nombre + ' · ' + badge)}">${img}${imp || cap ? `<div class="live-seg-fill" style="height:${niv}%"></div>` : ''}<span class="live-seg-badge">${esc(badge)}</span>${play}<span class="live-seg-foot">${esc(pie)}</span></div>`;
+    }).join('')}</div>` : '';
+    return `<tr>
     <td><a href="${esc(live.url)}" target="_blank" rel="noopener">${esc(live.titulo || 'YouTube Live')}</a>
       <div class="muted">${live.mode === 'ai' ? `IA: ${live.seconds} s por cada ${live.window} s` : `Partes de unos ${live.seconds} s`} · ${live.accounts.map(id => esc((E.cuentas || []).find(c => c.id === id)?.nombre || `Cuenta ${id}`)).join(', ')}</div></td>
     <td>${esc(live.estado)}<div class="muted">${esc(live.detalle)}</div></td>
-    <td>${live.segmentos.map(s => `${esc(({sin_audio:'Sin audio · no se edita',audio_no_verificado:'Audio no verificable · no se edita'})[s.estado] || s.estado)}: ${s.n}`).join('<br>') || 'Esperando el primer segmento'}</td>
+    <td><div>${resumenSeg}</div>${tira}</td>
     <td>${['conectando','capturando','reconectando','deteniendo'].includes(live.estado) ?
-      `<button onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener captura</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No hay capturas. Elige cuentas y pega un live activo.</td></tr>';
+      `<button onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener captura</button>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="muted">No hay capturas activas.</td></tr>';
 }
 async function detenerLive(id) { await api(`/api/bot/lives/${id}/detener`, {}); await cargarLives(); }
 async function cfg(cambios) { await api('/api/bot/config', cambios); cargar(); }
@@ -707,7 +1161,6 @@ async function youtubeAuto(accion) {
 async function cambiarDestinoCookies() {
   if (cookiesDescargaOcupado) return;
   const destino = $('cookies-descarga-destino').value;
-  // Conserva la URL que vio el usuario aunque el sondeo actualice E mientras el diálogo está abierto.
   const servidor = destino === 'colab' ? String(E?.config?.remoto_url || '').trim().replace(/\/+$/, '') : '';
   cookiesDescargaDestino = {destino, servidor};
   $('cookies-descarga-archivo').value = '';
@@ -775,9 +1228,18 @@ async function encolar() {
 }
 
 function elegirArchivosLocales() {
-  archivosLocales = Array.from($('local-archivos').files || []).map(file => ({file, estado:'pendiente',
-    clave:Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join(''),
-    mensaje:'Por guardar', datos:null}));
+  if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+    for (const prev of archivosLocales) { if (prev && prev.previewUrl) { try { URL.revokeObjectURL(prev.previewUrl); } catch (_) {} } }
+  }
+  archivosLocales = Array.from($('local-archivos').files || []).map(file => {
+    let previewUrl = '';
+    if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob !== 'undefined' && file instanceof Blob) {
+      try { previewUrl = URL.createObjectURL(file); } catch (_) {}
+    }
+    return {file, estado:'pendiente', pct:0, previewUrl,
+      clave:Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join(''),
+      mensaje:'Por guardar', datos:null};
+  });
   pintarLocales();
 }
 
@@ -789,8 +1251,22 @@ function pintarLocales() {
   const cuentas = (E?.cuentas || []).filter(c => c.plataforma === $('local-plataforma').value);
   selLocal = new Set([...selLocal].filter(id => cuentas.some(c => c.id === id)));
   chips('chips-locales', selLocal, cuentas, bloqueado);
-  $('local-lista').innerHTML = archivosLocales.map(a =>
-    `<div><b>${esc(a.file.name)}</b> · ${esc(a.mensaje)}</div>`).join('');
+  const waveSvg = '<svg class="vaso-ola" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(90,200,250,0.62)" d="M0,8 C30,16 60,0 120,8 C180,16 210,0 240,8 L240,16 L0,16 Z"></path></svg><svg class="vaso-ola atras" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(94,92,230,0.52)" d="M0,8 C40,0 80,16 120,8 C160,0 200,16 240,8 L240,16 L0,16 Z"></path></svg>';
+  $('local-lista').innerHTML = archivosLocales.length ? `<div class="vasos-grid">${archivosLocales.map((a, idx) => {
+    const listo = a.estado === 'guardado';
+    const pct = listo ? 100 : Math.max(a.estado === 'enviando' ? 8 : 0, Math.min(100, Number(a.pct) || 0));
+    const media = a.previewUrl ? `<video class="vaso-video-local" src="${esc(a.previewUrl)}#t=0.2" muted playsinline preload="metadata"></video>` : '';
+    return `<div class="vaso-clip${listo ? ' es-listo' : ''}">
+      ${media}
+      <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
+      <div class="vaso-brillo"></div>
+      <div class="vaso-capa">
+        <div style="display:flex;justify-content:space-between;gap:4px"><span class="vaso-chip">Clip ${idx + 1}</span><span class="vaso-chip">${listo ? 'Listo' : a.estado === 'error' ? 'Error' : pct + '%'}</span></div>
+        <div class="vaso-centro"><div class="vaso-pct">${pct}%</div><div class="vaso-etapa">${esc(a.mensaje)}</div></div>
+        <div class="vaso-pie"><b>${esc(a.file.name)}</b> · ${esc(a.mensaje)}</div>
+      </div>
+    </div>`;
+  }).join('')}</div>` : '';
   $('local-enviar').disabled = enviandoLocales || !archivosLocales.some(a => a.estado !== 'guardado');
   $('local-enviar').textContent = enviandoLocales ? 'Guardando archivos…' :
     archivosLocales.some(a => a.estado === 'error') ? 'Reintentar pendientes' : 'Guardar y añadir a la cola';
@@ -803,10 +1279,16 @@ function enviarArchivoLocal(item) {
     form.append('texto', item.datos.texto);
     const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/bot/archivos');
     xhr.upload.onprogress = event => {
-      item.mensaje = event.lengthComputable ? `Copiando: ${Math.round(event.loaded / event.total * 100)} %` : 'Copiando…';
+      if (event.lengthComputable && event.total > 0) {
+        item.pct = Math.round(event.loaded / event.total * 92);
+        item.mensaje = `Copiando: ${Math.round(event.loaded / event.total * 100)} %`;
+      } else {
+        item.pct = Math.max(item.pct || 0, 25);
+        item.mensaje = 'Copiando…';
+      }
       pintarLocales();
     };
-    xhr.upload.onload = () => { item.mensaje = 'Guardando y creando la cola…'; pintarLocales(); };
+    xhr.upload.onload = () => { item.pct = 96; item.mensaje = 'Guardando y creando la cola…'; pintarLocales(); };
     xhr.onerror = () => reject(new Error('No se pudo confirmar el guardado. Pulsa Reintentar pendientes.'));
     xhr.onabort = () => reject(new Error('Transferencia interrumpida. Puedes reintentar.'));
     xhr.onload = () => {
@@ -836,10 +1318,11 @@ async function encolarArchivosLocales() {
   pintarLocales();
   try {
     for (const item of pendientes) {
-      item.estado = 'enviando'; item.mensaje = 'Copiando…'; pintarLocales();
+      item.estado = 'enviando'; item.pct = Math.max(item.pct || 0, 6); item.mensaje = 'Copiando…'; pintarLocales();
       try {
         const result = await enviarArchivoLocal(item);
-        item.estado = 'guardado'; item.mensaje = `Guardado · ${result.publicaciones} publicación(es) en cola`;
+        item.estado = 'guardado'; item.pct = 100; item.mensaje = `Guardado · ${result.publicaciones} publicación(es) en cola`;
+        Promise.resolve(cargar()).catch(() => {});
       } catch (error) {
         item.estado = 'error'; item.mensaje = error.message;
       }
@@ -854,7 +1337,7 @@ async function crearCuenta() {
   await api('/api/bot/cuentas', {nombre: $('c-nombre').value, plataforma: $('c-plat').value,
     limite_dia: +$('c-limite').value || 6, url_subida: $('c-url').value});
   $('c-nombre').value = ''; $('c-url').value = '';
-  toast('Cuenta creada. Ahora pulsa "Sesión" para iniciar sesión.'); cargar();
+  toast('Cuenta creada. Ahora pulsa "Iniciar sesión" para vincularla.'); cargar();
 }
 function puedeCerrar(cuenta) {
   return !cierresPendientes.has(cuenta.id) && !pruebasPendientes.has(cuenta.id) && !cuenta.comprobando &&
@@ -879,7 +1362,7 @@ async function login(id) {
   try {
     const j = await api(`/api/bot/cuentas/${id}/login`, {});
     toast(`${j.navegador || 'Navegador'} iniciado: busca su ventana en esa PC, inicia sesión y ciérrala al terminar.`);
-  } catch (e) { /* api muestra el error real */ }
+  } catch (e) {}
   finally { loginPendientes.delete(id); cargar(); }
 }
 function importarCookies(id) {
@@ -916,7 +1399,7 @@ async function probar(id) {
     const j = await api(`/api/bot/cuentas/${id}/probar`, {});
     if (j.en_curso) cuenta.comprobando = true;
     toast(j.mensaje || 'Comprobando sesión…');
-  } catch (e) { /* api ya muestra el error */ }
+  } catch (e) {}
   finally { pruebasPendientes.delete(id); await cargar(); }
 }
 async function pausarCuenta(id, activa) { await api(`/api/bot/cuentas/${id}`, {activa}); cargar(); }
@@ -986,7 +1469,7 @@ async function cargarPresets(recargar = false) {
     if (recargar && presetCargado) await asegurarEdicion();
     const version = editorVersion;
     const result = await api('/api/smart_presets');
-    if (version !== editorVersion) return; // Una lectura lenta no pisa un cambio más reciente.
+    if (version !== editorVersion) return;
     presetsGuardados = result.presets || {};
     listasPresets();
     if (E && (!presetCargado || recargar)) iniciarPreset();
@@ -1055,7 +1538,6 @@ async function asegurarEdicion(forzar = false) {
         editorGuardado = firma;
         listasPresets(); $('preset').value = datos.name;
         $('preset-estado').textContent = `Guardado: ${datos.name}. Se usa en nuevos videos, sin reiniciar. La cola existente conserva sus ajustes.`;
-        // Si se escribió mientras guardaba, repetir con el último borrador sin recargar los campos.
       }
     } catch (e) {
       $('preset-estado').textContent = `No se guardó: ${e.message}. No se añadirá el enlace con cambios pendientes.`;
@@ -1083,7 +1565,10 @@ async function cambiarEditor(aplicar) {
 }
 async function cambiarCuentaEdicion(id, mostrar = false) {
   await cambiarEditor(async () => { editorCuenta = String(id); iniciarPreset(); });
-  if (mostrar) $('preparacion').scrollIntoView({behavior:'smooth'});
+  if (mostrar) {
+    if (typeof cambiarPestanaBot === 'function') cambiarPestanaBot('edicion');
+    $('preparacion').scrollIntoView({behavior:'smooth'});
+  }
 }
 async function cambiarPresetEdicion(name) {
   await cambiarEditor(async () => {
@@ -1108,15 +1593,24 @@ function seleccionarPreset() {
     'ed-cantidad':['num_clips',1], 'ed-motor':['motor_ia','pro'], 'ed-transcripcion':['transcripcion','groq'],
     'ed-whisper':['whisper_local','large-v3'], 'ed-formato':['video_format','vertical'],
     'ed-calidad':['export_profile','quality'], 'ed-upscale':['upscale','off'],
-    'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100]};
+    'ed-miniatura':['auto_thumbnail','off'],
+    'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100],
+    'ed-comentario':['commentary_mode','off'], 'ed-comentario-estilo':['commentary_style','gancho'],
+    'ed-comentario-voz':['commentary_voice','male'], 'ed-ambiente':['ambient_music','off']};
   for (const [id,[key,def]] of Object.entries(mapping)) {
     const value = String(presetBase[key] ?? def), element = $(id);
+    if (!element) continue;
     if (element.options && ![...element.options].some(o => o.value === value)) element.add(new Option(value, value));
     element.value = value;
   }
   $('ed-subs').value = presetBase.show_subtitles === false ? 'no' : 'si';
+  if ($('ed-borrar-meta')) $('ed-borrar-meta').value = presetBase.strip_metadata === false ? 'no' : 'si';
+  $('ed-cold-open').value = presetBase.cold_open ? 'si' : 'no';
+  $('ed-jump-cuts').value = presetBase.jump_cuts ? 'si' : 'no';
+  $('ed-auto-split').value = presetBase.auto_split ? 'si' : 'no';
+  $('ed-limpiar-voz').value = presetBase.clean_vocals ? 'si' : 'no';
   $('ed-inicio').value = formatoInicio(presetBase.skip_intro_seconds ?? 0);
-  modoEdicion(); vistaSubtitulos();
+  modoEdicion(); vistaSubtitulos(); vistaComentario();
   $('preset-estado').textContent = 'Los cambios se aplican a los videos que añadas después de guardar. La cola existente conserva su edición.';
 }
 function modoEdicion() {
@@ -1147,6 +1641,9 @@ function formatoInicio(value) {
   const minutes = Math.floor(seconds / 60), rest = String(seconds % 60).padStart(2, '0');
   return String(minutes).padStart(2, '0') + ':' + rest;
 }
+function vistaComentario() {
+  if ($('ed-comentario-opciones')) $('ed-comentario-opciones').hidden = ($('ed-comentario')?.value || 'off') === 'off';
+}
 function vistaSubtitulos() {
   $('sub-preview').hidden = $('ed-subs').value === 'no';
   const estilo = $('ed-estilo').value;
@@ -1154,14 +1651,29 @@ function vistaSubtitulos() {
   $('sub-preview').alt = `Ejemplo de ${$('ed-estilo').selectedOptions[0]?.textContent || estilo}`;
 }
 function ajustesEdicion() {
+  const rawCommMode = $('ed-comentario')?.value || 'off';
+  const rawCommStyle = $('ed-comentario-estilo')?.value || 'gancho';
+  const rawCommVoice = $('ed-comentario-voz')?.value || 'male';
+  const rawAmbient = $('ed-ambiente')?.value || 'off';
+  const rawThumb = $('ed-miniatura')?.value || 'off';
   const c = {...presetBase, moment_focus:$('ed-enfoque').value, context_before_seconds:Number($('ed-contexto').value), moment_query:$('ed-tema').value.trim(), clip_selection:$('ed-modo').value, clip_duration:Number($('ed-duracion').value),
     num_clips:Number($('ed-cantidad').value), motor_ia:$('ed-motor').value, transcripcion:$('ed-transcripcion').value,
     whisper_local:$('ed-whisper').value, video_format:$('ed-formato').value, export_profile:$('ed-calidad').value,
     upscale:$('ed-upscale').value, show_subtitles:$('ed-subs').value === 'si', style:$('ed-estilo').value,
     sub_fuente:$('ed-fuente').value, subtitle_scale:Number($('ed-escala').value),
-    skip_intro_seconds:segundosInicio($('ed-inicio').value)};
+    skip_intro_seconds:segundosInicio($('ed-inicio').value),
+    commentary_mode:['off','intro','intro_outro'].includes(rawCommMode) ? rawCommMode : 'off',
+    commentary_style:['gancho','opinion','contexto','debate'].includes(rawCommStyle) ? rawCommStyle : 'gancho',
+    commentary_voice:(rawCommVoice === 'male' || rawCommVoice === 'female' || String(rawCommVoice).startsWith('voice:')) ? rawCommVoice : 'male',
+    ambient_music:['off','auto','suave','alegre','epico','energica','terror','misterio','noticias'].includes(rawAmbient) ? rawAmbient : 'off',
+    auto_thumbnail:['off','cover_and_jpg','jpg_only'].includes(rawThumb) ? rawThumb : 'off',
+    strip_metadata:($('ed-borrar-meta')?.value || 'si') !== 'no',
+    cold_open:$('ed-cold-open')?.value === 'si',
+    jump_cuts:$('ed-jump-cuts')?.value === 'si',
+    auto_split:$('ed-auto-split')?.value === 'si',
+    clean_vocals:$('ed-limpiar-voz')?.value === 'si'};
   if (c.video_format !== presetBase.video_format) c.encuadre = c.video_format === 'vertical' ? 'caras' : 'difuminado';
-  for (const key of ['source','start_time','end_time','cast_id','voice_cast','custom_output_dir','output_path',
+  for (const key of ['source','start_time','end_time','cast_id','voice_cast','voice_config','custom_output_dir','output_path',
     'python_motor','script_local','subir_tiktok','subir_youtube','subir_facebook']) delete c[key];
   return c;
 }
@@ -1197,20 +1709,20 @@ async function guardarModo() {
 const fechaPlan = t => t ? new Date(t * 1000).toLocaleString('es', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
 function pintarPlan() {
   const p = E.plan; if (!p) return;
-  $('inventario').innerHTML = [[p.por_preparar,'videos por editar'],[p.clips_en_pc,'clips guardados en esta PC'],
-    [p.esperando_remoto || 0,'videos esperando servidor'],[p.pendientes,'publicaciones pendientes'],[p.bloqueadas.length,'publicaciones bloqueadas']].map(([n,t])=>`<div class="metrica"><b>${n}</b>${t}</div>`).join('');
+  $('inventario').innerHTML = [[p.por_preparar,'por editar'],[p.clips_en_pc,'clips en PC'],
+    [p.esperando_remoto || 0,'esperando Colab'],[p.pendientes,'por publicar'],[p.bloqueadas.length,'bloqueadas']].map(([n,t])=>`<div class="metrica"><b>${n}</b>${t}</div>`).join('');
   $('carpeta-clips').textContent = `Clips nuevos: ${p.carpeta_clips}${p.clips_ausentes ? ` · Atención: faltan ${p.clips_ausentes} archivos de trabajos anteriores.` : ''}`;
   const a = p.escenarios?.min, b = p.escenarios?.max;
   let mensaje = p.limitada ? 'Más de 1000 publicaciones: se muestran los totales sin fecha estimada.' :
     a?.fin ? `Fin estimado de las ${p.programables} publicaciones habilitadas: ${fechaPlan(a.fin)} – ${fechaPlan(b.fin)}.` : 'Todavía no hay publicaciones habilitadas para calcular una fecha.';
   if (p.retenida) mensaje = 'Publicación en espera por el modo elegido o porque el bot está apagado. Cálculo orientativo si se liberaran los clips ahora: ' + mensaje;
-  $('plan-cola').innerHTML = `<p>${esc(mensaje)}</p><p class="muted">Hora de la PC del bot: ${esc(p.hora_pc)}. Fechas estimadas mostradas en la zona horaria de este navegador.</p>` +
+  $('plan-cola').innerHTML = `<p>${esc(mensaje)}</p><p class="muted">Hora de la PC del bot: ${esc(p.hora_pc)}.</p>` +
     (p.bloqueadas.length ? `<p class="err">${esc([...new Set(p.bloqueadas.map(s=>s.motivo))].join(' · '))}. Esas publicaciones no se incluyen en el fin estimado.</p>` : '');
   if (!document.activeElement?.closest('#plan-cuentas')) $('plan-cuentas').innerHTML = E.cuentas.map(c => `<tr><td>${esc(c.nombre)}<div class="muted">${esc(c.plataforma)}</div></td>
     <td>${c.intervalo_unidad === 'minutos' ? Number(((c.intervalo_horas ?? 1)*60).toFixed(8))+' min' : (c.intervalo_horas ?? 1)+' h'}</td>
     <td>${esc(c.hora_inicio || '08:00')}–${esc(c.hora_fin || '23:30')}</td>
-    <td>${c.limite_dia} · <a href="#cuenta-${c.id}">Ajustar cuenta</a></td>
-    <td>${c.hoy} hoy · ${Math.max(0,c.limite_dia-c.hoy)} disponibles<br><span class="muted">${p.por_cuenta?.[c.id] || 0} por publicar</span></td>
+    <td>${c.limite_dia} · <a href="#cuenta-${c.id}" onclick="if(typeof cambiarPestanaBot==='function')cambiarPestanaBot('cuentas')">Ajustar cuenta</a></td>
+    <td>${c.hoy} hoy · ${Math.max(0,c.limite_dia-c.hoy)} disp.<br><span class="muted">${p.por_cuenta?.[c.id] || 0} por publicar</span></td>
     <td>${c.activa && c.estado === 'ok' ? `${fechaPlan(a?.por_cuenta?.[c.id])} – ${fechaPlan(b?.por_cuenta?.[c.id])}` : 'Pausada o sin sesión'}</td></tr>`).join('');
 }
 async function guardarRitmo(id, campo, input) {
@@ -1226,6 +1738,16 @@ async function guardarMonetizada(id, input) {
   try {
     await api(`/api/bot/cuentas/${id}`, {monetizada: activar});
     toast(activar ? 'Controles de cuenta monetizada activados.' : 'Controles de cuenta monetizada desactivados.');
+    await cargar();
+  } catch(e) { input.checked = !activar; toast(e.message,true); }
+  finally { input.disabled = false; }
+}
+async function guardarProtegerFyp(id, input) {
+  const activar = input.checked;
+  input.disabled = true;
+  try {
+    await api(`/api/bot/cuentas/${id}`, {proteger_fyp: activar});
+    toast(activar ? 'Protección Para ti activada en esta cuenta.' : 'Protección Para ti desactivada.');
     await cargar();
   } catch(e) { input.checked = !activar; toast(e.message,true); }
   finally { input.disabled = false; }
@@ -1248,7 +1770,6 @@ async function cambiarUnidadIntervalo(id, select) {
   input.dataset.unidad = select.value;
   select.disabled = true;
   try {
-    // Cambiar la unidad solo cambia la presentación, sin reiniciar la pausa.
     await api(`/api/bot/cuentas/${id}`, {intervalo_unidad:select.value});
     toast('Unidad guardada para esta cuenta.'); await cargar();
   } catch(e) {
@@ -1263,6 +1784,7 @@ async function guardarLimite(id, valor) {
 function verColaCuenta(id) {
   $('cola-cuenta').value = String(id);
   pintarSubidas(E.subidas);
+  if (typeof cambiarPestanaBot === 'function') cambiarPestanaBot('cola');
   $('subidas').scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function adelantarClip(id) {
@@ -1304,6 +1826,7 @@ function revisarTexto(id) {
   $('texto-titulo').value = lineas.shift() || '';
   $('texto-hashtags').value = /^\s*#/.test(lineas.at(-1) || '') ? lineas.pop() : '';
   $('texto-descripcion').value = lineas.join('\n').trim();
+  $('texto-video').poster = `/api/bot/miniatura/${id}`;
   $('texto-video').src = `/api/bot/clip/${id}`;
   $('texto-estado').textContent = 'Revisando el clip de ' + (s.cuenta_nombre || 'esta cuenta');
   $('texto-dialog').showModal();
@@ -1333,11 +1856,92 @@ window.addEventListener('beforeunload', event => {
   try { if (!editorPromesa && firmaEditor() === editorGuardado) return; } catch (e) {}
   event.preventDefault(); event.returnValue = '';
 });
+let vasosActivosCache = [];
+function pintarVasosActivos(vasos) {
+  const sec = $('vasos-activos-seccion'), grid = $('vasos-activos'), res = $('vasos-activos-resumen');
+  if (!sec || !grid) return;
+  const lista = Array.isArray(vasos) ? vasos : [];
+  vasosActivosCache = lista;
+  sec.hidden = !lista.length;
+  if (!lista.length) { grid.innerHTML = ''; return; }
+  if (res) res.textContent = `${lista.length} clip(s) en proceso`;
+  const waveSvg = '<svg class="vaso-ola" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(90,200,250,0.62)" d="M0,8 C30,16 60,0 120,8 C180,16 210,0 240,8 L240,16 L0,16 Z"></path></svg><svg class="vaso-ola atras" viewBox="0 0 240 16" preserveAspectRatio="none"><path fill="rgba(94,92,230,0.52)" d="M0,8 C40,0 80,16 120,8 C160,0 200,16 240,8 L240,16 L0,16 Z"></path></svg>';
+  const firma = JSON.stringify(lista);
+  if (grid.dataset.firma === firma) return;
+  grid.dataset.firma = firma;
+  grid.innerHTML = lista.map((v, idx) => {
+    const listo = v.estado === 'listo';
+    const pct = Math.max(0, Math.min(100, Number(v.pct) || 0));
+    const etiqueta = v.tipo === 'subida' ? 'Subiendo' : v.tipo === 'live' ? (listo ? 'Live listo' : 'Live → PC') : (listo ? 'Listo' : 'Cortando');
+    const poster = v.thumb_url ? `<img class="vaso-poster" src="${esc(v.thumb_url)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '';
+    const playBtn = v.video_url ? `<button type="button" class="vaso-play" title="Vista previa del clip" onclick="abrirVistaRapidaVaso(${idx})">▶</button>` : '';
+    return `<div class="vaso-clip${listo ? ' es-listo' : ''}">
+      ${poster}
+      <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
+      <div class="vaso-brillo"></div>
+      <div class="vaso-capa">
+        <div style="display:flex;justify-content:space-between;gap:4px"><span class="vaso-chip">${esc(etiqueta)}</span><span class="vaso-chip">${pct}%</span></div>
+        <div class="vaso-centro">${playBtn || `<div class="vaso-pct">${pct}%</div>`}<div class="vaso-etapa" title="${esc(v.etapa || '')}">${esc(v.etapa || 'Procesando…')}</div></div>
+        <div class="vaso-pie" title="${esc(v.titulo || '')}">${esc(v.titulo || 'Clip')}<div class="muted" style="font-weight:400;font-size:10.5px">${esc(v.subtitulo || '')}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function abrirVistaRapidaUrlBot(videoUrl, posterUrl, titulo, meta) {
+  const dlg = $('vista-rapida-dialog'), vid = $('vista-rapida-video');
+  if (!dlg || !vid || !videoUrl) return;
+  if ($('vista-rapida-titulo')) $('vista-rapida-titulo').textContent = titulo || 'Vista previa del clip';
+  if ($('vista-rapida-meta')) $('vista-rapida-meta').textContent = meta || '';
+  if ($('vista-rapida-abrir')) $('vista-rapida-abrir').href = videoUrl;
+  vid.poster = posterUrl || '';
+  vid.src = videoUrl;
+  if (!dlg.open) dlg.showModal();
+  vid.play().catch(() => {});
+}
+function abrirVistaRapidaVaso(idx) {
+  const v = vasosActivosCache[idx];
+  if (!v || !v.video_url) return;
+  abrirVistaRapidaUrlBot(v.video_url, v.thumb_url || '', v.titulo || 'Clip en proceso', v.subtitulo || v.etapa || '');
+}
+function abrirVistaRapidaBot(id) {
+  const s = (E?.subidas || []).find(x => Number(x.id) === Number(id));
+  const titulo = s ? (s.video_titulo || String(s.texto || '').split('\n')[0] || base(s.archivo)) : `Clip #${id}`;
+  const meta = s ? `${s.cuenta_nombre || 'Cuenta'} · ${s.plataforma || ''}` : '';
+  abrirVistaRapidaUrlBot(`/api/bot/clip/${Number(id)}`, `/api/bot/miniatura/${Number(id)}`, titulo, meta);
+}
+function cerrarVistaRapidaBot() {
+  const dlg = $('vista-rapida-dialog'), vid = $('vista-rapida-video');
+  if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
+  if (dlg && dlg.open) dlg.close();
+}
+$('vista-rapida-dialog')?.addEventListener('close', () => {
+  const vid = $('vista-rapida-video');
+  if (vid) vid.pause();
+});
+function alternarModoInmersivoBot() {
+  try { window.parent?.postMessage({type: 'bot-toggle-immersive'}, '*'); } catch (_) {}
+}
+async function cargarVocesComentario() {
+  try {
+    const r = await fetch('/api/voces');
+    if (!r.ok) return;
+    const voces = await r.json();
+    if (!Array.isArray(voces)) return;
+    const sel = $('ed-comentario-voz');
+    if (!sel) return;
+    const prev = sel.value;
+    for (const v of voces) {
+      if (!v || !v.id) continue;
+      const val = 'voice:' + v.id;
+      if (![...sel.options].some(o => o.value === val)) {
+        sel.add(new Option('Tu voz clonada: ' + (v.nombre || v.id) + ' (VoxCPM2)', val));
+      }
+    }
+    if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  } catch (_) {}
+}
 bloquearEdicion(true);
-cargarPresets(); cargar(); setInterval(cargar, 4000);
+cargarVocesComentario(); cargarPresets(); cargar(); setInterval(cargar, 4000);
 </script>
 </body>
 </html>
-
-
-

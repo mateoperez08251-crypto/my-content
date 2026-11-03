@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """YouTube Studio por navegador (los videos verticales de hasta 3 min salen como Shorts)."""
+import os
 import re
 import time
 from ..cancelacion import comprobar_cancelacion, iniciar_publicacion, esperar_cancelable
@@ -91,6 +92,18 @@ def subir(page, h, video, texto, url_subida=""):
     descripcion = primero(page, _DESCRIPCION, timeout=30)
     h.escribir(descripcion, texto[:4900])
 
+    miniatura_jpg = os.path.splitext(video)[0] + "_miniatura.jpg"
+    if os.path.isfile(miniatura_jpg):
+        try:
+            sel_thumb = page.locator(
+                'ytcp-thumbnails-compact-editor input[type="file"], input#file-loader[type="file"]'
+            ).first
+            if sel_thumb.count():
+                sel_thumb.set_input_files(miniatura_jpg)
+                h.pausa(1, 2)
+        except Exception:
+            pass
+
     h.mirar()
     h.clic(primero(page, _NO_NINOS, timeout=30))
 
@@ -125,4 +138,3 @@ def subir(page, h, video, texto, url_subida=""):
         pass
     h.pausa(8, 15)  # deja terminar lo que la página envía antes de cerrar
     return enlace
-

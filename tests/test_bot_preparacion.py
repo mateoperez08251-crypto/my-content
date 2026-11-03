@@ -60,6 +60,7 @@ class PreparacionTests(unittest.TestCase):
         self.assertEqual(job['proximo_intento'],0)
 
     def test_caida_colab_conserva_edicion_y_no_bloquea_clips_guardados(self):
+        self.m.guardar_cfg({'modo_cola': 'preparar_primero'})
         self.encolar(); self.m._paso()
         tid = self.encolar(2)
         opciones = self.m.db.trabajo(tid)['opciones']
@@ -138,6 +139,7 @@ class PreparacionTests(unittest.TestCase):
         self.assertIsNone(self.m._siguiente_subida())
 
     def test_prepara_toda_la_cola_antes_de_subir(self):
+        self.m.guardar_cfg({'modo_cola': 'preparar_primero'})
         self.encolar(1); self.encolar(2)
         with patch.object(self.m, '_procesar_subida') as subir:
             self.assertTrue(self.m._paso())
@@ -157,6 +159,7 @@ class PreparacionTests(unittest.TestCase):
         self.assertEqual(self.m.estado()['plan']['clips_en_pc'], 1)
 
     def test_reintento_de_edicion_retiene_las_subidas_en_preparar_primero(self):
+        self.m.guardar_cfg({'modo_cola': 'preparar_primero'})
         self.encolar(); self.m._paso()
         tid = self.encolar(2)
         self.m.db.marcar_trabajo(tid, 'pendiente', proximo_intento=10**12)
@@ -355,6 +358,206 @@ class PreparacionTests(unittest.TestCase):
         self.assertNotIn('source',copia)
         self.assertNotIn('python_motor',copia)
         self.assertNotIn('start_time',copia)
+
+
+    def test_flujo_continuo_por_defecto_sube_primer_clip_sin_esperar_resto_de_la_cola(self):
+        self.assertEqual(self.m.cfg['modo_cola'], 'alternar')
+        self.encolar(1)
+        self.encolar(2)
+        with patch.object(self.m, '_procesar_subida') as subir:
+            self.assertTrue(self.m._paso())  # corta trabajo 1
+            subir.assert_not_called()
+            self.assertEqual(self.split.call_count, 1)
+            self.assertTrue(self.m._paso())  # sube clip de trabajo 1 antes de cortar trabajo 2
+            subir.assert_called_once()
+            self.assertEqual(self.split.call_count, 1)
+        # Migración automática de bot_config.json antiguo sin flujo_continuo_v1
+        legacy_dir = Path(self.folder, 'legacy_cfg')
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        Path(legacy_dir, 'bot_config.json').write_text(
+            json.dumps({'modo_cola': 'preparar_primero', 'activo': False}),
+            encoding='utf-8',
+        )
+        migrado = Motor(str(legacy_dir), smart_split=self.split, cargar_preset=lambda n: self.options, log=lambda s: None)
+        self.addCleanup(migrado.db._con.close)
+        self.assertEqual(migrado.cfg['modo_cola'], 'alternar')
+        self.assertTrue(migrado.cfg.get('flujo_continuo_v1'))
+
+    def test_colab_importa_y_encola_primer_clip_mientras_corta_los_demas_sin_duplicar(self):
+        tid = self.encolar()
+        self.m.guardar_cfg({'remoto_url': 'https://colab.example.test'})
+        cli = remoto.Cliente('https://colab.example.test', 'secreto')
+        clip_a_bytes = b'clip-remoto-uno-valido'
+        clip_b_bytes = b'clip-remoto-dos-valido'
+        thumb_a_bytes = b'\xff\xd8\xff\xe0mini-uno'
+        encolados_en_corte = []
+
+        estados_poll = [
+            {
+                'estado': 'cortando',
+                'etapa': 'Renderizando clip 2/2',
+                'progreso': 'Renderizando clip 2/2|52',
+                'total_clips': 2,
+                'clips': [{
+                    'n': 0, 'nombre': 'clip_1.mp4', 'bytes': len(clip_a_bytes),
+                    'miniatura_bytes': len(thumb_a_bytes),
+                    'publicacion': 'Clip 1 listo ya', 'inicio': 0, 'fin': 30,
+                }],
+            },
+            {
+                'estado': 'listo',
+                'etapa': 'Listo',
+                'progreso': 'Listo|100',
+                'total_clips': 2,
+                'clips': [
+                    {
+                        'n': 0, 'nombre': 'clip_1.mp4', 'bytes': len(clip_a_bytes),
+                        'miniatura_bytes': len(thumb_a_bytes),
+                        'publicacion': 'Clip 1 listo ya', 'inicio': 0, 'fin': 30,
+                    },
+                    {
+                        'n': 1, 'nombre': 'clip_2.mp4', 'bytes': len(clip_b_bytes),
+                        'miniatura_bytes': 0,
+                        'publicacion': 'Clip 2 despues', 'inicio': 35, 'fin': 65,
+                    },
+                ],
+            },
+        ]
+        poll_idx = {'i': 0}
+
+        def fake_pedir(metodo, ruta, **kw):
+            resp = Mock()
+            resp.status_code = 200
+            if ruta == '/api/health':
+                resp.json.return_value = {
+                    'ok': True, 'app': 'my-content',
+                    'capabilities': ['unique_clip_ranges_v1', 'streaming_clips_v1'],
+                }
+                return resp
+            if metodo == 'POST' and ruta == '/api/bot/remoto/cortar':
+                resp.json.return_value = {'success': True, 'id': 'job-stream-1'}
+                return resp
+            if metodo == 'DELETE':
+                resp.json.return_value = {'ok': True}
+                return resp
+            idx = min(poll_idx['i'], len(estados_poll) - 1)
+            poll_idx['i'] += 1
+            if idx == 1:
+                # Antes de responder 'listo', el clip 1 YA debe estar encolado para subir en la PC
+                encolados_en_corte.append(list(self.m.db.subidas_pendientes()))
+            resp.json.return_value = estados_poll[idx]
+            return resp
+
+        def fake_bajar(ruta, destino, esperado=None):
+            os.makedirs(os.path.dirname(destino), exist_ok=True)
+            if ruta.endswith('/clip/0'):
+                Path(destino).write_bytes(clip_a_bytes)
+            elif ruta.endswith('/miniatura/0'):
+                Path(destino).write_bytes(thumb_a_bytes)
+            elif ruta.endswith('/clip/1'):
+                Path(destino).write_bytes(clip_b_bytes)
+
+        with patch.object(cli, '_pedir', side_effect=fake_pedir),              patch.object(cli, '_bajar', side_effect=fake_bajar),              patch.object(cli, '_esperar_cancelable', side_effect=lambda *a, **k: None),              patch.object(self.m, '_cliente_remoto', return_value=cli):
+            self.m._preparar_remoto(self.m.db.trabajo(tid))
+
+        self.assertEqual(len(encolados_en_corte), 1)
+        self.assertEqual(len(encolados_en_corte[0]), 1)
+        self.assertEqual(encolados_en_corte[0][0]['texto'], 'Clip 1 listo ya')
+        pendientes_finales = self.m.db.subidas_pendientes()
+        self.assertEqual(len(pendientes_finales), 2)
+        self.assertEqual([s['texto'] for s in pendientes_finales], ['Clip 1 listo ya', 'Clip 2 despues'])
+
+    def test_hilo_preparacion_y_motor_suben_primer_clip_en_paralelo_mientras_corta_el_segundo(self):
+        import threading
+        clip1 = Path(self.folder, 'stream_1.mp4')
+        clip2 = Path(self.folder, 'stream_2.mp4')
+        clip1.write_bytes(b'contenido-clip-1')
+        clip2.write_bytes(b'contenido-clip-2')
+        subida_ejecutada = threading.Event()
+        liberar_segundo_clip = threading.Event()
+        textos_subidos = []
+
+        def split_lento(datos, *args, **kwargs):
+            cb = datos.get('_on_clip_ready')
+            meta1 = {'archivo': str(clip1), 'publicacion': 'Primero inmediato', 'inicio': 0, 'fin': 25}
+            if callable(cb):
+                cb({'n': 0, 'total': 2, 'archivo': str(clip1), 'meta': meta1})
+            # Espera a que el hilo principal de subida procese el clip 1 mientras este corte sigue abierto
+            subida_ejecutada.wait(timeout=4.0)
+            liberar_segundo_clip.wait(timeout=4.0)
+            meta2 = {'archivo': str(clip2), 'publicacion': 'Segundo al terminar', 'inicio': 30, 'fin': 55}
+            if callable(cb):
+                cb({'n': 1, 'total': 2, 'archivo': str(clip2), 'meta': meta2})
+            return [str(clip1), str(clip2)], [meta1, meta2]
+
+        self.split.side_effect = split_lento
+
+        def procesar_subida_rapida(s):
+            textos_subidos.append(s['texto'])
+            self.m.db.marcar_subida(s['id'], 'ok')
+            if len(textos_subidos) == 1:
+                subida_ejecutada.set()
+                liberar_segundo_clip.set()
+
+        with patch.object(self.m, '_procesar_subida', side_effect=procesar_subida_rapida):
+            self.m.guardar_cfg({'activo': True, 'gap_min': 0, 'gap_max': 0})
+            self.encolar()
+            self.m.iniciar()
+            self.addCleanup(self.m.detener)
+            ok_primero = subida_ejecutada.wait(timeout=4.0)
+            deadline = time.time() + 4.0
+            while (len(textos_subidos) < 2 or self.m.db.trabajo(1)['estado'] != 'listo') and time.time() < deadline:
+                time.sleep(0.05)
+            self.m.detener()
+            if self.m._hilo_prep:
+                self.m._hilo_prep.join(timeout=2.0)
+            if self.m._hilo:
+                self.m._hilo.join(timeout=2.0)
+
+        self.assertTrue(ok_primero, 'El primer clip no se subió mientras se generaba el segundo')
+        self.assertEqual(textos_subidos, ['Primero inmediato', 'Segundo al terminar'])
+
+    def test_live_captura_expone_miniaturas_seguras_y_vasos_mientras_importa_a_pc(self):
+        from bot.live import LiveManager
+        lm = LiveManager(self.m, background=False, auditor=lambda p: 'listo')
+        self.addCleanup(lm.close)
+        self.m._lives = lm
+        jid = 'a1b2c3d4e5f60718'
+        carpeta_live = lm.root / jid
+        carpeta_live.mkdir(parents=True, exist_ok=True)
+        seg_cerrado = carpeta_live / 'a1b2c3d4_000000.mp4'
+        seg_abierto = carpeta_live / 'a1b2c3d4_000001.mp4'
+        seg_cerrado.write_bytes(b'x' * 70000)
+        seg_abierto.write_bytes(b'y' * 80000)
+        cfg_json = json.dumps({'mode': 'sequential', 'seconds': 60, 'window': 60, 'accounts': [self.cid], 'preset': '', 'text': ''})
+        ahora = time.time()
+        lm.db._q(
+            'INSERT INTO live_sesiones(id,url,titulo,config,estado,detalle,creado,actualizado) VALUES(?,?,?,?,?,?,?,?)',
+            (jid, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'Stream Prueba', cfg_json, 'capturando', 'Capturando en vivo', ahora, ahora),
+        )
+        lm.db._q(
+            'INSERT INTO live_segmentos(sesion,nombre,archivo,inicio,fin,estado,trabajo_id) VALUES(?,?,?,?,?,?,?)',
+            (jid, seg_cerrado.name, str(seg_cerrado), 0.0, 60.0, 'encolado', None),
+        )
+        estado_lives = lm.state()
+        serializado = json.dumps(estado_lives)
+        self.assertNotIn(self.folder.replace('\\', '/'), serializado.replace('\\', '/'))
+        clips_rec = estado_lives['lives'][0]['clips_recientes']
+        self.assertEqual(len(clips_rec), 2)
+        self.assertTrue(clips_rec[0]['capturando_ahora'])
+        self.assertIn(f'/api/bot/lives/{jid}/miniatura/{seg_abierto.name}', clips_rec[0]['thumb_url'])
+        self.assertFalse(clips_rec[1]['capturando_ahora'])
+        self.assertEqual(clips_rec[1]['thumb_url'], f'/api/bot/lives/{jid}/miniatura/{seg_cerrado.name}')
+        self.assertEqual(clips_rec[1]['video_url'], f'/api/bot/lives/{jid}/clip/{seg_cerrado.name}')
+        # Verifica resolución segura y bloqueo de traversal
+        self.assertEqual(lm.resolver_media_segmento(jid, seg_cerrado.name), str(seg_cerrado.resolve()))
+        self.assertIsNone(lm.resolver_media_segmento(jid, '../secret.mp4'))
+        self.assertIsNone(lm.resolver_media_segmento('../otro', seg_cerrado.name))
+        # Verifica que los vasos activos incluyen los clips de live con su miniatura
+        vasos = self.m.estado()['vasos_activos']
+        vasos_live = [v for v in vasos if v.get('tipo') == 'live']
+        self.assertTrue(len(vasos_live) >= 2)
+        self.assertTrue(all(v.get('thumb_url') for v in vasos_live))
 
 
 if __name__ == '__main__':

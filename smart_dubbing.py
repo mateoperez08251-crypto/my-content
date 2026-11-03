@@ -192,8 +192,7 @@ def dub(words, duration, language, voice, motor, directory):
     return output, marks, '\n'.join(parts_text)
 
 
-def separate_background(video_path, start, duration, out_dir):
-    """Devuelve el fondo separado; informa del error si no puede conservarlo."""
+def _separate_demucs_stems(video_path, start, duration, out_dir, error_extraccion, error_demucs_inicio):
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     source_wav = os.path.join(out_dir, 'orig_audio.wav')
@@ -202,12 +201,12 @@ def separate_background(video_path, start, duration, out_dir):
                         '-t', str(duration), '-vn', '-ac', '2', '-ar', '44100', source_wav],
                        capture_output=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if r.returncode or not os.path.exists(source_wav):
-        raise RuntimeError('No se pudo extraer el audio original para conservar el fondo.')
+        raise RuntimeError(error_extraccion)
     try:
         import audio_separator
         py = audio_separator._python_con_demucs()
     except Exception as exc:
-        raise RuntimeError('No se pudo iniciar Demucs para conservar música y ambiente. ' + str(exc)) from exc
+        raise RuntimeError(error_demucs_inicio + ' ' + str(exc)) from exc
     demucs_out = os.path.join(out_dir, 'demucs')
     os.makedirs(demucs_out, exist_ok=True)
     r = subprocess.run([py, '-m', 'demucs.separate', '-n', 'htdemucs',
@@ -215,10 +214,33 @@ def separate_background(video_path, start, duration, out_dir):
                        capture_output=True, text=True,
                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     base = os.path.splitext(os.path.basename(source_wav))[0]
-    instrumental = os.path.join(demucs_out, 'htdemucs', base, 'no_vocals.wav')
-    if r.returncode or not os.path.exists(instrumental):
+    return r.returncode, os.path.join(demucs_out, 'htdemucs', base)
+
+
+def separate_background(video_path, start, duration, out_dir):
+    """Devuelve el fondo separado; informa del error si no puede conservarlo."""
+    code, stems_dir = _separate_demucs_stems(
+        video_path, start, duration, out_dir,
+        'No se pudo extraer el audio original para conservar el fondo.',
+        'No se pudo iniciar Demucs para conservar música y ambiente.',
+    )
+    instrumental = os.path.join(stems_dir, 'no_vocals.wav')
+    if code or not os.path.exists(instrumental):
         raise RuntimeError('Demucs no pudo separar el fondo. Revisa su instalación y los modelos; no se exportó un clip sin fondo.')
     return instrumental
+
+
+def extract_clean_vocals(video_path, start, duration, out_dir):
+    """Extrae únicamente la voz limpia con Demucs (elimina la música de fondo original)."""
+    code, stems_dir = _separate_demucs_stems(
+        video_path, start, duration, out_dir,
+        'No se pudo extraer el audio original para limpiar la música de fondo.',
+        'No se pudo iniciar Demucs para limpiar la música original.',
+    )
+    vocals = os.path.join(stems_dir, 'vocals.wav')
+    if code or not os.path.exists(vocals):
+        raise RuntimeError('Demucs no pudo aislar la voz limpia. Revisa su instalación y los modelos o desactiva Limpiar música original.')
+    return vocals
 
 
 def translate_text(text, language, motor):

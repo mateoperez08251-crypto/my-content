@@ -1441,31 +1441,146 @@ def download_separated():
     return send_from_directory(paths.data_path("downloads", "separated"), filename, as_attachment=True)
 
 
+_clips_pc_lock = threading.Lock()
+_clips_pc_map = {}
+
+
+def _es_ruta_media_permitida(ruta):
+    if not ruta or not os.path.isfile(ruta):
+        return False
+    ext = os.path.splitext(ruta)[1].lower()
+    if ext not in (".mp4", ".mov", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".webp"):
+        return False
+    real = os.path.realpath(ruta)
+    raices = [
+        os.path.realpath(TEMP_DIR),
+        os.path.realpath(paths.DATA_DIR),
+        os.path.realpath(paths.EXEC_DIR),
+    ]
+    for raiz in raices:
+        try:
+            if os.path.commonpath([real, raiz]) == raiz:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _escanear_clips_pc(limit=48):
+    import hashlib
+    carpetas = [
+        ("Smart Split", paths.data_path("videos_procesados")),
+        ("Bot de subida", os.path.join(paths.DATA_DIR, "bot_clips")),
+        ("Salidas", paths.data_path("salidas")),
+    ]
+    encontrados = []
+    vistos = set()
+    for origen_lbl, carpeta in carpetas:
+        if not carpeta or not os.path.isdir(carpeta):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(carpeta):
+            for fn in filenames:
+                if not fn.lower().endswith((".mp4", ".mov")) or fn.endswith((".part.mp4", "_nometa.mp4", "_tmp.mp4")):
+                    continue
+                full = os.path.abspath(os.path.join(dirpath, fn))
+                real = os.path.realpath(full)
+                if real in vistos:
+                    continue
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                if st.st_size <= 0:
+                    continue
+                vistos.add(real)
+                encontrados.append((st.st_mtime, st.st_size, origen_lbl, full, real))
+    encontrados.sort(key=lambda x: x[0], reverse=True)
+    encontrados = encontrados[: max(1, min(120, int(limit or 48)))]
+    items = []
+    nuevo_mapa = {}
+    for mtime, size, origen_lbl, full, real in encontrados:
+        clave = hashlib.sha1(real.encode("utf-8", "replace")).hexdigest()[:20]
+        nuevo_mapa[clave] = full
+        stem = os.path.splitext(full)[0]
+        portada_ia = os.path.isfile(stem + "_miniatura.jpg")
+        titulo = os.path.splitext(os.path.basename(full))[0]
+        txt_meta = stem + ".txt"
+        if os.path.isfile(txt_meta):
+            try:
+                with open(txt_meta, "r", encoding="utf-8", errors="replace") as tf:
+                    primera = tf.readline().strip()
+                if primera:
+                    titulo = primera[:110]
+            except OSError:
+                pass
+        items.append({
+            "key": clave,
+            "nombre": os.path.basename(full),
+            "titulo": titulo,
+            "origen": origen_lbl,
+            "ruta": full,
+            "tamano_mb": round(size / (1024 * 1024), 1),
+            "mtime": mtime,
+            "tiene_portada_ia": portada_ia,
+            "thumb_url": f"/api/clips_pc/thumb/{clave}?t={int(mtime)}",
+            "video_url": f"/api/clips_pc/video/{clave}",
+        })
+    with _clips_pc_lock:
+        _clips_pc_map.update(nuevo_mapa)
+    return items
+
+
+@app.route("/api/clips_pc", methods=["GET"])
+def api_listar_clips_pc():
+    try:
+        limite = int(request.args.get("limit", 36))
+    except (TypeError, ValueError):
+        limite = 36
+    return jsonify({"success": True, "clips": _escanear_clips_pc(limite)})
+
+
+@app.route("/api/clips_pc/thumb/<clave>", methods=["GET"])
+def api_clip_pc_thumb(clave):
+    with _clips_pc_lock:
+        ruta = _clips_pc_map.get(str(clave or ""))
+    if not ruta:
+        _escanear_clips_pc(60)
+        with _clips_pc_lock:
+            ruta = _clips_pc_map.get(str(clave or ""))
+    if not ruta or not _es_ruta_media_permitida(ruta):
+        return jsonify({"success": False, "error": "Clip no encontrado"}), 404
+    from calidad_video import asegurar_miniatura_video
+    thumb = asegurar_miniatura_video(ruta)
+    if not thumb or not os.path.isfile(thumb):
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb))
+
+
+@app.route("/api/clips_pc/video/<clave>", methods=["GET"])
+def api_clip_pc_video(clave):
+    with _clips_pc_lock:
+        ruta = _clips_pc_map.get(str(clave or ""))
+    if not ruta:
+        _escanear_clips_pc(60)
+        with _clips_pc_lock:
+            ruta = _clips_pc_map.get(str(clave or ""))
+    if not ruta or not _es_ruta_media_permitida(ruta):
+        return jsonify({"success": False, "error": "Clip no encontrado"}), 404
+    ruta_abs = os.path.abspath(ruta)
+    return send_from_directory(os.path.dirname(ruta_abs), os.path.basename(ruta_abs))
+
+
 @app.route("/api/preview_img")
 def get_preview_img():
-    """Miniatura de un video (frame al 10%)."""
+    """Miniatura de un video local permitido (usa portada IA o fotograma representativo)."""
     path = request.args.get("path")
-    if not path or not os.path.exists(path):
+    if not path or not _es_ruta_media_permitida(path):
         return "Not found", 404
     try:
-        import cv2
-        import hashlib
-        thumb_filename = f"thumb_{hashlib.md5(path.encode('utf-8')).hexdigest()}.jpg"
-        thumb_path = os.path.join(TEMP_DIR, thumb_filename)
-        if not os.path.exists(thumb_path):
-            cap = cv2.VideoCapture(path)
-            try:
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(total_frames * 0.1)))
-                ret, frame = cap.read()
-            finally:
-                cap.release()
-            if ret:
-                height, width = frame.shape[:2]
-                frame = cv2.resize(frame, (320, int((320 / width) * height)))
-                cv2.imwrite(thumb_path, frame)
-        if os.path.exists(thumb_path):
-            return send_from_directory(TEMP_DIR, thumb_filename)
+        from calidad_video import asegurar_miniatura_video
+        thumb_path = asegurar_miniatura_video(path)
+        if thumb_path and os.path.isfile(thumb_path):
+            return send_from_directory(os.path.dirname(thumb_path), os.path.basename(thumb_path))
     except Exception as e:
         print(f"Error generando miniatura: {e}")
     return "Not found", 404
@@ -1697,6 +1812,16 @@ def run_smart_split_thread(data):
             }.items() if v is not None},
             "efectos": bool(data.get('efectos', True)),
             "vol_musica": float(data.get('vol_musica', 0.2) or 0.2),
+            "commentary_mode": str(data.get("commentary_mode", "off") or "off"),
+            "commentary_style": str(data.get("commentary_style", "gancho") or "gancho"),
+            "commentary_voice": str(data.get("commentary_voice", "male") or "male"),
+            "cold_open": bool(data.get("cold_open", False)),
+            "jump_cuts": bool(data.get("jump_cuts", False)),
+            "auto_split": bool(data.get("auto_split", False)),
+            "ambient_music": str(data.get("ambient_music", "off") or "off"),
+            "clean_vocals": bool(data.get("clean_vocals", False)),
+            "auto_thumbnail": str(data.get("auto_thumbnail", "off") or "off"),
+            "strip_metadata": bool(data.get("strip_metadata", True)),
         }
         if cfg_datos['upscale'] == 'ia':
             from smart_upscale import elegir_python
@@ -1746,6 +1871,15 @@ def run_smart_split_thread(data):
                 if person not in prepared_cast['references'] or actor not in saved:
                     raise RuntimeError('Una voz o persona seleccionada ya no existe. Vuelve a elegirla.')
                 config['cast'][person] = saved[actor]
+        if cfg_datos["commentary_mode"] != "off" and cfg_datos["commentary_voice"].startswith("voice:"):
+            from modulo_ia import liberar_gpu
+            liberar_gpu()
+            vc = _smart_voice_config()
+            cfg_datos["voice_config"] = {
+                "python": vc.get("voice_python", ""),
+                "model_dir": vc.get("voice_model", ""),
+                "tts_worker": vc.get("voice_worker", ""),
+            }
         log(f"Iniciando procesamiento de Smart Split (Escala: {cfg_datos['subtitle_scale']}%, "
             f"Estilo: {cfg_datos['subtitle_style']})...")
         log_telemetry("Iniciando Smart Split", f"Origen: {source}")
@@ -1765,6 +1899,15 @@ def run_smart_split_thread(data):
                         from editor_controls import ERROR_INTERVALO
                         resultado['error'] = ERROR_INTERVALO
                 except ValueError:
+                    pass
+                return True
+            if lin.startswith("RESULT_CLIP_READY:"):
+                try:
+                    ev_ready = json.loads(lin.split("RESULT_CLIP_READY:", 1)[1])
+                    cb_ready = data.get("_on_clip_ready")
+                    if isinstance(ev_ready, dict) and callable(cb_ready):
+                        cb_ready(ev_ready)
+                except Exception:
                     pass
                 return True
             if lin.startswith("RESULT_META:"):
@@ -1857,19 +2000,102 @@ def smart_split_api():
     if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "error": "Ya hay una automatización en curso"})
     _escribir_progreso_smart("Iniciando...|0")
+    try:
+        import smart_editor as _se
+        n_est = data.get("num_clips", 1) if data.get("clip_selection", "ai") == "ai" else max(1, int(data.get("num_clips") or 3))
+        _se._iniciar_estado_clips(n_est)
+    except Exception:
+        pass
     threading.Thread(target=run_smart_split_thread, args=(data,), daemon=True).start()
     return jsonify({"success": True})
 
 
+def _leer_clips_state_seguro():
+    st_path = os.path.join(TEMP_DIR, "smart_clips_state.json")
+    if not os.path.isfile(st_path):
+        return None
+    try:
+        with open(st_path, "r", encoding="utf-8") as sf:
+            raw_st = json.load(sf)
+        if not isinstance(raw_st, dict) or not isinstance(raw_st.get("clips"), list):
+            return None
+        return raw_st
+    except Exception:
+        return None
+
+
 @app.route("/api/smart_split_progress", methods=["GET"])
 def get_smart_split_progress():
+    msg, pct = "Preparando...", "0"
     try:
         with open(SMART_PROGRESS, "r", encoding="utf-8") as f:
             parts = f.read().strip().split("|")
-        return jsonify({"success": True, "message": parts[0] if parts else "Preparando...",
-                        "percent": parts[1] if len(parts) > 1 else "0"})
+        msg = parts[0] if parts else "Preparando..."
+        pct = parts[1] if len(parts) > 1 else "0"
     except OSError:
-        return jsonify({"success": True, "message": "Preparando...", "percent": "0"})
+        pass
+    clips_state = None
+    raw_st = _leer_clips_state_seguro()
+    if raw_st:
+        run_id = str(raw_st.get("run_id") or "")
+        clips_ui = []
+        for c in raw_st.get("clips") or []:
+            idx = int(c.get("index") or 1)
+            archivo_c = c.get("archivo") or ""
+            thumb_c = c.get("thumb") or ""
+            listo = c.get("estado") == "listo" and bool(archivo_c and os.path.isfile(archivo_c))
+            tiene_th = bool(thumb_c and os.path.isfile(thumb_c)) or listo
+            clips_ui.append({
+                "index": idx,
+                "titulo": c.get("titulo") or f"Clip {idx}",
+                "inicio": c.get("inicio"),
+                "fin": c.get("fin"),
+                "estado": c.get("estado") or "preparando",
+                "pct": max(0, min(100, int(c.get("pct") or 0))),
+                "etapa": c.get("etapa") or "",
+                "listo": listo,
+                "thumb_url": f"/api/smart_split_live/thumb/{idx}?r={run_id}&p={int(c.get('pct') or 0)}" if tiene_th else "",
+                "video_url": f"/api/smart_split_live/video/{idx}?r={run_id}" if listo else "",
+            })
+        clips_state = {
+            "run_id": run_id,
+            "clips_total": int(raw_st.get("clips_total") or len(clips_ui)),
+            "clip_actual": int(raw_st.get("clip_actual") or 0),
+            "clips": clips_ui,
+        }
+    return jsonify({"success": True, "message": msg, "percent": pct, "clips_state": clips_state})
+
+
+@app.route("/api/smart_split_live/thumb/<int:idx>", methods=["GET"])
+def api_smart_split_live_thumb(idx):
+    raw_st = _leer_clips_state_seguro()
+    if not raw_st:
+        return jsonify({"success": False, "error": "Sin vista previa activa"}), 404
+    item = next((c for c in (raw_st.get("clips") or []) if int(c.get("index") or 0) == idx), None)
+    if not item:
+        return jsonify({"success": False, "error": "Clip no encontrado"}), 404
+    thumb = item.get("thumb") or ""
+    archivo = item.get("archivo") or ""
+    if (not thumb or not os.path.isfile(thumb)) and archivo and os.path.isfile(archivo):
+        from calidad_video import asegurar_miniatura_video
+        thumb = asegurar_miniatura_video(archivo)
+    if not thumb or not os.path.isfile(thumb):
+        return jsonify({"success": False, "error": "Miniatura aún no lista"}), 404
+    thumb_abs = os.path.abspath(thumb)
+    return send_from_directory(os.path.dirname(thumb_abs), os.path.basename(thumb_abs))
+
+
+@app.route("/api/smart_split_live/video/<int:idx>", methods=["GET"])
+def api_smart_split_live_video(idx):
+    raw_st = _leer_clips_state_seguro()
+    if not raw_st:
+        return jsonify({"success": False, "error": "Sin clip activo"}), 404
+    item = next((c for c in (raw_st.get("clips") or []) if int(c.get("index") or 0) == idx), None)
+    archivo = (item or {}).get("archivo") or ""
+    if not archivo or not os.path.isfile(archivo):
+        return jsonify({"success": False, "error": "Clip aún en renderizado"}), 404
+    archivo_abs = os.path.abspath(archivo)
+    return send_from_directory(os.path.dirname(archivo_abs), os.path.basename(archivo_abs))
 
 
 # ---- Smart Split: presets guardables -----------------------------------
@@ -2303,6 +2529,26 @@ def bot_live_detener(jid):
     return _bot_respuesta(lambda: _bot().lives().stop(jid))
 
 
+@app.route('/api/bot/lives/<jid>/miniatura/<nombre>', methods=['GET'])
+def bot_live_miniatura(jid, nombre):
+    ruta = _bot().lives().resolver_media_segmento(jid, nombre)
+    if not ruta or not os.path.isfile(ruta):
+        return jsonify({'success': False, 'error': 'Sin miniatura'}), 404
+    from calidad_video import asegurar_miniatura_video
+    thumb = asegurar_miniatura_video(ruta)
+    if not thumb or not os.path.isfile(thumb):
+        return jsonify({'success': False, 'error': 'Sin miniatura'}), 404
+    return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb))
+
+
+@app.route('/api/bot/lives/<jid>/clip/<nombre>', methods=['GET'])
+def bot_live_clip(jid, nombre):
+    ruta = _bot().lives().resolver_media_segmento(jid, nombre)
+    if not ruta or not os.path.isfile(ruta):
+        return jsonify({'success': False, 'error': 'Clip no disponible'}), 404
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta), conditional=True)
+
+
 @app.route("/api/bot/encolar", methods=["POST"])
 def bot_encolar():
     data = request.get_json(silent=True) or {}
@@ -2396,8 +2642,8 @@ def bot_cuenta_editar(cid):
     def guardar():
         _bot().guardar_cuenta(cid, {
             k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
-                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada")})
-        if 'monetizada' in d:
+                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada", "proteger_fyp")})
+        if 'monetizada' in d or 'proteger_fyp' in d:
             from firebase_radar.local_radar import solicitar_revision
             solicitar_revision()
     return _bot_respuesta(guardar)
@@ -2473,6 +2719,59 @@ def bot_subidas_lote():
     return _bot_respuesta(lambda: _bot().borrar_lote_subidas(d.get('ids')))
 
 
+def _resolver_media_trabajo_bot(tid, idx_n=0):
+    motor = _bot()
+    t = motor.db.trabajo(tid)
+    if not t:
+        return None
+    carpeta_t = os.path.abspath(motor.carpeta_clips(t))
+    base_bot = os.path.abspath(getattr(motor, "carpeta", None) or paths.DATA_DIR)
+    if os.path.isdir(carpeta_t):
+        try:
+            if os.path.commonpath([carpeta_t, base_bot]) == base_bot:
+                archivos_c = sorted(
+                    os.path.join(carpeta_t, fn)
+                    for fn in os.listdir(carpeta_t)
+                    if fn.lower().endswith((".mp4", ".mov")) and not fn.endswith(".part")
+                )
+                if 0 <= idx_n < len(archivos_c) and os.path.isfile(archivos_c[idx_n]):
+                    return archivos_c[idx_n]
+        except ValueError:
+            pass
+    local_seg = t.get("archivo_local") or ""
+    if local_seg:
+        local_abs = os.path.abspath(local_seg)
+        raiz_live = os.path.abspath(os.path.join(base_bot, "live_segments"))
+        try:
+            if os.path.commonpath([local_abs, raiz_live]) == raiz_live and os.path.isfile(local_abs):
+                return local_abs
+        except ValueError:
+            pass
+    return None
+
+
+@app.route("/api/bot/trabajos/<int:tid>/miniatura", methods=["GET"])
+def bot_trabajo_miniatura(tid):
+    idx_n = max(0, request.args.get("n", 0, type=int))
+    ruta = _resolver_media_trabajo_bot(tid, idx_n)
+    if not ruta:
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    from calidad_video import asegurar_miniatura_video
+    thumb = asegurar_miniatura_video(ruta)
+    if not thumb or not os.path.isfile(thumb):
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb))
+
+
+@app.route("/api/bot/trabajos/<int:tid>/clip", methods=["GET"])
+def bot_trabajo_clip(tid):
+    idx_n = max(0, request.args.get("n", 0, type=int))
+    ruta = _resolver_media_trabajo_bot(tid, idx_n)
+    if not ruta or not os.path.isfile(ruta):
+        return jsonify({"success": False, "error": "Clip no disponible"}), 404
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta), conditional=True)
+
+
 @app.route("/api/bot/trabajos/<int:tid>/<accion>", methods=["POST"])
 def bot_trabajo_accion(tid, accion):
     def hacer():
@@ -2492,13 +2791,30 @@ _remoto_trabajos = {}
 
 
 def _remoto_hilo(jid, datos):
+    def _publicar_clip_parcial(ev_clip):
+        ruta_c = ev_clip.get("archivo") or ""
+        meta_c = ev_clip.get("meta") or {}
+        if not ruta_c or not os.path.isfile(ruta_c):
+            return
+        with _remoto_lock:
+            job = _remoto_trabajos.get(jid)
+            if not job or job.get("estado") in ("cancelado", "cancelando"):
+                return
+            if ruta_c not in job["rutas"]:
+                job["rutas"].append(ruta_c)
+            if isinstance(meta_c, dict) and not any(m.get("archivo") == ruta_c for m in job["meta"]):
+                job["meta"].append(meta_c)
+            if ev_clip.get("total"):
+                job["total_clips"] = int(ev_clip["total"])
+
+    datos["_on_clip_ready"] = _publicar_clip_parcial
     try:
         rutas, meta = run_smart_split_thread(datos)  # libera el bloqueo de trabajo al terminar
         with _remoto_lock:
             job = _remoto_trabajos.get(jid)
             if job:
                 job.update(estado='cancelado' if job.get('cancel_event') and job['cancel_event'].is_set() else 'listo',
-                           rutas=rutas, meta=meta or [])
+                           rutas=rutas, meta=meta or [], total_clips=len(rutas or []))
     except Exception as e:
         with _remoto_lock:
             job = _remoto_trabajos.get(jid)
@@ -2514,7 +2830,10 @@ def remoto_cortar():
         return jsonify({"success": False, "error": "Falta el enlace del video."}), 400
     if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "ocupado": True, "error": "El servidor está ocupado."}), 409
-    datos = {**(d.get("preset") or {}), "source": source, "download_quality": "best",
+    preset_remoto = dict(d.get("preset") or {})
+    if not preset_remoto.get("respetar_perfil_remoto") and preset_remoto.get("export_profile") in ("fast", "balanced", "", None):
+        preset_remoto["export_profile"] = "quality"
+    datos = {**preset_remoto, "source": source, "download_quality": "best",
              "subir_tiktok": False, "subir_youtube": False, "subir_facebook": False, "_lanzar_error": True}
     jid = uuid.uuid4().hex[:12]
     evento = threading.Event()
@@ -2544,6 +2863,9 @@ def remoto_estado(jid):
         for r in t["rutas"]:
             try:
                 os.remove(r)
+                thumb_r = os.path.splitext(r)[0] + "_miniatura.jpg"
+                if os.path.isfile(thumb_r):
+                    os.remove(thumb_r)
             except OSError:
                 pass
         with _remoto_lock:
@@ -2558,10 +2880,12 @@ def remoto_estado(jid):
     por_archivo = {m.get("archivo"): m for m in t["meta"]}
     clips = [{"n": i, "nombre": os.path.basename(r), "bytes": os.path.getsize(r) if os.path.isfile(r) else 0,
               "publicacion": crear_publicacion(por_archivo.get(r) or {}),
-              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen')}}
+              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto')},
+              "miniatura_bytes": os.path.getsize(os.path.splitext(r)[0] + "_miniatura.jpg") if os.path.isfile(os.path.splitext(r)[0] + "_miniatura.jpg") else 0}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
-                    "progreso": progreso, "clips": clips, "error_code": t.get("error_code", "")})
+                    "progreso": progreso, "clips": clips, "total_clips": t.get("total_clips", len(clips)),
+                    "error_code": t.get("error_code", "")})
 
 
 @app.route("/api/bot/remoto/<jid>/clip/<int:n>", methods=["GET"])
@@ -2571,6 +2895,19 @@ def remoto_clip(jid, n):
     if n < 0 or n >= len(rutas) or not os.path.isfile(rutas[n]):
         return jsonify({"success": False, "error": "Clip no encontrado."}), 404
     return send_from_directory(os.path.dirname(rutas[n]), os.path.basename(rutas[n]), as_attachment=True)
+
+
+@app.route("/api/bot/remoto/<jid>/miniatura/<int:n>", methods=["GET"])
+def remoto_miniatura(jid, n):
+    with _remoto_lock:
+        rutas = list((_remoto_trabajos.get(jid) or {}).get("rutas") or [])
+    if n < 0 or n >= len(rutas) or not os.path.isfile(rutas[n]):
+        return jsonify({"success": False, "error": "Miniatura no encontrada."}), 404
+    from calidad_video import asegurar_miniatura_video
+    thumb = asegurar_miniatura_video(rutas[n])
+    if not thumb or not os.path.isfile(thumb):
+        return jsonify({"success": False, "error": "Miniatura no encontrada."}), 404
+    return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb), as_attachment=True)
 
 
 @app.route("/api/bot/remoto_probar", methods=["POST"])
@@ -2586,6 +2923,34 @@ def bot_captura(sid):
     if not ruta or os.path.dirname(os.path.abspath(ruta)) != os.path.abspath(carpeta) or not os.path.isfile(ruta):
         return jsonify({"success": False, "error": "Sin captura"}), 404
     return send_from_directory(carpeta, os.path.basename(ruta))
+
+
+@app.route("/api/bot/miniatura/<int:sid>", methods=["GET"])
+def bot_miniatura(sid):
+    motor = _bot()
+    s = motor.db.subida(sid)
+    archivo = (s or {}).get("archivo") or ""
+    if not archivo or not os.path.isfile(archivo):
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    archivo_abs = os.path.abspath(archivo)
+    base_bot = getattr(motor, "carpeta", None) or paths.DATA_DIR
+    raiz_clips = os.path.abspath(os.path.join(base_bot, "bot_clips"))
+    raiz_data = os.path.abspath(os.path.join(paths.DATA_DIR, "bot_clips"))
+    permitido = False
+    for r_ok in (raiz_clips, raiz_data):
+        try:
+            if os.path.commonpath([archivo_abs, r_ok]) == r_ok:
+                permitido = True
+                break
+        except ValueError:
+            continue
+    if not permitido:
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    from calidad_video import asegurar_miniatura_video
+    thumb = asegurar_miniatura_video(archivo_abs)
+    if not thumb or not os.path.isfile(thumb):
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb))
 
 
 @app.route("/api/start", methods=["POST"])
@@ -2635,9 +3000,10 @@ def get_logs():
 def health():
     from editor_controls import CAPACIDAD
     from smart_moments import CAPACIDAD as MOMENTOS_CAPACIDAD
+    from smart_remix import CAPACIDAD_ORIGINALIDAD
     mem = winproc.estado_memoria()
     return jsonify({"ok": True, "status": automation_status,
-                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", MOMENTOS_CAPACIDAD],
+                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", MOMENTOS_CAPACIDAD, CAPACIDAD_ORIGINALIDAD, "streaming_clips_v1"],
                     "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
 
 

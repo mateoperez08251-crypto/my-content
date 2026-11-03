@@ -115,14 +115,161 @@ def bloqueos_monetizacion(datos):
 
 
 def filtrar_frame(frame, modo):
-    """Filtro moderado antes de los textos y de la única exportación con pérdida.
+    """Filtro de luminancia (LAB) antes de los textos y de la única exportación con pérdida.
 
-    HD suaviza ruido espacial; ambos modos aplican nitidez sin alterar el tamaño.
-    El escalado Lanczos ya se realiza en el encuadre del editor.
+    Opera solo sobre el canal L para realzar bordes y rostros sin amplificar ruido de color.
     """
     import cv2
     if modo not in ('hd', 'sharpen'):
         raise ValueError('Filtro de calidad no válido.')
-    imagen = cv2.bilateralFilter(frame, 5, 12, 12) if modo == 'hd' else frame
-    suave = cv2.GaussianBlur(imagen, (5, 5), 1.0)
-    return cv2.addWeighted(imagen, 1.45, suave, -0.45, 0)
+    lab = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    base_l = cv2.bilateralFilter(l_ch, 5, 14, 14) if modo == 'hd' else l_ch
+    suave_l = cv2.GaussianBlur(base_l, (0, 0), 1.15)
+    nitido_l = cv2.addWeighted(base_l, 1.48 if modo == 'sharpen' else 1.38, suave_l, -0.48 if modo == 'sharpen' else -0.38, 0)
+    return cv2.cvtColor(cv2.merge((nitido_l, a_ch, b_ch)), cv2.COLOR_LAB2RGB)
+
+
+def realzar_detalle_ampliacion(frame, factor_ampliacion):
+    """Compensa suavemente la pérdida de microdetalle al recortar 16:9 -> 9:16 (sin halos cromáticos)."""
+    if frame is None or isinstance(frame, (str, bytes)) or getattr(frame, 'ndim', 0) != 3 or factor_ampliacion <= 1.20:
+        return frame
+    import cv2
+    fuerza = min(0.30, max(0.08, (float(factor_ampliacion) - 1.15) * 0.28))
+    lab = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    suave_l = cv2.GaussianBlur(l_ch, (0, 0), 1.05)
+    l_out = cv2.addWeighted(l_ch, 1.0 + fuerza, suave_l, -fuerza, 0)
+    return cv2.cvtColor(cv2.merge((l_out, a_ch, b_ch)), cv2.COLOR_LAB2RGB)
+
+
+def limpiar_metadatos_mp4(video):
+    """Elimina sin recodificar firmas de codificador, fechas, capítulos y etiquetas de origen."""
+    if not video or not os.path.isfile(video):
+        return False
+    try:
+        with open(video, 'rb') as f:
+            cabecera = f.read(16)
+    except OSError:
+        return False
+    if len(cabecera) < 12 or cabecera[4:8] != b'ftyp':
+        return False
+    import imageio_ffmpeg
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    tmp = os.path.splitext(video)[0] + '_nometa.mp4'
+    sin_ventana = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    try:
+        r = subprocess.run(
+            [
+                ffmpeg, '-y', '-loglevel', 'error', '-i', video,
+                '-map', '0:v:0', '-map', '0:a?', '-dn',
+                '-map_metadata', '-1', '-map_chapters', '-1',
+                '-fflags', '+bitexact', '-flags:v', '+bitexact', '-flags:a', '+bitexact',
+                '-metadata', 'encoder=',
+                '-c', 'copy', '-movflags', '+faststart', tmp,
+            ],
+            capture_output=True, text=True, creationflags=sin_ventana,
+        )
+        if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+            os.replace(tmp, video)
+            return True
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return False
+
+
+def asegurar_miniatura_video(video, cache_dir=''):
+    """Devuelve la ruta de la miniatura del video (prioriza `_miniatura.jpg` IA; si no, extrae un fotograma nítido)."""
+    if not video or not os.path.isfile(video):
+        return ''
+    ruta_abs = os.path.abspath(video)
+    portada_ia = os.path.splitext(ruta_abs)[0] + '_miniatura.jpg'
+    if os.path.isfile(portada_ia) and os.path.getsize(portada_ia) > 0:
+        return portada_ia
+
+    import hashlib
+    try:
+        st = os.stat(ruta_abs)
+    except OSError:
+        return ''
+    if st.st_size <= 0:
+        return ''
+
+    if not cache_dir:
+        try:
+            import paths
+            cache_dir = os.path.join(paths.TEMP_DIR, 'video_thumbs')
+        except Exception:
+            cache_dir = os.path.join(os.path.dirname(ruta_abs), '.thumbs')
+    os.makedirs(cache_dir, exist_ok=True)
+    clave = hashlib.sha1(f'{ruta_abs}|{st.st_size}|{st.st_mtime_ns}'.encode('utf-8', 'replace')).hexdigest()[:24]
+    destino = os.path.join(cache_dir, f'poster_{clave}.jpg')
+    if os.path.isfile(destino) and os.path.getsize(destino) > 0:
+        return destino
+
+    tmp = destino + f'.{os.getpid()}.tmp.jpg'
+    try:
+        try:
+            import cv2
+            cap = cv2.VideoCapture(ruta_abs)
+            mejor = None
+            mejor_puntaje = -1.0
+            try:
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                for frac in (0.18, 0.35, 0.55, 0.06, 0.0):
+                    if total > 3:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, min(total - 1, int(total * frac))))
+                    ok, frame = cap.read()
+                    if not ok or frame is None or getattr(frame, 'size', 0) == 0:
+                        continue
+                    brillo = float(frame.mean())
+                    if brillo > mejor_puntaje:
+                        mejor = frame
+                        mejor_puntaje = brillo
+                    if brillo >= 22.0:
+                        mejor = frame
+                        break
+            finally:
+                cap.release()
+            if mejor is not None:
+                alto, ancho = mejor.shape[:2]
+                escala = min(1.0, 640.0 / max(ancho, alto, 1))
+                if escala < 0.99:
+                    mejor = cv2.resize(
+                        mejor,
+                        (max(2, int(round(ancho * escala))), max(2, int(round(alto * escala)))),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                if cv2.imwrite(tmp, mejor, [int(cv2.IMWRITE_JPEG_QUALITY), 88]) and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                    os.replace(tmp, destino)
+                    return destino
+        except Exception:
+            pass
+
+        import imageio_ffmpeg
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        sin_ventana = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        for ss in ('0.8', '0.0'):
+            r = subprocess.run(
+                [
+                    ffmpeg, '-y', '-loglevel', 'error', '-ss', ss, '-i', ruta_abs,
+                    '-frames:v', '1', '-vf', "scale='min(640,iw)':-2", '-q:v', '3', tmp,
+                ],
+                capture_output=True, timeout=15, creationflags=sin_ventana,
+            )
+            if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                os.replace(tmp, destino)
+                return destino
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return ''
