@@ -191,3 +191,58 @@ def estado_memoria() -> dict:
 def popen_kwargs() -> dict:
     """Argumentos comunes para Popen: sin ventana de consola en Windows."""
     return {"creationflags": SIN_VENTANA} if ES_WINDOWS else {}
+
+
+_ram_total_cache_gb: float | None = None
+_ultimo_compactado_ts: float = 0.0
+
+
+def es_equipo_baja_ram(umbral_gb: float = 5.5) -> bool:
+    """True en equipos con ~4 GB de RAM física (o forzado con CONTENTAPP_LOW_RAM=1/0)."""
+    global _ram_total_cache_gb
+    forzado = os.environ.get("CONTENTAPP_LOW_RAM", "").strip().lower()
+    if forzado in ("1", "true", "si", "yes", "on"):
+        return True
+    if forzado in ("0", "false", "no", "off"):
+        return False
+    if _ram_total_cache_gb is None:
+        mem = estado_memoria()
+        _ram_total_cache_gb = float(mem.get("ram_total_gb") or 8.0)
+    return 0.0 < _ram_total_cache_gb <= float(umbral_gb)
+
+
+def presion_memoria_alta() -> bool:
+    """True cuando la RAM libre o el commit libre están ajustados para lanzar dos procesos pesados."""
+    mem = estado_memoria()
+    ram_libre = float(mem.get("ram_libre_gb") or 4.0)
+    commit_libre = float(mem.get("commit_libre_gb") or 4.0)
+    if es_equipo_baja_ram():
+        return ram_libre < 0.95 or commit_libre < 1.6
+    return ram_libre < 0.55 or commit_libre < 1.1
+
+
+def compactar_memoria_proceso(forzar: bool = False) -> bool:
+    """Ejecuta GC y pide a Windows recortar el working set tras tareas pesadas (FFmpeg/OpenCV/Chromium)."""
+    global _ultimo_compactado_ts
+    import gc
+    import time
+
+    ahora = time.monotonic()
+    if not forzar and (ahora - _ultimo_compactado_ts) < 3.0:
+        return False
+    _ultimo_compactado_ts = ahora
+    gc.collect()
+    if not ES_WINDOWS:
+        return True
+    try:
+        hproc = ctypes.windll.kernel32.GetCurrentProcess()
+        try:
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+            if psapi.EmptyWorkingSet(hproc):
+                return True
+        except Exception:
+            pass
+        ctypes.windll.kernel32.SetProcessWorkingSetSize(hproc, ctypes.c_size_t(-1), ctypes.c_size_t(-1))
+        return True
+    except Exception:
+        return False

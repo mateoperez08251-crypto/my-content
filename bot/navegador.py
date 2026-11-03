@@ -162,6 +162,41 @@ ARGS = [
     "--disable-session-crashed-bubble",
 ]
 
+ARGS_BAJA_RAM = [
+    "--disable-dev-shm-usage",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-domain-reliability",
+    "--disk-cache-size=33554432",
+    "--media-cache-size=16777216",
+    "--renderer-process-limit=2",
+    "--js-flags=--max-old-space-size=256",
+]
+
+_ahorro_ram_modo = "auto"
+
+
+def configurar_ahorro_ram(modo: str = "auto") -> None:
+    global _ahorro_ram_modo
+    valor = str(modo or "auto").strip().lower()
+    _ahorro_ram_modo = valor if valor in ("auto", "si", "no") else "auto"
+
+
+def usar_ahorro_ram() -> bool:
+    if _ahorro_ram_modo == "si":
+        return True
+    if _ahorro_ram_modo == "no":
+        return False
+    try:
+        import winproc
+        return winproc.es_equipo_baja_ram()
+    except Exception:
+        return False
+
+
+def args_lanzamiento() -> list[str]:
+    return ARGS + ARGS_BAJA_RAM if usar_ahorro_ram() else list(ARGS)
+
 
 class SinNavegador(Exception):
     pass
@@ -270,7 +305,7 @@ def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False, naveg
         os.makedirs(perfil, exist_ok=True)
         nombre, ruta = buscar_navegador(navegador)
         with sync_playwright() as p:
-            opciones = dict(user_data_dir=perfil, headless=headless, args=ARGS, no_viewport=True,
+            opciones = dict(user_data_dir=perfil, headless=headless, args=args_lanzamiento(), no_viewport=True,
                             ignore_default_args=["--enable-automation"], locale="es-ES",
                             accept_downloads=False, timeout=LAUNCH_TIMEOUT_MS)
             if ruta:
@@ -313,6 +348,11 @@ def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False, naveg
                     pass
     finally:
         lk.release()
+        try:
+            import winproc
+            winproc.compactar_memoria_proceso()
+        except Exception:
+            pass
 
 
 def pagina(ctx):

@@ -97,6 +97,13 @@ class DB:
         self._con.row_factory = sqlite3.Row
         with self._lock:
             self._con.execute("PRAGMA journal_mode=WAL")
+            try:
+                import winproc
+                if winproc.es_equipo_baja_ram():
+                    self._con.execute("PRAGMA cache_size=-4000")
+                    self._con.execute("PRAGMA temp_store=FILE")
+            except Exception:
+                pass
             self._con.executescript(_ESQUEMA)
             columns = {r[1] for r in self._con.execute('PRAGMA table_info(trabajos)')}
             for name, definition in [('archivo_local', "TEXT NOT NULL DEFAULT ''"),
@@ -526,6 +533,16 @@ class DB:
         with self._lock, self._con:
             self._con.execute("DELETE FROM subidas WHERE trabajo_id=? AND estado NOT IN ('ok','cancelando','revisar')", (int(tid),))
             self._con.execute("DELETE FROM trabajos WHERE id=?", (int(tid),))
+
+    def estado_subidas_trabajo(self, tid):
+        """Resumen de subidas asociadas a un trabajo: total, ok y activas."""
+        filas = self._todos('SELECT estado, COUNT(*) AS n FROM subidas WHERE trabajo_id=? GROUP BY estado', (int(tid),))
+        por_estado = {r['estado']: int(r['n']) for r in filas}
+        total = sum(por_estado.values())
+        ok = por_estado.get('ok', 0)
+        activas = sum(por_estado.get(k, 0) for k in ('pendiente', 'subiendo', 'cancelando', 'revisar', 'error'))
+        en_vuelo = sum(por_estado.get(k, 0) for k in ('subiendo', 'cancelando', 'revisar'))
+        return {'total': total, 'ok': ok, 'activas': activas, 'en_vuelo': en_vuelo, 'por_estado': por_estado}
 
     # -- subidas --------------------------------------------------------
     def crear_subida(self, trabajo_id, cuenta_id, archivo, texto):

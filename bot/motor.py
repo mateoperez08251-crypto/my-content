@@ -16,6 +16,7 @@ import traceback
 from datetime import datetime
 from texto_publicacion import crear_publicacion, limpiar_titulo
 from firebase_radar.functions.canales import coincide, permitido
+import winproc
 
 from . import archivos, cookies_auto, locales, navegador, remoto
 from .planificacion import estimar
@@ -49,6 +50,7 @@ CONFIG_DEFECTO = {
     "proxima_global": 0.0,    # conserva la pausa general si se reinicia la app
     "headless": False,       # False = ves el navegador trabajando
     "navegador": "auto",     # auto (Brave > Chrome > Edge), brave, chrome, edge
+    "ahorro_ram": "auto",    # auto (activo en <=5.5 GB RAM), si, no
     "velocidad": 1.0,        # 1 = ritmo humano normal
     "radar_desde": 0,        # la bandeja de Firebase solo cuenta lo detectado después de esto
     "remoto_url": "",        # servidor de cortes (Colab con GPU); vacío = cortar en esta PC
@@ -145,6 +147,7 @@ class Motor:
         self._cookies_estado = ''
         self._cookies_intento = 0.0
         self._cookies_bloqueo = 0.0
+        navegador.configurar_ahorro_ram(self.cfg.get("ahorro_ram", "auto"))
         self.db.reparar_al_arrancar()
         self._avisos = Avisos(self.db, self.notificar, lambda: self.cfg, self.log)
 
@@ -202,6 +205,8 @@ class Motor:
             raise ValueError('La antigüedad máxima para cuentas monetizadas debe estar entre 5 y 1440 minutos.')
         if nueva['modo_cola'] not in ('preparar_primero', 'solo_preparar', 'solo_subir', 'alternar'):
             raise ValueError('Modo de cola no válido.')
+        if nueva.get('ahorro_ram', 'auto') not in ('auto', 'si', 'no'):
+            raise ValueError('Modo de ahorro de RAM no válido.')
         for k in ('hora_inicio', 'hora_fin'):
             if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', nueva[k]):
                 raise ValueError('Usa una hora válida: HH:MM.')
@@ -219,6 +224,7 @@ class Motor:
         os.replace(tmp, self._cfg_ruta)
         previo = self.cfg
         self.cfg = nueva
+        navegador.configurar_ahorro_ram(nueva.get("ahorro_ram", "auto"))
         if not nueva['remoto_url'] or nueva['remoto_respaldo_local']:
             self.db.reanudar_remotos()
         self._despertar.set()
@@ -336,6 +342,36 @@ class Motor:
             return detalle + f'\nPodré reintentar a partir del {hora(reintento)}, según el modo, horario y pausas.'
         return detalle + '\nLo dejé parado. Revisa el fallo en la cola antes de reintentar.'
 
+    def modo_ahorro_ram_activo(self) -> bool:
+        modo = str(self.cfg.get("ahorro_ram", "auto") or "auto").strip().lower()
+        if modo == "si":
+            return True
+        if modo == "no":
+            return False
+        return winproc.es_equipo_baja_ram()
+
+    def _corte_local_pesado_en_curso(self) -> bool:
+        ed = self._edicion_actual
+        if not ed:
+            return False
+        modo = str(self.cfg.get("ahorro_ram", "auto") or "auto").strip().lower()
+        if modo == "no":
+            return False
+        if modo == "auto" and not (winproc.es_equipo_baja_ram() and winproc.presion_memoria_alta()):
+            return False
+        tr = self.db.trabajo(ed[0])
+        return bool(tr and tr.get("cortar") and not tr.get("remoto_id"))
+
+    def _subida_pesada_en_curso_baja_ram(self) -> bool:
+        if self._subida_actual is None:
+            return False
+        modo = str(self.cfg.get("ahorro_ram", "auto") or "auto").strip().lower()
+        if modo == "si":
+            return True
+        if modo == "no":
+            return False
+        return bool(winproc.es_equipo_baja_ram() and winproc.presion_memoria_alta())
+
     # -- arranque -------------------------------------------------------
     def iniciar(self):
         if self._hilo and self._hilo.is_alive():
@@ -344,6 +380,12 @@ class Motor:
             self.guardar_cfg({})
         self._stop.clear()
         self._avisos.iniciar()
+        try:
+            hay_lives = self.db._uno("SELECT COUNT(*) AS n FROM live_sesiones")
+            if hay_lives and int(hay_lives["n"] or 0) > 0:
+                self.lives().reconcile()
+        except Exception:
+            pass
         self._hilo = threading.Thread(target=self._bucle, daemon=True, name="bot-motor")
         self._hilo_prep = threading.Thread(target=self._bucle_preparacion, daemon=True, name="bot-preparador")
         self._hilo_prep.start()
@@ -371,9 +413,17 @@ class Motor:
                         excluir_populares=not self.cfg["radar_populares"],
                     )
                     if trabajo:
-                        self._procesar_trabajo(trabajo)
-                        self._despertar.set()
-                        espera = 1
+                        es_local_pesado = bool(
+                            trabajo.get("cortar")
+                            and not trabajo.get("remoto_id")
+                            and (trabajo.get("archivo_local") or not self._remoto_disponible())
+                        )
+                        if es_local_pesado and self._subida_pesada_en_curso_baja_ram():
+                            espera = 3
+                        else:
+                            self._procesar_trabajo(trabajo)
+                            self._despertar.set()
+                            espera = 1
             except Exception as e:
                 self.log(f"Error inesperado al preparar: {e}")
                 traceback.print_exc()
@@ -433,6 +483,10 @@ class Motor:
                     self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
                                       else 'Preparando primero: esperando el reintento de un video.')
                 return False
+        if self._corte_local_pesado_en_curso():
+            if self.db.subidas_pendientes():
+                self.actividad = 'Modo ahorro RAM (4 GB): terminando corte local antes de abrir el navegador…'
+            return False
         sub = self._siguiente_subida()
         if sub:
             self._procesar_subida(sub)
@@ -736,6 +790,7 @@ class Motor:
                 if evento.is_set():
                     self.actividad = 'Corte cancelado. El video fue retirado de la cola.'
                 self._edicion_actual = None
+            winproc.compactar_memoria_proceso()
 
     def _edicion_cancelada(self):
         return self._stop.is_set() or bool(self._edicion_actual and self._edicion_actual[1].is_set())
@@ -809,6 +864,7 @@ class Motor:
                          "excluded_ranges": self.db.intervalos_usados(t['url'], None, t['id']) if not local else [],
                          "_cancel_event": self._edicion_actual[1] if self._edicion_actual else None,
                          "_on_clip_ready": _al_clip_local_listo,
+                         "_trabajo_id": t["id"],
                          "source": local or t["url"],
                          "download_quality": "best", "subir_tiktok": False, "subir_youtube": False,
                          "subir_facebook": False, "_lanzar_error": True}
@@ -1048,17 +1104,42 @@ class Motor:
             self.db.borrar_subida(sid)
             if anterior:
                 self._aviso_subida(anterior, 'borrado', 'Retirado de la cola.', 'cola')
+        if anterior and anterior.get('trabajo_id'):
+            self._reconciliar_trabajo_live(anterior['trabajo_id'])
         self._despertar.set()
         return {'estado': 'borrado', 'mensaje': 'Subida eliminada de la cola.'}
 
+    def _reconciliar_trabajo_live(self, trabajo_id):
+        if not trabajo_id:
+            return
+        try:
+            if self._lives is not None:
+                self._lives.reconcile()
+                return
+            t = self.db.trabajo(int(trabajo_id))
+            if not t or t.get('origen') != 'live' or t.get('estado') != 'listo':
+                return
+            est = self.db.estado_subidas_trabajo(int(trabajo_id))
+            if est['total'] > 0 and est['ok'] == est['total']:
+                self.db._q("UPDATE live_segmentos SET estado='subido' WHERE trabajo_id=? AND estado='procesado'",
+                           (int(trabajo_id),))
+                shutil.rmtree(self.carpeta_clips(t), ignore_errors=True)
+            elif est['total'] == 0:
+                self.db._q("UPDATE live_segmentos SET estado='retirado' WHERE trabajo_id=? AND estado='procesado'",
+                           (int(trabajo_id),))
+                shutil.rmtree(self.carpeta_clips(t), ignore_errors=True)
+        except Exception:
+            pass
+
     def borrar_trabajo(self, tid):
+        tid_int = int(tid)
         with self._cola_lock:
             actual = self._subida_actual
             resultado = None
-            if actual is not None and actual[0]['trabajo_id'] == int(tid):
+            if actual is not None and actual[0]['trabajo_id'] == tid_int:
                 resultado = self.borrar_subida(actual[0]['id'])
-            anterior = self.db.trabajo(tid)
-            if self._edicion_actual and self._edicion_actual[0] == int(tid):
+            anterior = self.db.trabajo(tid_int)
+            if self._edicion_actual and self._edicion_actual[0] == tid_int:
                 self._edicion_actual[1].set()
                 self.actividad = 'Cancelando el corte; deteniendo su procesamiento…'
                 resultado = {'estado': 'cancelando', 'mensaje': 'Cancelación solicitada. Se detendrá el corte y no se encolarán sus resultados.'}
@@ -1066,11 +1147,94 @@ class Motor:
                     threading.Thread(target=self._cancelar_corte_remoto,
                                      args=(anterior['remoto_url'], self.cfg['remoto_clave'], anterior['remoto_id']),
                                      daemon=True).start()
-            self.db.borrar_trabajo(tid)
+            self.db.borrar_trabajo(tid_int)
             if anterior:
                 self._aviso_trabajo(anterior, 'borrado', 'Video retirado de la cola.', 'cola')
+        est_sub = self.db.estado_subidas_trabajo(tid_int)
+        if est_sub['en_vuelo'] == 0 and est_sub['activas'] == 0:
+            shutil.rmtree(os.path.join(self.carpeta, 'bot_clips', f'trabajo_{tid_int}'), ignore_errors=True)
+        if anterior and anterior.get('origen') == 'live':
+            if self._lives is not None:
+                try:
+                    self._lives.reconcile()
+                except Exception:
+                    pass
+            else:
+                self.db._q("UPDATE live_segmentos SET estado='retirado' WHERE trabajo_id=? AND estado IN ('encolado','procesado')",
+                           (tid_int,))
         self._despertar.set()
         return resultado or {'mensaje': 'Video y subidas pendientes eliminados de la cola.'}
+
+    def borrar_lote_trabajos(self, ids) -> dict:
+        if not isinstance(ids, (list, tuple)) or not ids:
+            raise ValueError('Selecciona al menos un trabajo para eliminar.')
+        if len(ids) > 200:
+            raise ValueError('No se pueden eliminar más de 200 trabajos a la vez.')
+        limpios = []
+        vistos = set()
+        for raw in ids:
+            if isinstance(raw, bool):
+                raise ValueError('ID de trabajo no válido.')
+            tid = int(raw)
+            if tid <= 0:
+                raise ValueError('ID de trabajo no válido.')
+            if tid not in vistos:
+                vistos.add(tid)
+                limpios.append(tid)
+        borrados = 0
+        cancelando = 0
+        for tid in limpios:
+            prev = self.db.trabajo(tid)
+            res = self.borrar_trabajo(tid)
+            if res.get('estado') == 'cancelando':
+                cancelando += 1
+            elif prev:
+                borrados += 1
+        return {
+            'borrados': borrados,
+            'cancelando': cancelando,
+            'mensaje': f'Se eliminaron {borrados} video(s) de la cola' + (f' ({cancelando} cancelándose).' if cancelando else '.'),
+        }
+
+    def limpiar_trabajos_terminados(self, incluir_radar: bool = False) -> dict:
+        filas = self.db._todos(
+            "SELECT id, estado, origen FROM trabajos WHERE estado IN ('listo','error','sin_destino','omitido') ORDER BY id ASC LIMIT 500"
+        )
+        ed_tid = self._edicion_actual[0] if self._edicion_actual else None
+        borrados = 0
+        carpetas_limpias = 0
+        for f in filas:
+            tid = int(f['id'])
+            if tid == ed_tid:
+                continue
+            est = self.db.estado_subidas_trabajo(tid)
+            if est['activas'] > 0 or est['en_vuelo'] > 0:
+                continue
+            carpeta_t = os.path.join(self.carpeta, 'bot_clips', f'trabajo_{tid}')
+            if os.path.isdir(carpeta_t):
+                shutil.rmtree(carpeta_t, ignore_errors=True)
+                carpetas_limpias += 1
+            # Para radar/firebase conservamos la fila liviana de deduplicación salvo que se pida borrar todo.
+            if not incluir_radar and f.get('origen') in ('radar', 'radar_populares', 'firebase'):
+                continue
+            self.db.borrar_trabajo(tid)
+            borrados += 1
+        if self._lives is not None:
+            try:
+                self._lives.reconcile()
+            except Exception:
+                pass
+        self._despertar.set()
+        if borrados == 0 and carpetas_limpias == 0:
+            msg = 'No había trabajos terminados pendientes de limpiar.'
+        else:
+            partes = []
+            if borrados:
+                partes.append(f'{borrados} trabajo(s) retirados')
+            if carpetas_limpias:
+                partes.append(f'{carpetas_limpias} carpeta(s) temporales liberadas')
+            msg = 'Limpieza completada: ' + ' y '.join(partes) + '.'
+        return {'borrados': borrados, 'carpetas_limpias': carpetas_limpias, 'mensaje': msg}
 
     def _cancelar_corte_remoto(self, url, clave, jid):
         cliente = remoto.Cliente(url, clave)
@@ -1208,8 +1372,19 @@ class Motor:
         return {'mensaje': mensaje}
 
     def borrar_lote_subidas(self, ids):
+        tids = set()
+        if isinstance(ids, (list, tuple)):
+            for raw in ids:
+                try:
+                    sub = self.db.subida(int(raw))
+                    if sub and sub.get('trabajo_id'):
+                        tids.add(int(sub['trabajo_id']))
+                except (TypeError, ValueError):
+                    pass
         with self._cola_lock:
             resultado = self.db.borrar_lote(ids)
+        for tid in tids:
+            self._reconciliar_trabajo_live(tid)
         self.despertar()
         return resultado
 
@@ -1247,6 +1422,9 @@ class Motor:
                     self._aviso_subida(s, 'ok' if control.confirmada else 'cancelado', mensaje,
                                        'publicados' if control.confirmada else 'errores' if control.publicando else 'cola', True)
                 self._subida_actual = None
+            if s.get('trabajo_id'):
+                self._reconciliar_trabajo_live(s.get('trabajo_id'))
+            winproc.compactar_memoria_proceso()
 
     def _ejecutar_subida(self, s, control):
         control.comprobar()
@@ -1378,6 +1556,7 @@ class Motor:
         control.comprobar()
         self.db.marcar_subida(s["id"], "ok", error="", url_publicada=url or "")
         self.db.editar_cuenta(cuenta["id"], estado="ok")
+        self._reconciliar_trabajo_live(s.get("trabajo_id"))
         self.log(f"✅ Subido a {nombre}" + (f": {url}" if url else ""))
         try:
             self._descanso(cuenta)
@@ -1756,6 +1935,7 @@ class Motor:
         vasos_activos = self._construir_vasos_activos(trabajos_rec, recientes, ahora)
         return {
             "config": {**self.cfg, "remoto_clave": OCULTA if self.cfg["remoto_clave"] else ""},
+            "modo_ligero_ram": self.modo_ahorro_ram_activo(),
             "remoto": self._remoto_estado,
             "youtube_auto": self.estado_youtube(),
             "avisos": self._avisos.resumen(),
@@ -1779,9 +1959,11 @@ class Motor:
         trabajo_activo = next((t for t in trabajos if t['id'] == ed_tid or t.get('estado') in ('cortando', 'descargando')), None)
         if trabajo_activo:
             leido_local = False
+            tid_act = int(trabajo_activo['id'])
+            accion_tr = {'tipo': 'trabajo', 'id': tid_act}
             es_live_job = bool(trabajo_activo.get('origen') == 'live' or trabajo_activo.get('archivo_local'))
             thumb_trabajo_base = (
-                f"/api/bot/trabajos/{trabajo_activo['id']}/miniatura?t={int(trabajo_activo.get('actualizado') or 0)}"
+                f"/api/bot/trabajos/{tid_act}/miniatura?t={int(trabajo_activo.get('actualizado') or 0)}"
                 if (es_live_job and os.path.isfile(trabajo_activo.get('archivo_local') or ''))
                 else ''
             )
@@ -1792,8 +1974,18 @@ class Motor:
                     if os.path.isfile(st_path):
                         with open(st_path, 'r', encoding='utf-8') as f:
                             st = json.load(f)
-                        if isinstance(st, dict) and ahora - float(st.get('updated_at') or 0) < 900:
+                        st_global = st.get('global_pct') if isinstance(st, dict) else None
+                        st_tid = st.get('trabajo_id') if isinstance(st, dict) else None
+                        st_vigente = (
+                            isinstance(st, dict)
+                            and (st_global is None or int(st_global) >= 0)
+                            and ahora - float(st.get('updated_at') or 0) < 180
+                            and (st_tid is None or int(st_tid) == tid_act)
+                        )
+                        if st_vigente:
                             for c in (st.get('clips') or []):
+                                if c.get('estado') == 'error':
+                                    continue
                                 idx = int(c.get('index') or 1)
                                 listo = c.get('estado') == 'listo' and bool(c.get('archivo'))
                                 tiene_th = bool(c.get('thumb')) or listo
@@ -1802,7 +1994,7 @@ class Motor:
                                     if tiene_th else thumb_trabajo_base
                                 )
                                 vasos.append({
-                                    'id': f"corte_{trabajo_activo['id']}_{idx}",
+                                    'id': f"corte_{tid_act}_{idx}",
                                     'tipo': 'live' if es_live_job else 'corte',
                                     'titulo': c.get('titulo') or f"Clip {idx}",
                                     'subtitulo': trabajo_activo.get('titulo') or trabajo_activo.get('url') or 'Smart Split',
@@ -1811,6 +2003,7 @@ class Motor:
                                     'etapa': c.get('etapa') or 'Procesando…',
                                     'thumb_url': thumb_u,
                                     'video_url': f"/api/smart_split_live/video/{idx}?r={st.get('run_id', '')}" if listo else '',
+                                    'accion_cancelar': accion_tr,
                                 })
                             leido_local = bool(vasos)
                 except Exception:
@@ -1824,15 +2017,16 @@ class Motor:
                     )
                     for idx_i, fn_i in enumerate(archivos_imp):
                         vasos.append({
-                            'id': f"remoto_imp_{trabajo_activo['id']}_{idx_i}",
+                            'id': f"remoto_imp_{tid_act}_{idx_i}",
                             'tipo': 'corte',
                             'titulo': f"Clip {idx_i + 1} · ya en tu PC",
                             'subtitulo': trabajo_activo.get('titulo') or 'Colab GPU → PC',
                             'estado': 'listo',
                             'pct': 100,
                             'etapa': 'Importado · listo para subir',
-                            'thumb_url': f"/api/bot/trabajos/{trabajo_activo['id']}/miniatura?n={idx_i}",
-                            'video_url': f"/api/bot/trabajos/{trabajo_activo['id']}/clip?n={idx_i}",
+                            'thumb_url': f"/api/bot/trabajos/{tid_act}/miniatura?n={idx_i}",
+                            'video_url': f"/api/bot/trabajos/{tid_act}/clip?n={idx_i}",
+                            'accion_cancelar': accion_tr,
                         })
             if not leido_local:
                 act = str(self.actividad or '')
@@ -1840,39 +2034,62 @@ class Motor:
                 pct_val = max(8, min(96, int(m_pct.group(1)))) if m_pct else (22 if trabajo_activo.get('estado') == 'descargando' else 48)
                 etapa = act.split('·', 1)[1].strip() if '·' in act else ('Descargando video base' if trabajo_activo.get('estado') == 'descargando' else 'Cortando siguiente clip…')
                 vasos.append({
-                    'id': f"trabajo_{trabajo_activo['id']}",
+                    'id': f"trabajo_{tid_act}",
                     'tipo': 'live' if es_live_job else 'corte',
-                    'titulo': trabajo_activo.get('titulo') or trabajo_activo.get('url') or f"Trabajo #{trabajo_activo['id']}",
+                    'titulo': trabajo_activo.get('titulo') or trabajo_activo.get('url') or f"Trabajo #{tid_act}",
                     'subtitulo': 'Colab GPU' if trabajo_activo.get('remoto_id') else ('Live → Esta PC' if es_live_job else 'Esta PC'),
                     'estado': 'llenando',
                     'pct': pct_val,
                     'etapa': etapa[:72],
                     'thumb_url': thumb_trabajo_base,
                     'video_url': '',
+                    'accion_cancelar': accion_tr,
                 })
-        # Tramos de YouTube Live capturándose o importándose a la cola de la PC
+        # Tramos de YouTube Live realmente en captura activa o esperando turno inmediato de edición
         try:
             if self._lives is not None:
                 live_info = self._lives.state().get('lives') or []
-                ids_activos_v = {trabajo_activo['id']} if trabajo_activo else set()
+                ids_activos_v = {int(trabajo_activo['id'])} if trabajo_activo else set()
+                prep_habilitada = bool(self.cfg.get('activo') and self.cfg.get('modo_cola') != 'solo_subir')
                 agregados_live = 0
                 for ses in live_info:
+                    sesion_activa = ses.get('estado') in ('conectando', 'capturando', 'reconectando', 'deteniendo')
                     for seg_c in (ses.get('clips_recientes') or []):
                         if agregados_live >= 4:
                             break
                         tid_seg = seg_c.get('trabajo_id')
-                        if tid_seg and tid_seg in ids_activos_v:
+                        if tid_seg and int(tid_seg) in ids_activos_v:
                             continue
                         est_seg_l = seg_c.get('estado')
                         if est_seg_l not in ('capturando', 'listo', 'encolado'):
                             continue
-                        if tid_seg:
-                            tr_fila = self.db.trabajo(tid_seg)
-                            if tr_fila and tr_fila.get('estado') == 'listo':
+                        if seg_c.get('capturando_ahora'):
+                            if not sesion_activa:
                                 continue
-                        pct_l = 38 if seg_c.get('capturando_ahora') else (68 if est_seg_l == 'listo' else 82)
-                        etapa_l = ('Capturando señal en vivo…' if seg_c.get('capturando_ahora')
-                                   else 'Importando tramo del live a la PC…')
+                            pct_l = 38
+                            etapa_l = 'Capturando señal en vivo…'
+                            accion_l = {'tipo': 'live_detener', 'sesion': ses['id']}
+                        elif tid_seg:
+                            if not prep_habilitada:
+                                continue
+                            tr_fila = self.db.trabajo(int(tid_seg))
+                            if not tr_fila or tr_fila.get('estado') not in ('pendiente', 'cortando', 'descargando'):
+                                continue
+                            if float(tr_fila.get('proximo_intento') or 0) > ahora + 5:
+                                continue
+                            if tr_fila.get('estado') == 'pendiente':
+                                pct_l = 24
+                                etapa_l = 'En turno para editar en esta PC…'
+                            else:
+                                pct_l = 56
+                                etapa_l = 'Importando tramo del live a la PC…'
+                            accion_l = {'tipo': 'live_segmento', 'sesion': ses['id'], 'nombre': seg_c['nombre']}
+                        else:
+                            if not sesion_activa:
+                                continue
+                            pct_l = 62 if est_seg_l == 'listo' else 74
+                            etapa_l = 'Cerrando tramo del live…' if est_seg_l == 'listo' else 'Pasando tramo a la cola de la PC…'
+                            accion_l = {'tipo': 'live_segmento', 'sesion': ses['id'], 'nombre': seg_c['nombre']}
                         vasos.append({
                             'id': f"live_{ses['id']}_{seg_c['nombre']}",
                             'tipo': 'live',
@@ -1883,6 +2100,7 @@ class Motor:
                             'etapa': etapa_l,
                             'thumb_url': seg_c.get('thumb_url') or '',
                             'video_url': seg_c.get('video_url') or '',
+                            'accion_cancelar': accion_l,
                         })
                         agregados_live += 1
         except Exception:
@@ -1905,6 +2123,7 @@ class Motor:
                     'etapa': 'Publicando en plataforma…',
                     'thumb_url': f"/api/bot/miniatura/{sid}" if s.get('tiene_miniatura') else '',
                     'video_url': f"/api/bot/clip/{sid}" if s.get('archivo_existe') else '',
+                    'accion_cancelar': {'tipo': 'subida', 'id': sid},
                 })
         return vasos
 

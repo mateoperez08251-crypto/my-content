@@ -36,6 +36,7 @@ if MODO_SERVIDOR:
 
 import atexit
 import collections
+import functools
 import datetime
 import faulthandler
 import json
@@ -397,9 +398,9 @@ keyboard_listener = None
 
 # Logs: cola acotada (no crece sin límite si la ventana está oculta).
 _logs_lock = threading.Lock()
-logs_queue = collections.deque(maxlen=5000)
+logs_queue = collections.deque(maxlen=1200 if winproc.es_equipo_baja_ram() else 5000)
 # Envío al dashboard central en un hilo aparte: log() nunca bloquea.
-_dashboard_queue = queue.Queue(maxsize=2000)
+_dashboard_queue = queue.Queue(maxsize=400 if winproc.es_equipo_baja_ram() else 2000)
 
 monitor_running = False
 MONITOR_FILE = paths.data_path("monitor_history.json")
@@ -423,6 +424,7 @@ def _terminar_trabajo():
         automation_status = 'stopped'
         proc, current_subprocess = current_subprocess, None
     winproc.matar_arbol(proc)
+    winproc.compactar_memoria_proceso()
 
 
 _file_logger = None
@@ -932,26 +934,34 @@ def run_automation_thread(data):
         _terminar_trabajo()
 
 
+@functools.lru_cache(maxsize=1)
+def _detectar_gpu_sistema() -> str:
+    if not winproc.ES_WINDOWS:
+        return "Desconocida"
+    try:
+        output = subprocess.check_output(
+            ['powershell', '-NoProfile', '-NonInteractive', '-Command', '(Get-CimInstance Win32_VideoController).Name'],
+            text=True, timeout=12, **winproc.popen_kwargs())
+        gpus = [line.strip() for line in output.split('\n') if line.strip()]
+        return gpus[0] if gpus else "Desconocida"
+    except Exception:
+        return "Desconocida"
+
+
 @app.route("/api/system-specs", methods=["GET"])
 def get_system_specs():
     mem = winproc.estado_memoria()
     ram_gb = mem["ram_total_gb"]
+    low_ram = winproc.es_equipo_baja_ram()
     cpu_cores = os.cpu_count() or 4
-    gpu_name = "Desconocida"
-    if winproc.ES_WINDOWS:
-        try:
-            output = subprocess.check_output(
-                ['powershell', '-Command', '(Get-CimInstance Win32_VideoController).Name'],
-                text=True, timeout=20, **winproc.popen_kwargs())
-            gpus = [line.strip() for line in output.split('\n') if line.strip()]
-            gpu_name = gpus[0] if gpus else "Desconocida"
-        except Exception:
-            pass
+    gpu_name = _detectar_gpu_sistema()
 
     if ram_gb >= 15 and cpu_cores >= 8:
         status, message = "sobrado", "¡Mi loco, vas sobrado! Tu PC es una bestia para Inteligencia Artificial."
     elif ram_gb >= 7.5 and cpu_cores >= 4:
         status, message = "aceptable", "¡Manito, vas bien! Tu PC cumple para correr las IA locales sin problemas."
+    elif low_ram:
+        status, message = "forzado", "Modo ligero 4 GB activado: optimización automática de memoria, video y navegador."
     else:
         status, message = "forzado", "¡Ay mi loco, vas forzado! Te faltan recursos. Tu PC podría trabarse usando IA local."
 
@@ -959,6 +969,7 @@ def get_system_specs():
         "ram_gb": round(ram_gb, 1),
         "ram_libre_gb": round(mem["ram_libre_gb"], 1),
         "commit_libre_gb": round(mem["commit_libre_gb"], 1),
+        "low_ram_mode": low_ram,
         "cpu_cores": cpu_cores,
         "gpu_name": gpu_name,
         "status": status,
@@ -1822,6 +1833,7 @@ def run_smart_split_thread(data):
             "clean_vocals": bool(data.get("clean_vocals", False)),
             "auto_thumbnail": str(data.get("auto_thumbnail", "off") or "off"),
             "strip_metadata": bool(data.get("strip_metadata", True)),
+            "_trabajo_id": data.get("_trabajo_id"),
         }
         if cfg_datos['upscale'] == 'ia':
             from smart_upscale import elegir_python
@@ -1924,6 +1936,12 @@ def run_smart_split_thread(data):
                 return True
             return False
 
+        try:
+            import smart_editor as _se_init
+            _n_init = 1 if (cfg_datos.get("clip_selection") == "sequential" and data.get("_trabajo_id")) else max(1, int(cfg_datos.get("num_clips") or 1))
+            _se_init._iniciar_estado_clips(_n_init, trabajo_id=data.get("_trabajo_id"))
+        except Exception:
+            pass
         cfg = _escribir_config("config_smart", cfg_datos)
         codigo = _ejecutar_subproceso(_cmd_script("smart_editor.py", "--run-smart", "--config", cfg),
                                       leer_smart, config_path=cfg, cancel_checker=cancelado)
@@ -1967,6 +1985,11 @@ def run_smart_split_thread(data):
     except Exception as e:
         log(f"PROCESO SMART SPLIT ABORTADO: {e}")
         _escribir_progreso_smart(f"Error: {e}|-1")
+        try:
+            import smart_editor as _se_abort
+            _se_abort.marcar_estado_clips_abortado(str(e))
+        except Exception:
+            pass
         if data.get("_lanzar_error"):
             raise
     finally:
@@ -2529,6 +2552,28 @@ def bot_live_detener(jid):
     return _bot_respuesta(lambda: _bot().lives().stop(jid))
 
 
+@app.route('/api/bot/lives/<jid>', methods=['DELETE'])
+def bot_live_borrar(jid):
+    return _bot_respuesta(lambda: _bot().lives().delete_session(jid))
+
+
+@app.route('/api/bot/lives/<jid>/segmentos/<nombre>', methods=['DELETE'])
+def bot_live_borrar_segmento(jid, nombre):
+    return _bot_respuesta(lambda: _bot().lives().delete_segment(jid, nombre))
+
+
+@app.route('/api/bot/lives/lote', methods=['POST'])
+def bot_lives_lote():
+    d = request.get_json(silent=True) or {}
+
+    def hacer():
+        mgr = _bot().lives()
+        if d.get('accion') == 'limpiar':
+            return mgr.cleanup_finished()
+        return mgr.delete_batch(d.get('sesiones'), d.get('segmentos'))
+    return _bot_respuesta(hacer)
+
+
 @app.route('/api/bot/lives/<jid>/miniatura/<nombre>', methods=['GET'])
 def bot_live_miniatura(jid, nombre):
     ruta = _bot().lives().resolver_media_segmento(jid, nombre)
@@ -2707,7 +2752,10 @@ def bot_subida_accion(sid, accion):
             return _bot().borrar_subida(sid)
         elif accion == "ok":  # lo revisaste y sí se publicó
             _bot().db.marcar_subida(sid, "ok", error="")
-            _bot()._aviso_subida(_bot().db.subida(sid), 'ok', 'Marcada como publicada por ti desde el panel.', 'publicados', True)
+            sub_ok = _bot().db.subida(sid)
+            if sub_ok and sub_ok.get('trabajo_id'):
+                _bot()._reconciliar_trabajo_live(sub_ok['trabajo_id'])
+            _bot()._aviso_subida(sub_ok, 'ok', 'Marcada como publicada por ti desde el panel.', 'publicados', True)
         else:
             raise ValueError("Acción no válida.")
     return _bot_respuesta(hacer)
@@ -2782,6 +2830,17 @@ def bot_trabajo_accion(tid, accion):
             return _bot().borrar_trabajo(tid)
         else:
             raise ValueError("Acción no válida.")
+    return _bot_respuesta(hacer)
+
+
+@app.route("/api/bot/trabajos/lote", methods=["POST"])
+def bot_trabajos_lote():
+    d = request.get_json(silent=True) or {}
+
+    def hacer():
+        if d.get("accion") == "limpiar":
+            return _bot().limpiar_trabajos_terminados(bool(d.get("incluir_radar", False)))
+        return _bot().borrar_lote_trabajos(d.get("ids"))
     return _bot_respuesta(hacer)
 
 

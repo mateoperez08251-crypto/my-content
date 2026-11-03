@@ -211,65 +211,96 @@ def asegurar_miniatura_video(video, cache_dir=''):
     if os.path.isfile(destino) and os.path.getsize(destino) > 0:
         return destino
 
-    tmp = destino + f'.{os.getpid()}.tmp.jpg'
-    try:
+    sem, baja_ram = _semaforo_miniatura()
+    max_lado = 360 if baja_ram else 640
+    calidad_jpg = 82 if baja_ram else 88
+
+    with sem:
+        if os.path.isfile(destino) and os.path.getsize(destino) > 0:
+            return destino
+        import threading as _th
+        tmp = destino + f'.{os.getpid()}.{_th.get_ident()}.tmp.jpg'
         try:
-            import cv2
-            cap = cv2.VideoCapture(ruta_abs)
-            mejor = None
-            mejor_puntaje = -1.0
             try:
-                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-                for frac in (0.18, 0.35, 0.55, 0.06, 0.0):
-                    if total > 3:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, min(total - 1, int(total * frac))))
-                    ok, frame = cap.read()
-                    if not ok or frame is None or getattr(frame, 'size', 0) == 0:
-                        continue
-                    brillo = float(frame.mean())
-                    if brillo > mejor_puntaje:
-                        mejor = frame
-                        mejor_puntaje = brillo
-                    if brillo >= 22.0:
-                        mejor = frame
-                        break
-            finally:
-                cap.release()
-            if mejor is not None:
-                alto, ancho = mejor.shape[:2]
-                escala = min(1.0, 640.0 / max(ancho, alto, 1))
-                if escala < 0.99:
-                    mejor = cv2.resize(
-                        mejor,
-                        (max(2, int(round(ancho * escala))), max(2, int(round(alto * escala)))),
-                        interpolation=cv2.INTER_AREA,
-                    )
-                if cv2.imwrite(tmp, mejor, [int(cv2.IMWRITE_JPEG_QUALITY), 88]) and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                import cv2
+                cap = cv2.VideoCapture(ruta_abs)
+                mejor = None
+                mejor_puntaje = -1.0
+                try:
+                    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                    muestras = (0.20, 0.42, 0.05) if baja_ram else (0.18, 0.35, 0.55, 0.06, 0.0)
+                    for frac in muestras:
+                        if total > 3:
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, min(total - 1, int(total * frac))))
+                        ok, frame = cap.read()
+                        if not ok or frame is None or getattr(frame, 'size', 0) == 0:
+                            continue
+                        brillo = float(frame.mean())
+                        if brillo > mejor_puntaje:
+                            mejor = frame
+                            mejor_puntaje = brillo
+                        if brillo >= 22.0:
+                            mejor = frame
+                            break
+                finally:
+                    cap.release()
+                if mejor is not None:
+                    alto, ancho = mejor.shape[:2]
+                    escala = min(1.0, float(max_lado) / max(ancho, alto, 1))
+                    if escala < 0.99:
+                        mejor = cv2.resize(
+                            mejor,
+                            (max(2, int(round(ancho * escala))), max(2, int(round(alto * escala)))),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                    if cv2.imwrite(tmp, mejor, [int(cv2.IMWRITE_JPEG_QUALITY), calidad_jpg]) and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                        os.replace(tmp, destino)
+                        return destino
+            except Exception:
+                pass
+
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            sin_ventana = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+            for ss in ('0.8', '0.0'):
+                r = subprocess.run(
+                    [
+                        ffmpeg, '-y', '-loglevel', 'error', '-threads', '1', '-ss', ss, '-i', ruta_abs,
+                        '-frames:v', '1', '-vf', f"scale='min({max_lado},iw)':-2", '-q:v', '4' if baja_ram else '3', tmp,
+                    ],
+                    capture_output=True, timeout=15, creationflags=sin_ventana,
+                )
+                if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
                     os.replace(tmp, destino)
                     return destino
         except Exception:
             pass
-
-        import imageio_ffmpeg
-        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-        sin_ventana = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-        for ss in ('0.8', '0.0'):
-            r = subprocess.run(
-                [
-                    ffmpeg, '-y', '-loglevel', 'error', '-ss', ss, '-i', ruta_abs,
-                    '-frames:v', '1', '-vf', "scale='min(640,iw)':-2", '-q:v', '3', tmp,
-                ],
-                capture_output=True, timeout=15, creationflags=sin_ventana,
-            )
-            if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
-                os.replace(tmp, destino)
-                return destino
-    except Exception:
-        pass
-    finally:
-        if os.path.exists(tmp):
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
     return ''
+
+
+_THUMB_LOCK_INIT = None
+_THUMB_SEM_CACHE = None
+
+
+def _semaforo_miniatura():
+    """Limita decodificaciones simultáneas de miniaturas (1 a la vez en PCs de 4 GB RAM)."""
+    global _THUMB_LOCK_INIT, _THUMB_SEM_CACHE
+    import threading
+    if _THUMB_LOCK_INIT is None:
+        _THUMB_LOCK_INIT = threading.Lock()
+    try:
+        import winproc
+        baja = winproc.es_equipo_baja_ram()
+    except Exception:
+        baja = False
+    cupo = 1 if baja else 2
+    with _THUMB_LOCK_INIT:
+        if _THUMB_SEM_CACHE is None or _THUMB_SEM_CACHE[0] != cupo:
+            _THUMB_SEM_CACHE = (cupo, threading.BoundedSemaphore(cupo))
+        return _THUMB_SEM_CACHE[1], baja
