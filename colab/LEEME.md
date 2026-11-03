@@ -41,3 +41,9 @@ Validación local: `python -m unittest discover -s tests -p 'test_colab_notebook
 - La celda **5C** instala y verifica **LR-ASD** para detectar quién habla realmente en cámara usando GPUs con CUDA 12.6+ (`cu126` o `cu128`).
 - Para narrar el **Modo Comentario IA** con tu voz clonada sin activar doblaje multipersona ni pedir `HF_TOKEN`, pon `PREPARAR_VOZ_CLONADA = True` en la celda `1`.
 - Para aislar la voz limpia con Demucs (`Quitar música original`) o preservar fondo, activa `PREPARAR_FONDO = True` en la celda `1`.
+
+
+## Seguimiento del hablante con audio y video
+
+La nueva [libreta LR-ASD](My_Content_Colab_seguimiento.ipynb) prepara el seguimiento en la celda **5C**. Se activa en Caras/Zoom dinámico con Equilibrado o Pro. No necesita token de Hugging Face para seguir al hablante visible. Consulta [instalación, pruebas y límites](SEGUIMIENTO.md). La calidad real con tus videos y G4 queda pendiente de medir.
+

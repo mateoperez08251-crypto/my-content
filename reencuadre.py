@@ -189,8 +189,8 @@ def _asignar(pistas, caras, t):
     """Asociación uno a uno en dos etapas: pistas activas (<= 0.85 s) y reidentificación corta (<= 1.85 s)."""
     assigned, used = {}, set()
     for max_age, min_age, dist_mult, max_ratio in (
-        (0.85, -1.0, 0.85, 2.05),
-        (1.85, 0.85, 1.25, 2.25),
+        (0.65, -1.0, 0.85, 2.0),
+        (0.95, 0.65, 1.15, 2.0),
     ):
         pairs = []
         for p in pistas:

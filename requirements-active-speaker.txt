@@ -1,0 +1,6 @@
+# Optional LR-ASD runtime, separate from the app, diarization and voice runtimes.
+# First install torch==2.8.0 from the cu128 index (see colab/SEGUIMIENTO.md).
+numpy>=1.26,<2
+opencv-python-headless>=4.8,<4.12
+scipy>=1.11,<2
+python_speech_features==0.6
