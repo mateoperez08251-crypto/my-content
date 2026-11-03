@@ -236,10 +236,15 @@ def _escribir_estado_clips_json():
         pass
 
 
-def _iniciar_estado_clips(num_estimado=1):
+def _iniciar_estado_clips(num_estimado=1, trabajo_id=None):
     global _CLIPS_RUNTIME
     import time as _time
     n = max(1, min(24, int(num_estimado or 1)))
+    tid_env = trabajo_id if trabajo_id is not None else os.environ.get("CONTENTAPP_TRABAJO_ID", "")
+    try:
+        tid_val = int(tid_env) if str(tid_env).strip() else None
+    except (TypeError, ValueError):
+        tid_val = None
     try:
         os.makedirs(LIVE_PREVIEW_DIR, exist_ok=True)
         for fn in os.listdir(LIVE_PREVIEW_DIR):
@@ -252,6 +257,7 @@ def _iniciar_estado_clips(num_estimado=1):
         pass
     _CLIPS_RUNTIME = {
         "run_id": str(int(_time.time() * 1000)),
+        "trabajo_id": tid_val,
         "updated_at": _time.time(),
         "global_pct": 2,
         "stage": "Iniciando Smart Split...",
@@ -373,7 +379,7 @@ def write_progress(msg, percent=0):
             actual = int(_CLIPS_RUNTIME.get("clip_actual") or 0)
             if pct_num == -1:
                 for c in clips:
-                    if c.get("estado") in ("preparando", "llenando"):
+                    if c.get("estado") in ("preparando", "esperando", "llenando"):
                         c["estado"] = "error"
                         c["etapa"] = str(msg or "Error")[:120]
             elif pct_num >= 100:
@@ -401,6 +407,31 @@ def write_progress(msg, percent=0):
                     if etapa_limpia:
                         c["etapa"] = etapa_limpia[:68]
             _escribir_estado_clips_json()
+    except Exception:
+        pass
+
+
+def marcar_estado_clips_abortado(mensaje="Proceso detenido"):
+    """Si el subproceso muere o se cancela a mitad (ej. 83%), marca los vasos pendientes como error en disco."""
+    import time as _time
+    try:
+        if not os.path.isfile(CLIPS_STATE_FILE):
+            return
+        with open(CLIPS_STATE_FILE, "r", encoding="utf-8") as f:
+            st = json.load(f)
+        if not isinstance(st, dict):
+            return
+        st["global_pct"] = -1
+        st["stage"] = str(mensaje or "Proceso detenido")[:160]
+        st["updated_at"] = _time.time()
+        for c in (st.get("clips") or []):
+            if c.get("estado") in ("preparando", "esperando", "llenando"):
+                c["estado"] = "error"
+                c["etapa"] = str(mensaje or "Proceso detenido")[:120]
+        tmp = CLIPS_STATE_FILE + f".{os.getpid()}.abort.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False)
+        os.replace(tmp, CLIPS_STATE_FILE)
     except Exception:
         pass
 
@@ -494,6 +525,14 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
     seleccion_opciones = dict(moment_focus=moment_focus, context_before_seconds=context_before_seconds, moment_query=moment_query)
     motor = cv.MOTORES.get(motor_ia, cv.MOTORES["pro"])
+    _baja_ram_local = False
+    try:
+        import winproc as _wp
+        _baja_ram_local = _wp.es_equipo_baja_ram()
+        if _baja_ram_local:
+            cv2.setNumThreads(2)
+    except Exception:
+        pass
     _fn_init_clips = globals().get("_iniciar_estado_clips")
     if callable(_fn_init_clips):
         _fn_init_clips(num_clips if clip_selection == "ai" else max(1, int(num_clips or 3)))
@@ -1082,17 +1121,33 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                 processed_clip = processed_clip.with_audio(audio_ref)
 
                 import gpu_video
+                _preset_cpu_map = {"quality": "veryfast" if _baja_ram_local else "slow", "balanced": "veryfast", "fast": "ultrafast"}
                 opciones = gpu_video.opciones_moviepy(
                     calidad="maxima" if export_profile == "quality" else "alta",
-                    preset_cpu={"quality": "slow", "balanced": "veryfast", "fast": "ultrafast"}[export_profile])
+                    preset_cpu=_preset_cpu_map[export_profile])
+                if _baja_ram_local and opciones.get("codec") == "libx264":
+                    _ffp = list(opciones.get("ffmpeg_params") or [])
+                    if "-x264-params" not in _ffp:
+                        _ffp += ["-x264-params", "rc-lookahead=10:ref=2:sync-lookahead=4"]
+                    opciones = {**opciones, "ffmpeg_params": _ffp}
                 if idx == 0:
-                    print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}")
+                    print(f"Codificando con {'GPU (NVENC)' if opciones['codec'] == 'h264_nvenc' else 'CPU (libx264)'}"
+                          + (" [modo ligero 4 GB RAM]" if _baja_ram_local and opciones.get('codec') == 'libx264' else ""))
+                _hilos_encode = 2 if _baja_ram_local else max(2, os.cpu_count() or 2)
                 processed_clip.write_videofile(
                     out_name, audio_codec="aac", audio_bitrate="320k" if export_profile == "quality" else "192k",
-                    threads=max(2, os.cpu_count() or 2),
+                    threads=_hilos_encode,
                     logger=ProgresoRender(write_progress, f"Exportando clip {parte_num} de {len(seleccion)}",
                                           p0 + tramo * (.75 if upscale == "ia" else .35), p0 + tramo * .94),
                     fps=min(subclip.fps, 30) if export_profile == "fast" else subclip.fps, **opciones)
+                try:
+                    processed_clip.close()
+                except Exception:
+                    pass
+                try:
+                    subclip.close()
+                except Exception:
+                    pass
                 if denoise_audio:
                     _limpiar_audio(out_name)
 
@@ -1164,6 +1219,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         ensure_ascii=False), flush=True)
                 except Exception:
                     pass
+                try:
+                    import winproc as _wp_gc
+                    _wp_gc.compactar_memoria_proceso()
+                except Exception:
+                    pass
 
         write_progress("¡Proceso finalizado con éxito!", 100)
         print("¡Proceso finalizado!")
@@ -1172,7 +1232,14 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         try:
             speaker_resources.close()
         finally:
-            original.close()
+            try:
+                original.close()
+            finally:
+                try:
+                    import winproc as _wp_end
+                    _wp_end.compactar_memoria_proceso(forzar=True)
+                except Exception:
+                    pass
 
 
 def _mezclar_en_video(video, musica, vol, eventos, duracion, audio_mix, ambiente_tipo="", semilla=0, strip_metadata=True):
@@ -1250,6 +1317,8 @@ def main(argv):
     if len(argv) >= 2 and argv[0] == "--config":
         with open(argv[1], "r", encoding="utf-8") as f:
             cfg = json.load(f)
+        if cfg.get("_trabajo_id") is not None:
+            os.environ["CONTENTAPP_TRABAJO_ID"] = str(cfg["_trabajo_id"])
         meta = []
         try:
             rutas = process_smart_split(

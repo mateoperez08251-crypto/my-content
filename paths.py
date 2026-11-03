@@ -53,6 +53,28 @@ for _d in (DATA_DIR, TEMP_DIR, LOGS_DIR):
     os.makedirs(_d, exist_ok=True)
 
 
+def asegurar_temp_con_espacio(min_libre_bytes: int = 2 * 1024 ** 3) -> str:
+    """Si %TEMP% tiene poco espacio (ej. unidad C: casi llena y sin margen para paginación),
+    redirige temporales de Python/FFmpeg/MoviePy a TEMP_DIR si tiene más espacio libre."""
+    import tempfile
+
+    try:
+        actual = tempfile.gettempdir()
+        libre_actual = shutil.disk_usage(actual).free
+        libre_datos = shutil.disk_usage(TEMP_DIR).free
+        if libre_actual < min_libre_bytes and libre_datos > max(libre_actual + 256 * 1024 ** 2, 512 * 1024 ** 2):
+            for clave in ("TMP", "TEMP", "TMPDIR"):
+                os.environ[clave] = TEMP_DIR
+            tempfile.tempdir = None
+            return TEMP_DIR
+        return actual
+    except OSError:
+        return TEMP_DIR
+
+
+asegurar_temp_con_espacio()
+
+
 def data_path(*partes: str) -> str:
     return os.path.join(DATA_DIR, *partes)
 

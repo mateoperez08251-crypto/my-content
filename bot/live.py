@@ -499,13 +499,214 @@ class LiveManager:
                 self.db._q("UPDATE live_segmentos SET estado='encolado',trabajo_id=? WHERE sesion=? AND nombre=?",
                            (tid,segment['sesion'],segment['nombre']))
                 self.motor.despertar()
-            for segment in self.db._todos("SELECT s.* FROM live_segmentos s JOIN trabajos t ON t.id=s.trabajo_id WHERE s.estado='encolado' AND t.estado='listo'"):
+            for segment in self.db._todos(
+                "SELECT s.sesion, s.nombre, s.archivo, s.estado, s.trabajo_id, "
+                "t.id AS tid_real, t.estado AS t_estado "
+                "FROM live_segmentos s LEFT JOIN trabajos t ON t.id=s.trabajo_id "
+                "WHERE s.trabajo_id IS NOT NULL AND s.estado IN ('encolado','procesado')"
+            ):
+                tid = int(segment['trabajo_id'])
+                t_real = segment.get('tid_real')
+                t_est = segment.get('t_estado')
+                if t_real is None:
+                    res_sub = self.db.estado_subidas_trabajo(tid)
+                    nuevo_est = 'subido' if (res_sub['total'] > 0 and res_sub['ok'] == res_sub['total']) else 'retirado'
+                    try:
+                        Path(segment['archivo']).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    if res_sub['en_vuelo'] == 0:
+                        shutil.rmtree(Path(self.motor.carpeta, 'bot_clips', f'trabajo_{tid}'), ignore_errors=True)
+                    self.db._q('UPDATE live_segmentos SET estado=? WHERE sesion=? AND nombre=?',
+                               (nuevo_est, segment['sesion'], segment['nombre']))
+                elif t_est == 'listo':
+                    try:
+                        Path(segment['archivo']).unlink(missing_ok=True)
+                    except OSError:
+                        continue
+                    res_sub = self.db.estado_subidas_trabajo(tid)
+                    if res_sub['total'] > 0 and res_sub['ok'] == res_sub['total']:
+                        shutil.rmtree(Path(self.motor.carpeta, 'bot_clips', f'trabajo_{tid}'), ignore_errors=True)
+                        self.db._q("UPDATE live_segmentos SET estado='subido' WHERE sesion=? AND nombre=?",
+                                   (segment['sesion'], segment['nombre']))
+                    elif res_sub['total'] == 0:
+                        shutil.rmtree(Path(self.motor.carpeta, 'bot_clips', f'trabajo_{tid}'), ignore_errors=True)
+                        self.db._q("UPDATE live_segmentos SET estado='retirado' WHERE sesion=? AND nombre=?",
+                                   (segment['sesion'], segment['nombre']))
+                    elif segment['estado'] == 'encolado':
+                        self.db._q("UPDATE live_segmentos SET estado='procesado' WHERE sesion=? AND nombre=?",
+                                   (segment['sesion'], segment['nombre']))
+                elif t_est in ('error', 'omitido', 'sin_destino') and segment['estado'] == 'encolado':
+                    nuevo_est = 'error' if t_est == 'error' else 'omitido'
+                    self.db._q('UPDATE live_segmentos SET estado=? WHERE sesion=? AND nombre=?',
+                               (nuevo_est, segment['sesion'], segment['nombre']))
+            for ses in self.db._todos("SELECT id, detalle FROM live_sesiones WHERE estado IN ('detenido','finalizado','interrumpido')"):
+                pend_n = self.db._uno(
+                    "SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=? AND estado IN ('listo','encolado','procesado')",
+                    (ses['id'],),
+                )['n']
+                tot_n = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=?', (ses['id'],))['n']
+                det = ses.get('detalle') or ''
+                if tot_n > 0 and pend_n == 0 and ('cola' in det.lower() or 'procesándose' in det.lower()):
+                    self.db._q(
+                        'UPDATE live_sesiones SET detalle=? WHERE id=?',
+                        ('Todos los clips de esta captura ya se subieron o retiraron.', ses['id']),
+                    )
+
+    def _limpiar_trabajo_live(self, tid):
+        if not tid:
+            return
+        tid_int = int(tid)
+        try:
+            self.motor.borrar_trabajo(tid_int)
+        except Exception:
+            self.db.borrar_trabajo(tid_int)
+        res_sub = self.db.estado_subidas_trabajo(tid_int)
+        if res_sub['en_vuelo'] == 0:
+            shutil.rmtree(Path(self.motor.carpeta, 'bot_clips', f'trabajo_{tid_int}'), ignore_errors=True)
+
+    def _podar_manifiestos(self, carpeta_sesion: Path, nombres_borrar: set[str]):
+        if not carpeta_sesion.is_dir() or not nombres_borrar:
+            return
+        for mf in carpeta_sesion.glob('*.csv'):
+            try:
+                lineas = mf.read_text(encoding='utf-8').splitlines(keepends=True)
+                conservadas = [
+                    ln for ln in lineas
+                    if not (ln.strip() and ln.split(',', 1)[0].strip() in nombres_borrar)
+                ]
+                if len(conservadas) != len(lineas):
+                    mf.write_text(''.join(conservadas), encoding='utf-8')
+            except OSError:
+                pass
+
+    def delete_segment(self, jid, nombre):
+        jid_str = str(jid or '').strip()
+        nom_str = str(nombre or '').strip()
+        if not re.fullmatch(r'[a-f0-9]{16}', jid_str) or not re.fullmatch(r'[a-f0-9]{8}_\d{6}\.(?:mp4|mkv)', nom_str):
+            raise LiveError('Segmento de live no válido.')
+        with self.lock:
+            fila = self.db._uno('SELECT trabajo_id, archivo FROM live_segmentos WHERE sesion=? AND nombre=?', (jid_str, nom_str))
+            if not fila:
+                raise LiveError('El clip de live ya no existe.')
+            if fila.get('trabajo_id'):
+                self._limpiar_trabajo_live(fila['trabajo_id'])
+            carpeta_s = (self.root / jid_str).resolve()
+            if os.path.commonpath([str(self.root), str(carpeta_s)]) == str(self.root):
                 try:
-                    Path(segment['archivo']).unlink(missing_ok=True)
+                    (carpeta_s / nom_str).unlink(missing_ok=True)
                 except OSError:
+                    pass
+                self._podar_manifiestos(carpeta_s, {nom_str})
+            self._audio_revisados.discard((jid_str, nom_str))
+            self.db._q('DELETE FROM live_segmentos WHERE sesion=? AND nombre=?', (jid_str, nom_str))
+        return {'borrado': True, 'sesion': jid_str, 'nombre': nom_str}
+
+    def delete_session(self, jid):
+        jid_str = str(jid or '').strip()
+        if not re.fullmatch(r'[a-f0-9]{16}', jid_str):
+            raise LiveError('Sesión de live no válida.')
+        thread_to_join = None
+        with self.lock:
+            row = self.db._uno('SELECT estado FROM live_sesiones WHERE id=?', (jid_str,))
+            if row is None:
+                raise LiveError('Live no encontrado.')
+            ev = self.events.get(jid_str)
+            if ev is not None:
+                ev.set()
+            if row['estado'] in ACTIVE:
+                self.db._q("UPDATE live_sesiones SET estado='deteniendo',detalle='Eliminando sesión de live…',actualizado=? WHERE id=?",
+                           (time.time(), jid_str))
+                thread_to_join = self.threads.get(jid_str)
+        if thread_to_join is not None and thread_to_join is not threading.current_thread():
+            thread_to_join.join(4.0)
+        with self.lock:
+            tids = {
+                int(r['trabajo_id'])
+                for r in self.db._todos('SELECT trabajo_id FROM live_segmentos WHERE sesion=? AND trabajo_id IS NOT NULL', (jid_str,))
+            }
+            tids.update(
+                int(r['id'])
+                for r in self.db._todos('SELECT id FROM trabajos WHERE clave LIKE ?', (f'live:{jid_str}:%',))
+            )
+            for tid in tids:
+                self._limpiar_trabajo_live(tid)
+            self.db._q('DELETE FROM live_segmentos WHERE sesion=?', (jid_str,))
+            self.db._q('DELETE FROM live_sesiones WHERE id=?', (jid_str,))
+            self.events.pop(jid_str, None)
+            self.threads.pop(jid_str, None)
+            self._audio_revisados = {par for par in self._audio_revisados if par[0] != jid_str}
+            carpeta_s = (self.root / jid_str).resolve()
+            if os.path.commonpath([str(self.root), str(carpeta_s)]) == str(self.root):
+                shutil.rmtree(carpeta_s, ignore_errors=True)
+        return {'borrada': True, 'id': jid_str}
+
+    def delete_batch(self, session_ids=None, segments=None):
+        ses_lista = session_ids if isinstance(session_ids, list) else []
+        seg_lista = segments if isinstance(segments, list) else []
+        if not ses_lista and not seg_lista:
+            raise LiveError('Selecciona al menos un live o un clip para eliminar.')
+        if len(ses_lista) > 100 or len(seg_lista) > 300:
+            raise LiveError('Demasiados elementos seleccionados de una vez.')
+        ses_borradas = set()
+        seg_borrados = 0
+        for jid in dict.fromkeys(str(x or '').strip() for x in ses_lista if x):
+            try:
+                self.delete_session(jid)
+                ses_borradas.add(jid)
+            except LiveError:
+                pass
+        for item in seg_lista:
+            if not isinstance(item, dict):
+                continue
+            jid = str(item.get('sesion') or '').strip()
+            nom = str(item.get('nombre') or '').strip()
+            if not jid or not nom or jid in ses_borradas:
+                continue
+            try:
+                self.delete_segment(jid, nom)
+                seg_borrados += 1
+            except LiveError:
+                pass
+        return {'sesiones_borradas': len(ses_borradas), 'segmentos_borrados': seg_borrados}
+
+    def cleanup_finished(self):
+        """Limpia de una pasada clips de live ya subidos/retirados/sin audio y sesiones terminadas sin cola activa."""
+        self.reconcile()
+        seg_borrados = 0
+        ses_borradas = 0
+        candidatos_seg = self.db._todos(
+            "SELECT sesion, nombre, trabajo_id, estado FROM live_segmentos "
+            "WHERE estado IN ('subido','retirado','omitido','sin_audio','audio_no_verificado','error','procesado')"
+        )
+        for seg in candidatos_seg:
+            est = seg['estado']
+            if est in ('procesado', 'error') and seg.get('trabajo_id'):
+                res_sub = self.db.estado_subidas_trabajo(seg['trabajo_id'])
+                tr = self.db.trabajo(seg['trabajo_id'])
+                # Conservar si todavía tiene subidas pendientes/activas o si el trabajo está activo.
+                if res_sub['activas'] > 0 and not (res_sub['total'] > 0 and res_sub['ok'] == res_sub['total']):
+                    if est == 'procesado':
+                        continue
+                if tr and tr.get('estado') in ('pendiente', 'cortando', 'descargando', 'esperando_remoto'):
                     continue
-                self.db._q("UPDATE live_segmentos SET estado='procesado' WHERE sesion=? AND nombre=?",
-                           (segment['sesion'],segment['nombre']))
+            try:
+                self.delete_segment(seg['sesion'], seg['nombre'])
+                seg_borrados += 1
+            except LiveError:
+                pass
+        sesiones_inactivas = self.db._todos(
+            "SELECT id, estado FROM live_sesiones WHERE estado NOT IN ('conectando','capturando','reconectando','deteniendo')"
+        )
+        for ses in sesiones_inactivas:
+            restantes = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=?', (ses['id'],))['n']
+            if restantes == 0:
+                try:
+                    self.delete_session(ses['id'])
+                    ses_borradas += 1
+                except LiveError:
+                    pass
+        return {'sesiones_borradas': ses_borradas, 'segmentos_borrados': seg_borrados}
 
     def _reconcile_loop(self):
         while not self.stop_all.wait(1):
@@ -544,7 +745,8 @@ class LiveManager:
             cfg = json.loads(self.db._uno('SELECT config FROM live_sesiones WHERE id=?', (jid,))['config'])
             item.update(mode=cfg['mode'], seconds=cfg['seconds'], window=cfg['window'], accounts=cfg['accounts'])
             filas_seg = self.db._todos(
-                'SELECT nombre,inicio,fin,estado,trabajo_id FROM live_segmentos WHERE sesion=? ORDER BY inicio DESC LIMIT 8',
+                "SELECT nombre,inicio,fin,estado,trabajo_id FROM live_segmentos "
+                "WHERE sesion=? ORDER BY (estado IN ('subido','retirado')) ASC, inicio DESC LIMIT 8",
                 (jid,),
             )
             conocidos = {r['nombre'] for r in filas_seg}
@@ -561,11 +763,13 @@ class LiveManager:
                             continue
                         if st.st_size >= 65536:
                             clips_live.append({
+                                'sesion': jid,
                                 'nombre': f_abierto.name,
                                 'duracion': 0.0,
                                 'estado': 'capturando',
                                 'trabajo_id': None,
                                 'capturando_ahora': True,
+                                'eliminable': False,
                                 'disponible': True,
                                 'thumb_url': f"/api/bot/lives/{jid}/miniatura/{f_abierto.name}?t={int(st.st_mtime)}",
                                 'video_url': '',
@@ -576,11 +780,13 @@ class LiveManager:
                 disp = bool(ruta_ok)
                 dur = round(max(0.0, float(seg['fin']) - float(seg['inicio'])), 1)
                 clips_live.append({
+                    'sesion': jid,
                     'nombre': seg['nombre'],
                     'duracion': dur,
                     'estado': seg['estado'],
                     'trabajo_id': seg['trabajo_id'],
                     'capturando_ahora': False,
+                    'eliminable': True,
                     'disponible': disp,
                     'thumb_url': f"/api/bot/lives/{jid}/miniatura/{seg['nombre']}" if disp else '',
                     'video_url': f"/api/bot/lives/{jid}/clip/{seg['nombre']}" if disp else '',
