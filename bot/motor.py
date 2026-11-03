@@ -1372,8 +1372,19 @@ class Motor:
         return {'mensaje': mensaje}
 
     def borrar_lote_subidas(self, ids):
+        tids = set()
+        if isinstance(ids, (list, tuple)):
+            for raw in ids:
+                try:
+                    sub = self.db.subida(int(raw))
+                    if sub and sub.get('trabajo_id'):
+                        tids.add(int(sub['trabajo_id']))
+                except (TypeError, ValueError):
+                    pass
         with self._cola_lock:
             resultado = self.db.borrar_lote(ids)
+        for tid in tids:
+            self._reconciliar_trabajo_live(tid)
         self.despertar()
         return resultado
 

@@ -290,17 +290,40 @@ dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
 }
 .vaso-play:hover{background:var(--acento-azul);transform:scale(1.08)}
 .vaso-pie{font-size:11.5px;font-weight:600;color:#fff;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 2px 6px rgba(0,0,0,.7)}
-.live-clips-tira{display:flex;gap:8px;overflow-x:auto;padding:8px 0 2px;scrollbar-width:thin}
-.live-seg-card{
-  position:relative;width:62px;height:108px;flex:0 0 62px;border-radius:12px;overflow:hidden;
-  background:linear-gradient(155deg,#131b2c,#080c15);border:1px solid rgba(255,255,255,.15);
-  box-shadow:0 6px 16px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.12)
+.vaso-cerrar{
+  width:22px;height:22px;border-radius:50%;padding:0;font-size:11px;line-height:1;
+  background:rgba(8,12,22,.76);border:1px solid rgba(255,255,255,.22);color:#f8fafc;
+  display:inline-flex;align-items:center;justify-content:center;flex:0 0 22px
 }
+.vaso-cerrar:hover:not(:disabled){background:rgba(255,69,58,.85);border-color:#ff6961;color:#fff;transform:scale(1.06)}
+.live-toolbar,.trabajos-toolbar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  background:rgba(255,255,255,.03);padding:8px 11px;border-radius:12px;border:1px solid var(--borde);margin-top:8px
+}
+.chk-fila{width:16px;height:16px;padding:0;margin:0;cursor:pointer;accent-color:#0a84ff;flex:0 0 16px;box-shadow:none}
+.live-clips-tira{display:flex;gap:8px;overflow-x:auto;padding:8px 0 4px;scrollbar-width:thin}
+.live-seg-card{
+  position:relative;width:74px;height:122px;flex:0 0 74px;border-radius:12px;overflow:hidden;
+  background:linear-gradient(155deg,#131b2c,#080c15);border:1px solid rgba(255,255,255,.15);
+  box-shadow:0 6px 16px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.12);transition:border-color .2s ease,opacity .2s ease
+}
+.live-seg-card.es-subido{opacity:.72;border-color:rgba(48,209,88,.45)}
+.live-seg-card.es-retirado{opacity:.58;border-color:rgba(148,163,184,.3)}
+.live-seg-card.es-error{border-color:rgba(255,69,58,.5)}
+.live-seg-card.seleccionado{border-color:var(--acento);box-shadow:0 0 0 2px rgba(10,132,255,.45)}
 .live-seg-card img{width:100%;height:100%;object-fit:cover;display:block}
 .live-seg-fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(10,132,255,.32),rgba(48,209,88,.45));pointer-events:none;transition:height .5s var(--spring)}
-.live-seg-badge{position:absolute;top:4px;left:4px;right:4px;font-size:9.5px;font-weight:700;padding:2px 5px;border-radius:99px;background:rgba(6,10,18,.74);color:#f8fafc;text-align:center;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.live-seg-foot{position:absolute;left:4px;right:4px;bottom:4px;font-size:9.5px;font-weight:600;color:#fff;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,.85)}
-.live-seg-play{position:absolute;inset:0;border:0;border-radius:0;padding:0;background:rgba(6,10,18,.18);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+.live-seg-top{position:absolute;top:4px;left:4px;right:4px;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:3px;pointer-events:none}
+.live-seg-chk{pointer-events:auto;width:14px;height:14px;padding:0;margin:0;cursor:pointer;accent-color:#0a84ff;box-shadow:none;border-radius:4px}
+.live-seg-del{
+  pointer-events:auto;width:18px;height:18px;padding:0;border-radius:50%;font-size:10px;line-height:1;
+  background:rgba(8,12,22,.82);border:1px solid rgba(255,255,255,.22);color:#f8fafc;
+  display:inline-flex;align-items:center;justify-content:center;margin-left:auto
+}
+.live-seg-del:hover:not(:disabled){background:rgba(255,69,58,.88);border-color:#ff6961;color:#fff;transform:none}
+.live-seg-badge{position:absolute;bottom:20px;left:4px;right:4px;z-index:2;font-size:9px;font-weight:700;padding:2px 4px;border-radius:99px;background:rgba(6,10,18,.78);color:#f8fafc;text-align:center;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.live-seg-foot{position:absolute;left:4px;right:4px;bottom:4px;z-index:2;font-size:9.5px;font-weight:600;color:#fff;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,.85);pointer-events:none}
+.live-seg-play{position:absolute;inset:0;z-index:1;border:0;border-radius:0;padding:0;background:rgba(6,10,18,.18);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
 .live-seg-play:hover{background:rgba(10,132,255,.4);transform:none}
 
 /* Tarjetas de cola de subidas con Miniatura 9:16 Visible */
@@ -380,6 +403,12 @@ dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
 #vista-rapida-dialog{width:min(430px,94vw);padding:0;overflow:hidden}
 .cola-toolbar{background:rgba(255,255,255,.03);padding:9px 12px;border-radius:13px;border:1px solid var(--borde);margin-top:10px}
 
+body.modo-ligero-ram::before,body.modo-ligero-ram::after,body.modo-ligero-ram .vaso-olas,body.modo-ligero-ram .vaso-burbujas{display:none!important}
+body.modo-ligero-ram header,body.modo-ligero-ram .bot-nav-wrap,body.modo-ligero-ram .card,body.modo-ligero-ram .metrica,body.modo-ligero-ram .vaso-liquido,body.modo-ligero-ram .vaso-chip,body.modo-ligero-ram .vaso-play,body.modo-ligero-ram .clip-thumb-play span,body.modo-ligero-ram .live-seg-badge,body.modo-ligero-ram #toast,body.modo-ligero-ram dialog.cookies-dialog,body.modo-ligero-ram #texto-dialog,body.modo-ligero-ram #vista-rapida-dialog,body.modo-ligero-ram dialog::backdrop{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+body.modo-ligero-ram header,body.modo-ligero-ram .bot-nav-wrap{background:#0b0f19}
+body.modo-ligero-ram .card,body.modo-ligero-ram .metrica{background:#111623;box-shadow:0 4px 12px rgba(0,0,0,.35)}
+body.modo-ligero-ram .vista-panel.activa{animation:none!important}
+
 @media(prefers-reduced-motion:reduce){
   .vaso-ola,.vaso-burbujas i,.vista-panel.activa{animation:none!important}
   .vaso-liquido,.vaso-clip,button,.publicacion{transition:none!important}
@@ -396,6 +425,7 @@ dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
 <body>
 <header>
   <h1><img src="/static/icons/bot.svg" width="26" height="26" alt=""> Bot de subida</h1>
+  <span id="badge-ram-ligero" class="est e-ok" hidden title="Modo optimizado para 4 GB de RAM: menos uso de GPU, navegador ligero y miniaturas secuenciales">⚡ Modo ligero 4 GB</span>
   <div id="actividad">Cargando…</div>
   <label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Encendido</label>
   <button type="button" id="btn-bot-inmersivo" class="solo-embed" onclick="alternarModoInmersivoBot()" title="Ocultar o mostrar la barra lateral del programa">
@@ -583,7 +613,14 @@ dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
         <p class="muted">Para lives, guarda las cookies en «Esta PC», aunque tengas Colab conectado. Se comparten con Smart Split y los enlaces.</p>
         <p id="live-mode-hint" class="muted">Cortes de duración aproximada, según los fotogramas clave de la señal.</p>
       </details>
-      <div class="tabla-scroll" style="margin-top:8px"><table><thead><tr><th>Transmisión</th><th>Captura</th><th>Segmentos</th><th></th></tr></thead><tbody id="lives"></tbody></table></div>
+      <div class="live-toolbar" id="live-toolbar">
+        <button type="button" class="mini" onclick="seleccionarTodoLive(true)">Seleccionar todo</button>
+        <button type="button" class="mini" onclick="seleccionarTodoLive(false)">Quitar selección</button>
+        <button type="button" class="mini peligro" id="live-borrar-lote" onclick="borrarSeleccionLive()" disabled><i class="ph ph-trash"></i> Eliminar seleccionados</button>
+        <button type="button" class="mini" id="live-limpiar-btn" onclick="limpiarLivesTerminados()" title="Retira sesiones finalizadas y clips de live que ya se subieron"><i class="ph ph-broom"></i> Limpiar ya subidos / terminados</button>
+        <span id="live-sel-resumen" class="muted" aria-live="polite" style="margin-left:auto">0 seleccionados</span>
+      </div>
+      <div class="tabla-scroll" style="margin-top:8px"><table><thead><tr><th style="width:28px"></th><th>Transmisión</th><th>Captura</th><th>Segmentos y clips</th><th></th></tr></thead><tbody id="lives"></tbody></table></div>
     </section>
 
     <section class="card col-6" style="order:1">
@@ -631,6 +668,10 @@ dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
         <div><label for="estimacion_subida_min">Tiempo subida est. (min)</label><input id="estimacion_subida_min" type="number" min="0.1" max="180" step="0.5"></div>
         <div><label>Navegador</label><select id="navegador"><option value="auto">Automático (Brave › Chrome › Edge)</option>
           <option value="brave">Brave</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
+        <div><label for="ahorro_ram">Optimización RAM (4 GB)</label><select id="ahorro_ram">
+          <option value="auto">Automática (activa en ≤ 5.5 GB RAM)</option>
+          <option value="si">Forzar ahorro máximo (4 GB RAM)</option>
+          <option value="no">Desactivada (máximo paralelismo)</option></select></div>
       </div>
       <div class="fila" style="margin-top:12px">
         <label class="switch"><input type="checkbox" id="radar_auto"> Radar PC → cola</label>
@@ -713,7 +754,14 @@ dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
 
     <section class="card col-7">
       <h2><i class="ph-duotone ph-film-reel"></i> Videos preparándose <small id="res-trabajos"></small></h2>
-      <div class="tabla-scroll"><table><thead><tr><th>Video</th><th>Origen</th><th>Estado</th><th></th></tr></thead>
+      <div class="trabajos-toolbar" id="trabajos-toolbar">
+        <button type="button" class="mini" onclick="seleccionarTrabajosVisibles(true)">Seleccionar visibles</button>
+        <button type="button" class="mini" onclick="seleccionarTrabajosVisibles(false)">Limpiar</button>
+        <button type="button" class="mini peligro" id="trabajos-borrar-lote" onclick="borrarTrabajosSeleccionados()" disabled><i class="ph ph-trash"></i> Eliminar seleccionados</button>
+        <button type="button" class="mini" onclick="limpiarTrabajosTerminados()" title="Limpia trabajos terminados y libera carpetas temporales"><i class="ph ph-broom"></i> Limpiar terminados</button>
+        <label class="switch" style="margin-left:auto;font-size:11.5px"><input type="checkbox" id="trabajos-ver-historial" onchange="if(E)pintar()"> Ver terminados/omitidos</label>
+      </div>
+      <div class="tabla-scroll" style="margin-top:8px"><table><thead><tr><th style="width:28px"></th><th>Video</th><th>Origen</th><th>Estado</th><th></th></tr></thead>
       <tbody id="trabajos"></tbody></table></div>
     </section>
 
@@ -793,8 +841,11 @@ dialog::backdrop{background:rgba(3,5,10,.76);backdrop-filter:blur(8px)}
 <script>
 const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
 const NOMBRE_EST = {publicada:'Publicada',ok:'Listo',sin_login:'Sin sesión',sin_comprobar:'Sin comprobar',pendiente:'En cola',subiendo:'Subiendo',error:'Error',
-  cortando:'Cortando',descargando:'Descargando',listo:'Preparado',esperando_remoto:'Esperando servidor',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar',cancelando:'Cancelando…'};
+  cortando:'Cortando',descargando:'Descargando',listo:'Preparado',esperando_remoto:'Esperando servidor',sin_destino:'Sin destino',omitido:'Omitido',revisar:'Revisar',cancelando:'Cancelando…',
+  subido:'Subido ✓',retirado:'Retirado',procesado:'En cola',capturando:'Capturando',encolado:'A PC…'};
 let E = null, selUrl = new Set(), selRegla = new Set(), selLive = new Set(), editando = false;
+const selLiveBorrarSesiones = new Set(), selLiveBorrarSegmentos = new Set(), selTrabajosBorrar = new Set();
+let ultimosLives = [];
 let selLocal = new Set(), archivosLocales = [], enviandoLocales = false;
 let cookiesDescargaOcupado = false, cookiesDescargaDestino = null;
 const loginPendientes = new Set();
@@ -972,7 +1023,7 @@ function tarjetaCuenta(c) {
     <p class="muted">${c.activa ? 'Cuenta activa' : 'Cuenta pausada'} · ${c.hoy}/${c.limite_dia} hoy · ${c.pendientes || 0} pendientes</p>
     <div class="proximo"><b>${faltan === null ? 'Sin hora estimada' : faltan ? 'Turno estimado en '+Math.floor(faltan/60)+' h '+faltan%60+' min' : 'Turno disponible'}</b>
       ${proxima ? '<div class="muted">'+fechaSubida(proxima)+'</div>' : ''}<p>${esc(c.espera || '')}</p>
-      ${siguiente ? `<div class="fila" style="margin-top:6px"><video controls preload="none" poster="/api/bot/miniatura/${Number(siguiente.id)}" src="/api/bot/clip/${Number(siguiente.id)}" aria-label="Próximo clip de ${esc(c.nombre)}"></video><span style="font-size:12px">${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>` : ''}
+      ${siguiente ? (E?.modo_ligero_ram ? `<div class="fila" style="margin-top:6px"><div class="clip-thumb-box"><img src="/api/bot/miniatura/${Number(siguiente.id)}" loading="lazy" alt="" onerror="this.parentElement.classList.add('sin-img')"><button type="button" class="clip-thumb-play" aria-label="Próximo clip de ${esc(c.nombre)}" onclick="if(typeof abrirVistaRapidaBot==='function')abrirVistaRapidaBot(${Number(siguiente.id)})"><span>▶</span></button></div><span style="font-size:12px">${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>` : `<div class="fila" style="margin-top:6px"><video controls preload="none" poster="/api/bot/miniatura/${Number(siguiente.id)}" src="/api/bot/clip/${Number(siguiente.id)}" aria-label="Próximo clip de ${esc(c.nombre)}"></video><span style="font-size:12px">${esc((siguiente.texto || '').split('\n')[0] || 'Clip #'+siguiente.id)}</span></div>`) : ''}
     </div>
     <div class="acc">
       <button onclick="pausarCuenta(${c.id},${!c.activa})">${c.activa ? 'Pausar cuenta' : 'Activar cuenta'}</button>
@@ -1006,12 +1057,15 @@ function pintarCuentas() {
 }
 function pintar() {
   const c = E.config;
+  if (typeof document !== 'undefined') document.body?.classList?.toggle('modo-ligero-ram', Boolean(E.modo_ligero_ram));
+  if ($('badge-ram-ligero')) $('badge-ram-ligero').hidden = !E.modo_ligero_ram;
   $('carpeta-datos').textContent = E.carpeta_datos ? `Cuentas y perfiles guardados en: ${E.carpeta_datos}` : '';
   $('activo').checked = c.activo;
   $('actividad').innerHTML = `<b>${esc(E.actividad)}</b>` + (E.en_horario ? '' : ' · fuera de horario');
   if (!editando) {
     for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min','monetizada_max_min','modo_cola','remoto_url','remoto_clave','navegador'])
-      $(k).value = c[k];
+      if ($(k)) $(k).value = c[k];
+    if ($('ahorro_ram')) $('ahorro_ram').value = c.ahorro_ram || 'auto';
     for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) $(k).checked = c[k];
     for (const k of ['avisos_activos','avisos_cola','avisos_progreso','avisos_publicados','avisos_errores','avisos_lives','avisos_sistema']) $(k).checked = c[k] !== false;
     $('avisos_intervalo_min').value = c.avisos_intervalo_min ?? 5;
@@ -1043,17 +1097,10 @@ function pintar() {
   if (typeof pintarVasosActivos === 'function') pintarVasosActivos(E.vasos_activos || []);
   document.querySelectorAll('[data-seleccion-id]').forEach(el=>el.checked=seleccionCola.has(Number(el.dataset.seleccionId)));
   actualizarSeleccionCola();
-  $('trabajos').innerHTML = E.trabajos.map(t => `<tr>
-    <td>${t.origen === 'local' ? esc(t.titulo) : `<a href="${esc(t.url)}" target="_blank">${esc(t.titulo || t.url)}</a>`}<div class="muted">${esc(t.canal)}</div>
-      ${t.error && t.estado !== 'omitido' ? `<div class="err">${esc(t.error)}</div>` : ''}</td>
-    <td class="muted">${t.origen === 'local' ? 'Archivo de tu PC · sin cortes' : `${esc(t.origen)}<br>Preset: ${esc(t.preset)}`}</td><td>${est(t.estado)}</td>
-    <td class="acc">${['error','sin_destino','omitido'].includes(t.estado) ? `<button class="mini" onclick="accion('trabajos',${t.id},'reintentar')"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
-      <button class="mini peligro" onclick="accion('trabajos',${t.id},'borrar')"><i class="ph ph-trash"></i></button></td></tr>`
-  ).join('') || '<tr><td colspan="4" class="muted">No hay videos preparándose.</td></tr>';
   const rs = E.resumen.subidas || {};
   $('res-subidas').textContent = `${rs.ok || 0} subidas · ${rs.pendiente || 0} en cola · ${rs.error || 0} con error`;
   const rt = E.resumen.trabajos || {};
-  $('res-trabajos').textContent = `${rt.pendiente || 0} por preparar`;
+  if (typeof pintarTrabajos === 'function') pintarTrabajos(E.trabajos || [], rt);
   if ($('badge-cola')) $('badge-cola').textContent = String((rs.pendiente || 0) + (rt.pendiente || 0));
   if ($('badge-cuentas')) $('badge-cuentas').textContent = String((E.cuentas || []).length);
   const reg = $('registro'), abajo = reg.scrollTop + reg.clientHeight >= reg.scrollHeight - 20;
@@ -1100,26 +1147,57 @@ async function iniciarLive() {
 }
 async function cargarLives() {
   const data = await api('/api/bot/lives');
-  $('lives').innerHTML = (data.lives || []).map(live => {
-    const resumenSeg = live.segmentos.map(s => `${esc(({sin_audio:'Sin audio · no se edita',audio_no_verificado:'Audio no verificable · no se edita'})[s.estado] || s.estado)}: ${s.n}`).join(' · ') || 'Esperando el primer segmento';
+  const lives = data.lives || [];
+  ultimosLives = lives;
+  const idsLive = new Set(lives.map(l => String(l.id)));
+  const keysSeg = new Set();
+  for (const l of lives) for (const seg of (l.clips_recientes || [])) if (seg.eliminable !== false && !seg.capturando_ahora) keysSeg.add(`${l.id}::${seg.nombre}`);
+  for (const id of selLiveBorrarSesiones) if (!idsLive.has(id)) selLiveBorrarSesiones.delete(id);
+  for (const k of selLiveBorrarSegmentos) if (!keysSeg.has(k)) selLiveBorrarSegmentos.delete(k);
+  const nombresSeg = {
+    sin_audio:'Sin audio · no se edita',
+    audio_no_verificado:'Audio no verificable · no se edita',
+    subido:'Subidos ✓',
+    retirado:'Retirados',
+    procesado:'En cola',
+    encolado:'Preparándose',
+    listo:'Capturados',
+    error:'Con error'
+  };
+  $('lives').innerHTML = lives.map(live => {
+    const activa = ['conectando','capturando','reconectando','deteniendo'].includes(live.estado);
+    const resumenSeg = (live.segmentos || []).map(s => `${esc(nombresSeg[s.estado] || s.estado)}: ${s.n}`).join(' · ') || 'Sin segmentos pendientes';
     const tira = (live.clips_recientes || []).length ? `<div class="live-clips-tira">${live.clips_recientes.map(seg => {
       const cap = !!seg.capturando_ahora;
       const imp = !cap && ['listo','encolado'].includes(seg.estado);
-      const niv = cap ? 42 : imp ? 78 : 100;
-      const badge = cap ? 'Capturando' : imp ? 'A PC…' : (seg.estado === 'procesado' ? 'Listo' : seg.estado);
+      const subido = seg.estado === 'subido';
+      const retirado = seg.estado === 'retirado';
+      const esErr = seg.estado === 'error';
+      const eliminable = seg.eliminable !== false && !cap;
+      const segKey = `${live.id}::${seg.nombre}`;
+      const selSeg = selLiveBorrarSegmentos.has(segKey);
+      const niv = cap ? 42 : imp ? 68 : 100;
+      const badge = cap ? 'Capturando' : imp ? 'A PC…' : subido ? 'Subido ✓' : retirado ? 'Retirado' : esErr ? 'Error' : (seg.estado === 'procesado' ? 'En cola' : seg.estado);
       const pie = seg.duracion > 0 ? `${Math.round(seg.duracion)} s` : 'En vivo';
       const img = seg.thumb_url ? `<img src="${esc(seg.thumb_url)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '';
       const play = (!cap && seg.video_url) ? `<button type="button" class="live-seg-play" title="Vista previa del tramo capturado" data-v="${esc(seg.video_url)}" data-p="${esc(seg.thumb_url || '')}" data-t="${esc((live.titulo || 'Live') + ' · ' + seg.nombre)}" onclick="abrirVistaRapidaUrlBot(this.dataset.v,this.dataset.p,this.dataset.t,'YouTube Live capturado en esta PC')">▶</button>` : '';
-      return `<div class="live-seg-card" title="${esc(seg.nombre + ' · ' + badge)}">${img}${imp || cap ? `<div class="live-seg-fill" style="height:${niv}%"></div>` : ''}<span class="live-seg-badge">${esc(badge)}</span>${play}<span class="live-seg-foot">${esc(pie)}</span></div>`;
+      const chk = eliminable ? `<input type="checkbox" class="live-seg-chk" data-live-seg="${esc(segKey)}" ${selSeg ? 'checked' : ''} onchange="toggleSelSegmentoLive('${esc(live.id)}','${esc(seg.nombre)}',this.checked)" onclick="event.stopPropagation()" title="Seleccionar este clip">` : '<span></span>';
+      const delBtn = eliminable ? `<button type="button" class="live-seg-del" title="Eliminar este clip del live" onclick="event.preventDefault();event.stopPropagation();eliminarSegmentoLive('${esc(live.id)}','${esc(seg.nombre)}')">✕</button>` : '';
+      const clsExtra = (subido ? ' es-subido' : '') + (retirado ? ' es-retirado' : '') + (esErr ? ' es-error' : '') + (selSeg ? ' seleccionado' : '');
+      return `<div class="live-seg-card${clsExtra}" title="${esc(seg.nombre + ' · ' + badge)}">${img}${imp || cap ? `<div class="live-seg-fill" style="height:${niv}%"></div>` : ''}<div class="live-seg-top">${chk}${delBtn}</div><span class="live-seg-badge">${esc(badge)}</span>${play}<span class="live-seg-foot">${esc(pie)}</span></div>`;
     }).join('')}</div>` : '';
+    const selSes = selLiveBorrarSesiones.has(String(live.id));
     return `<tr>
+    <td><input type="checkbox" class="chk-fila" data-live-sesion="${esc(live.id)}" ${selSes ? 'checked' : ''} onchange="toggleSelSesionLive('${esc(live.id)}',this.checked)" title="Seleccionar transmisión"></td>
     <td><a href="${esc(live.url)}" target="_blank" rel="noopener">${esc(live.titulo || 'YouTube Live')}</a>
       <div class="muted">${live.mode === 'ai' ? `IA: ${live.seconds} s por cada ${live.window} s` : `Partes de unos ${live.seconds} s`} · ${live.accounts.map(id => esc((E.cuentas || []).find(c => c.id === id)?.nombre || `Cuenta ${id}`)).join(', ')}</div></td>
-    <td>${esc(live.estado)}<div class="muted">${esc(live.detalle)}</div></td>
+    <td>${est(live.estado)}<div class="muted">${esc(live.detalle)}</div></td>
     <td><div>${resumenSeg}</div>${tira}</td>
-    <td>${['conectando','capturando','reconectando','deteniendo'].includes(live.estado) ?
-      `<button onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener captura</button>` : ''}</td></tr>`;
-  }).join('') || '<tr><td colspan="4" class="muted">No hay capturas activas.</td></tr>';
+    <td class="acc"><div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${activa ?
+      `<button class="mini" onclick="detenerLive('${esc(live.id)}')" ${live.estado === 'deteniendo' ? 'disabled' : ''}>Detener</button>` : ''}
+      <button class="mini peligro" onclick="eliminarSesionLive('${esc(live.id)}',${activa})" title="Eliminar registro y tramos de este live"><i class="ph ph-trash"></i> Eliminar</button></div></td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">No hay capturas registradas.</td></tr>';
+  if (typeof actualizarSeleccionLive === 'function') actualizarSeleccionLive();
 }
 async function detenerLive(id) { await api(`/api/bot/lives/${id}/detener`, {}); await cargarLives(); }
 async function cfg(cambios) { await api('/api/bot/config', cambios); cargar(); }
@@ -1430,6 +1508,7 @@ async function guardarAjustes() {
   const d = {};
   for (const k of ['pausa_min','pausa_max','max_intentos','estimacion_subida_min','monetizada_max_min']) d[k] = +$(k).value;
   for (const k of ['preset','modo_cola','remoto_url','remoto_clave','navegador']) d[k] = $(k).value;
+  if ($('ahorro_ram')) d.ahorro_ram = $('ahorro_ram').value || 'auto';
   for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) d[k] = $(k).checked;
   await api('/api/bot/config', d); editando = false; await cargar(); toast('Horario y modo guardados');
 }
@@ -1875,17 +1954,184 @@ function pintarVasosActivos(vasos) {
     const etiqueta = v.tipo === 'subida' ? 'Subiendo' : v.tipo === 'live' ? (listo ? 'Live listo' : 'Live → PC') : (listo ? 'Listo' : 'Cortando');
     const poster = v.thumb_url ? `<img class="vaso-poster" src="${esc(v.thumb_url)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '';
     const playBtn = v.video_url ? `<button type="button" class="vaso-play" title="Vista previa del clip" onclick="abrirVistaRapidaVaso(${idx})">▶</button>` : '';
+    const closeBtn = v.accion_cancelar ? `<button type="button" class="vaso-cerrar" title="Cancelar o retirar este clip" onclick="event.stopPropagation();cancelarVasoActivo(${idx})">✕</button>` : '';
     return `<div class="vaso-clip${listo ? ' es-listo' : ''}">
       ${poster}
       <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
       <div class="vaso-brillo"></div>
       <div class="vaso-capa">
-        <div style="display:flex;justify-content:space-between;gap:4px"><span class="vaso-chip">${esc(etiqueta)}</span><span class="vaso-chip">${pct}%</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:4px"><span class="vaso-chip">${esc(etiqueta)}</span><div style="display:inline-flex;align-items:center;gap:4px"><span class="vaso-chip">${pct}%</span>${closeBtn}</div></div>
         <div class="vaso-centro">${playBtn || `<div class="vaso-pct">${pct}%</div>`}<div class="vaso-etapa" title="${esc(v.etapa || '')}">${esc(v.etapa || 'Procesando…')}</div></div>
         <div class="vaso-pie" title="${esc(v.titulo || '')}">${esc(v.titulo || 'Clip')}<div class="muted" style="font-weight:400;font-size:10.5px">${esc(v.subtitulo || '')}</div></div>
       </div>
     </div>`;
   }).join('');
+}
+async function cancelarVasoActivo(idx) {
+  const v = vasosActivosCache[idx];
+  const acc = v?.accion_cancelar;
+  if (!acc) return;
+  try {
+    if (acc.tipo === 'trabajo') await accion('trabajos', acc.id, 'borrar');
+    else if (acc.tipo === 'subida') await accion('subidas', acc.id, 'borrar');
+    else if (acc.tipo === 'live_segmento') await eliminarSegmentoLive(acc.sesion, acc.nombre, true);
+    else if (acc.tipo === 'live_detener') await detenerLive(acc.sesion);
+  } catch (e) {}
+}
+function actualizarSeleccionLive() {
+  const total = selLiveBorrarSesiones.size + selLiveBorrarSegmentos.size;
+  if ($('live-sel-resumen')) $('live-sel-resumen').textContent = `${total} seleccionado(s)`;
+  if ($('live-borrar-lote')) $('live-borrar-lote').disabled = !total;
+}
+function toggleSelSesionLive(jid, checked) {
+  const k = String(jid);
+  if (checked) selLiveBorrarSesiones.add(k); else selLiveBorrarSesiones.delete(k);
+  actualizarSeleccionLive();
+}
+function toggleSelSegmentoLive(jid, nombre, checked) {
+  const k = `${jid}::${nombre}`;
+  if (checked) selLiveBorrarSegmentos.add(k); else selLiveBorrarSegmentos.delete(k);
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('[data-live-seg]').forEach(el => {
+      if (el.dataset.liveSeg === k) el.closest?.('.live-seg-card')?.classList.toggle('seleccionado', checked);
+    });
+  }
+  actualizarSeleccionLive();
+}
+function seleccionarTodoLive(marcar) {
+  selLiveBorrarSesiones.clear();
+  selLiveBorrarSegmentos.clear();
+  if (marcar) {
+    for (const l of ultimosLives) {
+      selLiveBorrarSesiones.add(String(l.id));
+      for (const seg of (l.clips_recientes || [])) {
+        if (seg.eliminable !== false && !seg.capturando_ahora) selLiveBorrarSegmentos.add(`${l.id}::${seg.nombre}`);
+      }
+    }
+  }
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('[data-live-sesion]').forEach(el => { el.checked = selLiveBorrarSesiones.has(el.dataset.liveSesion); });
+    document.querySelectorAll('[data-live-seg]').forEach(el => {
+      const ok = selLiveBorrarSegmentos.has(el.dataset.liveSeg);
+      el.checked = ok;
+      el.closest?.('.live-seg-card')?.classList.toggle('seleccionado', ok);
+    });
+  }
+  actualizarSeleccionLive();
+}
+async function eliminarSegmentoLive(jid, nombre, sinConfirmar = false) {
+  if (!sinConfirmar && typeof confirm === 'function' && !confirm(`¿Eliminar el clip ${nombre} del live y retirarlo de la cola si no se ha publicado?`)) return;
+  try {
+    const r = await api(`/api/bot/lives/${encodeURIComponent(jid)}/segmentos/${encodeURIComponent(nombre)}`, undefined, 'DELETE');
+    selLiveBorrarSegmentos.delete(`${jid}::${nombre}`);
+    toast(r.mensaje || 'Clip del live eliminado.');
+    await cargar();
+  } catch (e) {}
+}
+async function eliminarSesionLive(jid, activa = false) {
+  const msg = activa
+    ? 'Esta transmisión sigue activa. ¿Detener la captura y eliminar su registro y tramos no publicados?'
+    : '¿Eliminar este registro de Live y limpiar sus archivos temporales?';
+  if (typeof confirm === 'function' && !confirm(msg)) return;
+  try {
+    const r = await api(`/api/bot/lives/${encodeURIComponent(jid)}`, undefined, 'DELETE');
+    selLiveBorrarSesiones.delete(String(jid));
+    for (const k of [...selLiveBorrarSegmentos]) if (k.startsWith(`${jid}::`)) selLiveBorrarSegmentos.delete(k);
+    toast(r.mensaje || 'Sesión de live eliminada.');
+    await cargar();
+  } catch (e) {}
+}
+async function borrarSeleccionLive() {
+  const sesiones = [...selLiveBorrarSesiones];
+  const segmentos = [...selLiveBorrarSegmentos].map(k => {
+    const idx = k.indexOf('::');
+    return {sesion: k.slice(0, idx), nombre: k.slice(idx + 2)};
+  }).filter(s => !selLiveBorrarSesiones.has(s.sesion));
+  const total = sesiones.length + segmentos.length;
+  if (!total) return;
+  if (typeof confirm === 'function' && !confirm(`¿Eliminar la selección (${sesiones.length} sesión(es) y ${segmentos.length} clip(s) individuales)?`)) return;
+  if ($('live-borrar-lote')) $('live-borrar-lote').disabled = true;
+  try {
+    const r = await api('/api/bot/lives/lote', {sesiones, segmentos});
+    selLiveBorrarSesiones.clear();
+    selLiveBorrarSegmentos.clear();
+    toast(r.mensaje || 'Selección de live eliminada.');
+    await cargar();
+  } catch (e) { actualizarSeleccionLive(); }
+}
+async function limpiarLivesTerminados() {
+  if ($('live-limpiar-btn')) $('live-limpiar-btn').disabled = true;
+  try {
+    const r = await api('/api/bot/lives/lote', {accion: 'limpiar'});
+    selLiveBorrarSesiones.clear();
+    selLiveBorrarSegmentos.clear();
+    toast(r.mensaje || 'Lives terminados limpiados.');
+    await cargar();
+  } catch (e) {} finally {
+    if ($('live-limpiar-btn')) $('live-limpiar-btn').disabled = false;
+  }
+}
+function pintarTrabajos(trabajos, rt = {}) {
+  if (!$('trabajos')) return;
+  const verHistorial = Boolean($('trabajos-ver-historial')?.checked);
+  const lista = Array.isArray(trabajos) ? trabajos : [];
+  const visibles = verHistorial ? lista : lista.filter(t => !['listo','omitido'].includes(t.estado));
+  const ocultos = Math.max(0, lista.length - visibles.length);
+  const idsDisp = new Set(lista.map(t => Number(t.id)));
+  for (const id of selTrabajosBorrar) if (!idsDisp.has(id)) selTrabajosBorrar.delete(id);
+  if ($('res-trabajos')) {
+    $('res-trabajos').textContent = `${rt.pendiente || 0} por preparar` + (ocultos ? ` · ${ocultos} terminados ocultos` : '');
+  }
+  $('trabajos').innerHTML = visibles.map(t => {
+    const id = Number(t.id);
+    const sel = selTrabajosBorrar.has(id);
+    return `<tr>
+    <td><input type="checkbox" class="chk-fila" data-trabajo-sel="${id}" ${sel ? 'checked' : ''} onchange="toggleSelTrabajo(${id},this.checked)" title="Seleccionar trabajo"></td>
+    <td>${t.origen === 'local' ? esc(t.titulo) : `<a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.titulo || t.url)}</a>`}<div class="muted">${esc(t.canal)}</div>
+      ${t.error && t.estado !== 'omitido' ? `<div class="err">${esc(t.error)}</div>` : ''}</td>
+    <td class="muted">${t.origen === 'local' ? 'Archivo de tu PC · sin cortes' : `${esc(t.origen)}<br>Preset: ${esc(t.preset)}`}</td><td>${est(t.estado)}</td>
+    <td class="acc">${['error','sin_destino','omitido'].includes(t.estado) ? `<button class="mini" onclick="accion('trabajos',${id},'reintentar')" title="Reintentar"><i class="ph ph-arrow-clockwise"></i></button>` : ''}
+      <button class="mini peligro" onclick="accion('trabajos',${id},'borrar')" title="Eliminar de la cola"><i class="ph ph-trash"></i></button></td></tr>`;
+  }).join('') || `<tr><td colspan="5" class="muted">${ocultos ? 'No hay videos preparándose ahora mismo (activa «Ver terminados/omitidos» para ver el historial).' : 'No hay videos preparándose.'}</td></tr>`;
+  actualizarSeleccionTrabajos();
+}
+function actualizarSeleccionTrabajos() {
+  if ($('trabajos-borrar-lote')) $('trabajos-borrar-lote').disabled = !selTrabajosBorrar.size;
+}
+function toggleSelTrabajo(id, checked) {
+  const n = Number(id);
+  if (checked) selTrabajosBorrar.add(n); else selTrabajosBorrar.delete(n);
+  actualizarSeleccionTrabajos();
+}
+function seleccionarTrabajosVisibles(marcar) {
+  if (!marcar) {
+    selTrabajosBorrar.clear();
+  } else {
+    const verHistorial = Boolean($('trabajos-ver-historial')?.checked);
+    for (const t of (E?.trabajos || [])) {
+      if (verHistorial || !['listo','omitido'].includes(t.estado)) selTrabajosBorrar.add(Number(t.id));
+    }
+  }
+  if (E) pintar();
+}
+async function borrarTrabajosSeleccionados() {
+  if (!selTrabajosBorrar.size) return;
+  if (typeof confirm === 'function' && !confirm(`¿Eliminar ${selTrabajosBorrar.size} video(s) seleccionados de la cola de preparación?`)) return;
+  if ($('trabajos-borrar-lote')) $('trabajos-borrar-lote').disabled = true;
+  try {
+    const r = await api('/api/bot/trabajos/lote', {ids: [...selTrabajosBorrar]});
+    selTrabajosBorrar.clear();
+    toast(r.mensaje || 'Trabajos eliminados.');
+    await cargar();
+  } catch (e) { actualizarSeleccionTrabajos(); }
+}
+async function limpiarTrabajosTerminados() {
+  try {
+    const r = await api('/api/bot/trabajos/lote', {accion: 'limpiar'});
+    selTrabajosBorrar.clear();
+    toast(r.mensaje || 'Trabajos terminados limpiados.');
+    await cargar();
+  } catch (e) {}
 }
 function abrirVistaRapidaUrlBot(videoUrl, posterUrl, titulo, meta) {
   const dlg = $('vista-rapida-dialog'), vid = $('vista-rapida-video');
@@ -1941,7 +2187,28 @@ async function cargarVocesComentario() {
   } catch (_) {}
 }
 bloquearEdicion(true);
-cargarVocesComentario(); cargarPresets(); cargar(); setInterval(cargar, 4000);
+cargarVocesComentario(); cargarPresets(); cargar();
+let _botPollEnCurso = false, _botPollTimer = null;
+function programarRefrescoBot() {
+  clearTimeout(_botPollTimer);
+  const ms = E?.modo_ligero_ram ? 6500 : 4000;
+  _botPollTimer = setTimeout(async () => {
+    if (!_botPollEnCurso && !(typeof document !== 'undefined' && document.hidden)) {
+      _botPollEnCurso = true;
+      try { await cargar(); } finally { _botPollEnCurso = false; }
+    }
+    programarRefrescoBot();
+  }, ms);
+}
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !_botPollEnCurso) {
+      _botPollEnCurso = true;
+      Promise.resolve(cargar()).finally(() => { _botPollEnCurso = false; programarRefrescoBot(); });
+    }
+  });
+}
+programarRefrescoBot();
 </script>
 </body>
 </html>

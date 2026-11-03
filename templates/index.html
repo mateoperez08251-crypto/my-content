@@ -124,6 +124,20 @@
             }
         }
 
+        body.low-ram-mode::before,
+        body.low-ram-mode::after {
+            display: none !important;
+            animation: none !important;
+        }
+
+        body.low-ram-mode .topnav,
+        body.low-ram-mode .sidebar,
+        body.low-ram-mode .glass-panel,
+        body.low-ram-mode .card {
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+        }
+
         /* TopNav */
         .topnav {
             position: fixed;
@@ -5406,15 +5420,23 @@
             line.appendChild(timeSpan);
             line.appendChild(document.createTextNode(' ' + msg));
             term.appendChild(line);
+            const maxLogLines = document.body.classList.contains('low-ram-mode') ? 220 : 500;
+            while (term.childElementCount > maxLogLines && term.firstElementChild) {
+                term.removeChild(term.firstElementChild);
+            }
             term.scrollTop = term.scrollHeight;
         }
 
-        setInterval(async () => {
+        let _logsPollBusy = false;
+        async function _pollAppLogs() {
+            if (_logsPollBusy || document.hidden) return;
+            _logsPollBusy = true;
             try {
                 const res = await fetch('/api/logs');
                 const data = await res.json();
                 if (data.logs && data.logs.length > 0) {
-                    data.logs.forEach(log => appendLog(log));
+                    const sliceLogs = document.body.classList.contains('low-ram-mode') ? data.logs.slice(-60) : data.logs;
+                    sliceLogs.forEach(log => appendLog(log));
                 }
 
                 // Si el status del backend es stopped o idle, reiniciar UI
@@ -5429,8 +5451,14 @@
                         if (loader) loader.style.display = 'none';
                     }
                 }
-            } catch (err) { }
-        }, 1000);
+            } catch (err) { } finally {
+                _logsPollBusy = false;
+            }
+        }
+        (function _scheduleAppLogs() {
+            const delay = document.body.classList.contains('low-ram-mode') ? 2500 : 1200;
+            setTimeout(() => { _pollAppLogs().finally(_scheduleAppLogs); }, delay);
+        })();
 
         // Bandeja del radar: filtros + eliminar + Smart Split directo
         let _inboxCache = [];
@@ -5520,7 +5548,7 @@
         }
 
         fetchInbox();
-        setInterval(fetchInbox, 15000);
+        setInterval(() => { if (!document.hidden) fetchInbox(); }, 20000);
 
 
         // Animación de barra de progreso
@@ -5763,6 +5791,14 @@
     </div>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            fetch('/api/system-specs')
+                .then(r => r.json())
+                .then(d => {
+                    if (d && (d.low_ram_mode || Number(d.ram_gb) <= 5.5)) {
+                        document.body.classList.add('low-ram-mode');
+                    }
+                })
+                .catch(() => {});
             // Mostrar modal de compatibilidad si es la primera vez
             if (!localStorage.getItem('compatibilityChecked')) {
                 document.getElementById('compatibilityModal').style.display = 'flex';
