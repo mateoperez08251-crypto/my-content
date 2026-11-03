@@ -89,6 +89,26 @@ class Cliente:
             capacidades = self.probar().get('capabilities')
             if not isinstance(capacidades, list) or MOMENTOS_CAPACIDAD not in capacidades:
                 raise FalloTrabajo('Actualiza la libreta y ejecuta las celdas 2, 2B, 6 y 6C de Colab. Ese servidor aún no admite humor, drama y contexto previo; no se ignorarán tus ajustes.')
+        from smart_commentary import validate_commentary_options
+        from smart_remix import CAPACIDAD_ORIGINALIDAD, es_originalidad_activa, validate_remix_options
+        from smart_thumbnail import validate_thumbnail_options
+        validate_commentary_options(
+            preset.get('commentary_mode', 'off'),
+            preset.get('commentary_style', 'gancho'),
+            preset.get('commentary_voice', 'male'),
+        )
+        validate_remix_options(
+            preset.get('cold_open', False),
+            preset.get('jump_cuts', False),
+            preset.get('auto_split', False),
+            preset.get('ambient_music', 'off'),
+            preset.get('clean_vocals', False),
+        )
+        validate_thumbnail_options(preset.get('auto_thumbnail', 'off'))
+        if es_originalidad_activa(preset):
+            capacidades = self.probar().get('capabilities')
+            if not isinstance(capacidades, list) or CAPACIDAD_ORIGINALIDAD not in capacidades:
+                raise FalloTrabajo('Actualiza la libreta y ejecuta las celdas 2, 2B, 6 y 6C de Colab. Ese servidor aún no admite comentario IA, miniatura automática, remezcla ni audio diferenciado; no se ignorarán tus ajustes.')
         r = self._pedir("POST", "/api/bot/remoto/cortar", json={"source": url_video, "preset": preset})
         if r.status_code == 409:
             raise ServidorOcupado()
@@ -146,7 +166,7 @@ class Cliente:
                 r = self._pedir("GET", f"/api/bot/remoto/{jid}")
                 fallos = 0
             except ServidorCaido:
-                fallos += 1  # cortes cortos del túnel: se toleran unos minutos
+                fallos += 1
                 if fallos >= 18:
                     raise
                 self._esperar_cancelable(cada_s, cancelar)
@@ -190,6 +210,22 @@ class Cliente:
                     f.flush()
                     os.fsync(f.fileno())
                 os.replace(registro_path + '.tmp', registro_path)
+            mb = c.get('miniatura_bytes')
+            if isinstance(mb, int) and mb > 0:
+                thumb_destino = os.path.splitext(destino)[0] + '_miniatura.jpg'
+                thumb_nombre = os.path.basename(thumb_destino)
+                if not (registro['archivos'].get(thumb_nombre) == mb
+                        and os.path.isfile(thumb_destino) and os.path.getsize(thumb_destino) == mb):
+                    try:
+                        self._bajar(f"/api/bot/remoto/{jid}/miniatura/{c['n']}", thumb_destino, esperado=mb)
+                        registro['archivos'][thumb_nombre] = os.path.getsize(thumb_destino)
+                        with open(registro_path + '.tmp', 'w', encoding='utf-8') as f:
+                            json.dump(registro, f)
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.replace(registro_path + '.tmp', registro_path)
+                    except (FalloTrabajo, ServidorCaido):
+                        pass
             salida.append((destino, c.get("publicacion") or ""))
         metadata = {ruta: c for (ruta, _), c in zip(salida, d['clips'])}
         archivos.guardar_manifest(carpeta, salida, metadata)

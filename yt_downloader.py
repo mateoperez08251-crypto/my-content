@@ -25,7 +25,12 @@ def _base_dir():
 
 def _ffmpeg():
     ruta = os.path.join(_base_dir(), "ffmpeg.exe")
-    return ruta if os.path.exists(ruta) else imageio_ffmpeg.get_ffmpeg_exe()
+    if os.path.exists(ruta):
+        return ruta
+    en_sistema = shutil.which("ffmpeg")
+    if en_sistema and shutil.which("ffprobe"):
+        return en_sistema
+    return imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def ruta_cookies():
@@ -180,18 +185,21 @@ def download_video(url, output_dir="videos_descargados", quality="best", cancel_
         'http_chunk_size': 10485760,
         'progress_hooks': [progress_hook],
     })
-    # Si YouTube bloquea el cliente por defecto, se prueban otros
+    # Si YouTube bloquea el cliente por defecto o degrada a 360p (SABR), probar clientes HD/4K primero
     intentos = [None]
+    pide_hd = quality == "best" or (str(quality).isdigit() and int(quality) >= 720)
     if "youtu" in url:
-        intentos += [["tv_simply", "web_embedded"], ["mweb", "web_safari"]]
+        intentos += [["ios", "web_creator"], ["android_vr", "tv"], ["tv_simply", "web_embedded"], ["mweb", "web_safari"]]
 
+    mejor_archivo = None
+    mejor_altura = 0
     ultimo = None
     for clientes in intentos:
         if cancel_checker and cancel_checker():
             raise DescargaError("Cancelado.")
         opts = dict(base)
         if clientes:
-            print(f"Reintentando con otro cliente de YouTube: {', '.join(clientes)}")
+            print(f"Probando cliente HD de YouTube: {', '.join(clientes)}")
             opts['extractor_args'] = {'youtube': {'player_client': clientes}}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -199,15 +207,29 @@ def download_video(url, output_dir="videos_descargados", quality="best", cancel_
                 archivo = ydl.prepare_filename(info)
             mp4 = os.path.splitext(archivo)[0] + ".mp4"
             final = mp4 if os.path.exists(mp4) else archivo
-            print(f"Descarga completada: {final}")
-            return final
+            altura_real = 0
+            if isinstance(info, dict):
+                altura_real = int(info.get("height") or 0)
+                if not altura_real and info.get("requested_formats"):
+                    altura_real = max(int(f.get("height") or 0) for f in info["requested_formats"] if isinstance(f, dict))
+            if altura_real > mejor_altura or mejor_archivo is None:
+                mejor_altura = altura_real
+                mejor_archivo = final
+            if "youtu" in url and pide_hd and 0 < altura_real < 720 and clientes in (None, ["ios", "web_creator"]):
+                print(f"Aviso: el cliente actual entregó {altura_real}p; buscando versión 1080p/4K...")
+                continue
+            print(f"Descarga completada: {mejor_archivo}")
+            return mejor_archivo
         except Exception as e:
             if "CANCELADO_POR_USUARIO" in str(e):
                 raise DescargaError("Cancelado.")
             ultimo = e
             print(f"Intento fallido: {mensaje_error(e)}")
-            if not _es_bloqueo(e):
+            if not _es_bloqueo(e) and mejor_archivo is None:
                 break  # otro cliente no arregla un video borrado o un enlace malo
+    if mejor_archivo:
+        print(f"Descarga completada: {mejor_archivo} ({mejor_altura}p)")
+        return mejor_archivo
 
     if _actualizar_yt_dlp():
         try:
@@ -247,4 +269,3 @@ if __name__ == "__main__":
         download_video(sys.argv[1])
     else:
         print("Pasa una URL de YouTube como argumento.")
-

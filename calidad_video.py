@@ -115,14 +115,68 @@ def bloqueos_monetizacion(datos):
 
 
 def filtrar_frame(frame, modo):
-    """Filtro moderado antes de los textos y de la única exportación con pérdida.
+    """Filtro de luminancia (LAB) antes de los textos y de la única exportación con pérdida.
 
-    HD suaviza ruido espacial; ambos modos aplican nitidez sin alterar el tamaño.
-    El escalado Lanczos ya se realiza en el encuadre del editor.
+    Opera solo sobre el canal L para realzar bordes y rostros sin amplificar ruido de color.
     """
     import cv2
     if modo not in ('hd', 'sharpen'):
         raise ValueError('Filtro de calidad no válido.')
-    imagen = cv2.bilateralFilter(frame, 5, 12, 12) if modo == 'hd' else frame
-    suave = cv2.GaussianBlur(imagen, (5, 5), 1.0)
-    return cv2.addWeighted(imagen, 1.45, suave, -0.45, 0)
+    lab = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    base_l = cv2.bilateralFilter(l_ch, 5, 14, 14) if modo == 'hd' else l_ch
+    suave_l = cv2.GaussianBlur(base_l, (0, 0), 1.15)
+    nitido_l = cv2.addWeighted(base_l, 1.48 if modo == 'sharpen' else 1.38, suave_l, -0.48 if modo == 'sharpen' else -0.38, 0)
+    return cv2.cvtColor(cv2.merge((nitido_l, a_ch, b_ch)), cv2.COLOR_LAB2RGB)
+
+
+def realzar_detalle_ampliacion(frame, factor_ampliacion):
+    """Compensa suavemente la pérdida de microdetalle al recortar 16:9 -> 9:16 (sin halos cromáticos)."""
+    if frame is None or isinstance(frame, (str, bytes)) or getattr(frame, 'ndim', 0) != 3 or factor_ampliacion <= 1.20:
+        return frame
+    import cv2
+    fuerza = min(0.30, max(0.08, (float(factor_ampliacion) - 1.15) * 0.28))
+    lab = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    suave_l = cv2.GaussianBlur(l_ch, (0, 0), 1.05)
+    l_out = cv2.addWeighted(l_ch, 1.0 + fuerza, suave_l, -fuerza, 0)
+    return cv2.cvtColor(cv2.merge((l_out, a_ch, b_ch)), cv2.COLOR_LAB2RGB)
+
+
+def limpiar_metadatos_mp4(video):
+    """Elimina sin recodificar firmas de codificador, fechas, capítulos y etiquetas de origen."""
+    if not video or not os.path.isfile(video):
+        return False
+    try:
+        with open(video, 'rb') as f:
+            cabecera = f.read(16)
+    except OSError:
+        return False
+    if len(cabecera) < 12 or cabecera[4:8] != b'ftyp':
+        return False
+    import imageio_ffmpeg
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    tmp = os.path.splitext(video)[0] + '_nometa.mp4'
+    sin_ventana = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    try:
+        r = subprocess.run(
+            [
+                ffmpeg, '-y', '-loglevel', 'error', '-i', video,
+                '-map', '0:v:0', '-map', '0:a?', '-dn',
+                '-map_metadata', '-1', '-map_chapters', '-1',
+                '-fflags', '+bitexact', '-flags:v', '+bitexact', '-flags:a', '+bitexact',
+                '-metadata', 'encoder=',
+                '-c', 'copy', '-movflags', '+faststart', tmp,
+            ],
+            capture_output=True, text=True, creationflags=sin_ventana,
+        )
+        if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+            os.replace(tmp, video)
+            return True
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return False

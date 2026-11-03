@@ -12,8 +12,14 @@ def guardar_manifest(carpeta, clips, metadatos=None):
             raise ValueError('El servidor entregó un clip vacío.')
         registros.append({'nombre': os.path.basename(ruta), 'bytes': size, 'texto': texto})
         if metadatos and ruta in metadatos:
-            registros[-1].update({k: metadatos[ruta][k] for k in ('inicio', 'fin', 'calidad_origen')
-                                 if k in metadatos[ruta]})
+            registros[-1].update({
+                k: metadatos[ruta][k]
+                for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto')
+                if k in metadatos[ruta]
+            })
+        miniatura = os.path.splitext(ruta)[0] + '_miniatura.jpg'
+        if os.path.isfile(miniatura) and os.path.getsize(miniatura) > 0:
+            registros[-1]['miniatura'] = os.path.basename(miniatura)
     if not registros:
         raise ValueError('No hay clips preparados.')
     tmp = os.path.join(carpeta, 'clips.json.tmp')
@@ -54,6 +60,14 @@ def conservar(carpeta, clips, metadatos=None):
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(destino + '.part', destino)
+            thumb_origen = os.path.splitext(ruta)[0] + '_miniatura.jpg'
+            thumb_destino = os.path.splitext(destino)[0] + '_miniatura.jpg'
+            if os.path.isfile(thumb_origen) and os.path.getsize(thumb_origen) > 0:
+                with open(thumb_origen, 'rb') as src_t, open(thumb_destino + '.part', 'wb') as dst_t:
+                    shutil.copyfileobj(src_t, dst_t)
+                    dst_t.flush()
+                    os.fsync(dst_t.fileno())
+                os.replace(thumb_destino + '.part', thumb_destino)
         salida.append((destino, texto))
         if metadatos and ruta in metadatos:
             trasladados[destino] = metadatos[ruta]
@@ -67,7 +81,6 @@ def leer_intervalos(carpeta):
                 for r in json.load(f) if 'inicio' in r and 'fin' in r}
 
 
-
 def leer_calidad_origen(carpeta, archivo):
     try:
         with open(os.path.join(carpeta, 'clips.json'), encoding='utf-8') as f:
@@ -78,4 +91,3 @@ def leer_calidad_origen(carpeta, archivo):
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     return {}
-

@@ -2364,7 +2364,7 @@
                 </form>
                 <section style="margin-top:20px;border-top:1px solid #444;padding-top:16px" aria-labelledby="radar-seguimiento-titulo">
                     <h3 id="radar-seguimiento-titulo">Estado del Radar y de sus entregas</h3>
-                    <p>La PC debe estar encendida para editar. Seguir un canal detecta sus videos; configura sus cuentas de destino en <a href="/bot">Bot → Reglas</a>. La nube revisa cada 30 minutos si está desplegada; la frecuencia elegida arriba corresponde a esta PC.</p>
+                    <p>La PC debe estar encendida para editar. Seguir un canal detecta sus videos; configura sus cuentas de destino en <a href="/bot" onclick="return openBotModal(event, 'cuentas')">Bot → Reglas</a>. La nube revisa cada 30 minutos si está desplegada; la frecuencia elegida arriba corresponde a esta PC.</p>
                     <button type="button" id="radar-revisar" class="btn" onclick="revisarRadarAhora()">Revisar ahora</button>
                     <button type="button" id="radar-populares" class="btn" data-activo="0" onclick="alternarRadarPopulares()">Iniciar radar de populares</button>
                     <p>Populares usa el ranking histórico de YouTube y solo cuentas de TikTok no monetizadas de tus reglas. Al iniciarlo, las cuentas monetizadas siguen únicamente publicaciones recientes. Respeta la edición, horarios y cola de cada cuenta. Pausar conserva los trabajos; una publicación ya enviada a TikTok no se puede retirar con este botón.</p>
@@ -2513,7 +2513,7 @@
                     class="ph-duotone ph-film-strip"></i> Estudio Creador IA</a>
             <a href="#" class="nav-item" onclick="openVoiceClonerModal()"><i class="ph-duotone ph-microphone-stage"></i>
                 Clonador de Voz</a>
-            <a href="/bot" class="nav-item"><i class="ph-duotone ph-robot"></i> Bot de subida</a>
+            <a href="/bot" class="nav-item" onclick="return openBotModal(event)"><i class="ph-duotone ph-robot"></i> Bot de subida</a>
             <a href="#" class="nav-item" onclick="openChrome()"><i class="ph-duotone ph-browser"></i> Abrir navegador
                 Studio</a>
             <a href="#" class="nav-item" onclick="openAudioExtractModal()"><i class="ph-duotone ph-waveform"></i>
@@ -3290,6 +3290,82 @@
                             <small style="display:block;margin-top:8px">Editar o traducir no elimina los derechos de autor ni garantiza monetización. Usa material propio o con permiso. Para japonés y coreano instala una fuente compatible (Noto Sans CJK).</small>
                         </div>
 
+                        <!-- Originalidad para TikTok: Comentario IA, Remezcla y Audio -->
+                        <div style="margin-top: 15px; padding: 15px; background: rgba(0,225,255,0.03); border: 1px solid rgba(0,225,255,0.22); border-radius: 8px;">
+                            <label style="margin:0; margin-bottom: 10px; display: block; color: var(--accent-primary);">
+                                <i class="ph-duotone ph-microphone-stage"></i> Originalidad para TikTok · Comentario IA, remezcla y audio
+                            </label>
+                            <div style="display: flex; flex-direction: column; gap: 10px;">
+                                <label for="smart_commentary_mode" style="font-size: 0.85rem; color: rgba(255,255,255,0.85);">Modo comentario / Narrador IA
+                                    <select id="smart_commentary_mode" class="form-control" onchange="updateSmartCommentary()">
+                                        <option value="off">Sin comentario IA</option>
+                                        <option value="intro">Solo presentación inicial (3–5 s antes del clip)</option>
+                                        <option value="intro_outro">Presentación inicial + opinión o pregunta al final</option>
+                                    </select>
+                                </label>
+                                <div id="smart_commentary_controls" hidden style="display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03);">
+                                    <label for="smart_commentary_style" style="font-size: 0.82rem; color: rgba(255,255,255,0.8);">Enfoque del narrador
+                                        <select id="smart_commentary_style" class="form-control">
+                                            <option value="gancho">Gancho de intriga (sin destripar el final)</option>
+                                            <option value="opinion">Opinión directa sobre el momento</option>
+                                            <option value="contexto">Contexto rápido para entender el clip</option>
+                                            <option value="debate">Debate / pregunta abierta para comentarios</option>
+                                        </select>
+                                    </label>
+                                    <label for="smart_commentary_voice" style="font-size: 0.82rem; color: rgba(255,255,255,0.8);">Voz del narrador
+                                        <select id="smart_commentary_voice" class="form-control">
+                                            <option value="male">Voz neuronal masculina</option>
+                                            <option value="female">Voz neuronal femenina</option>
+                                        </select>
+                                    </label>
+                                    <small style="color: rgba(255,255,255,0.6);">El narrador aparece en una tarjeta visual con vista previa y ondas de voz antes (y opcionalmente después) del clip, sin pisar el diálogo original. Si guardaste una voz en el Clonador, puedes elegirla arriba (requiere VoxCPM2).</small>
+                                </div>
+
+                                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="smart_cold_open">
+                                    <span>Adelanto del clímax al inicio (2–3 s con etiqueta ADELANTO y destello)</span>
+                                </label>
+                                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="smart_jump_cuts">
+                                    <span>Recortar silencios largos y alternar zoom dinámico en el cuerpo del clip</span>
+                                </label>
+                                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="smart_auto_split">
+                                    <span>Pantalla dividida automática (arriba/abajo) cuando conversan 2 personas en vertical</span>
+                                </label>
+
+                                <label for="smart_ambient_music" style="font-size: 0.85rem; color: rgba(255,255,255,0.85);">Música ambiente generada (sin copyright de catálogo)
+                                    <select id="smart_ambient_music" class="form-control">
+                                        <option value="off">Sin ambiente generado</option>
+                                        <option value="auto">Automático según el estilo del clip</option>
+                                        <option value="suave">Suave</option>
+                                        <option value="alegre">Alegre / comedia</option>
+                                        <option value="epico">Épico / impacto</option>
+                                        <option value="energica">Enérgica / ritmo alto</option>
+                                        <option value="misterio">Misterio / intriga</option>
+                                        <option value="terror">Tensión / terror</option>
+                                        <option value="noticias">Informativo / análisis</option>
+                                    </select>
+                                </label>
+                                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="smart_clean_vocals">
+                                    <span>Aislar voz limpia con Demucs (quita la música original al conservar el idioma)</span>
+                                </label>
+                                <label for="smart_auto_thumbnail" style="font-size: 0.85rem; color: rgba(255,255,255,0.85);">Miniatura automática con frase interesante del clip
+                                    <select id="smart_auto_thumbnail" class="form-control">
+                                        <option value="off">Sin miniatura extra</option>
+                                        <option value="cover_and_jpg">Portada en el video + JPG con frase clave</option>
+                                        <option value="jpg_only">Solo imagen JPG con frase clave</option>
+                                    </select>
+                                </label>
+                                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="smart_strip_metadata" checked>
+                                    <span>Borrar metadatos y rastro técnico del archivo al exportar</span>
+                                </label>
+                                <small style="color: rgba(255,255,255,0.52);">Estas opciones añaden narración propia, miniatura con gancho real, limpieza de metadatos y mezcla de audio para diferenciar tus clips en el feed Para ti. Ninguna herramienta garantiza inmunidad ante derechos de autor o moderación.</small>
+                            </div>
+                        </div>
+
                         <!-- Background Music Picker -->
                         <div
                             style="margin-top: 15px; padding: 15px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
@@ -3438,6 +3514,32 @@
                     <!-- Generado por JS -->
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Modal Compacto: Bot de Subida -->
+    <div id="botUploadModal" onclick="if(event.target===this) closeBotModal()"
+        style="display:none; position:fixed; inset:0; z-index:9990; background:rgba(4,6,12,0.78); backdrop-filter:blur(8px); align-items:center; justify-content:center; padding:16px;">
+        <div style="width:min(95vw, 1180px); height:min(91vh, 860px); background:#0b0f17; border:1px solid rgba(255,255,255,0.12); border-radius:18px; box-shadow:0 28px 80px rgba(0,0,0,0.75); display:flex; flex-direction:column; overflow:hidden;">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 16px; background:rgba(255,255,255,0.03); border-bottom:1px solid rgba(255,255,255,0.08); gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px; font-family:'Outfit',sans-serif; font-weight:600; font-size:0.98rem; color:#f3f6fc;">
+                    <i class="ph-duotone ph-robot" style="color:var(--accent-primary); font-size:1.2rem;"></i>
+                    <span>Bot de subida</span>
+                    <span style="font-size:0.76rem; font-weight:400; color:rgba(255,255,255,0.5);">Vista compacta integrada</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <a href="/bot" target="_blank" rel="noopener"
+                        style="padding:6px 11px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.04); color:#cbd5e1; text-decoration:none; font-size:0.78rem; display:inline-flex; align-items:center; gap:6px;">
+                        <i class="ph-bold ph-arrow-square-out"></i> Pestaña completa
+                    </a>
+                    <button type="button" onclick="closeBotModal()" title="Cerrar (Esc)"
+                        style="width:32px; height:32px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.05); color:#f8fafc; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:1rem;">
+                        ✕
+                    </button>
+                </div>
+            </div>
+            <iframe id="botUploadIframe" src="about:blank" title="Panel compacto del Bot de subida"
+                style="flex:1; width:100%; border:0; background:#0b0f17;"></iframe>
         </div>
     </div>
 
@@ -3630,6 +3732,33 @@
             document.getElementById('terminalModal').style.display = 'none';
         }
 
+        function openBotModal(ev, tabName) {
+            if (ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button === 1)) return true;
+            if (ev && ev.preventDefault) ev.preventDefault();
+            const modal = document.getElementById('botUploadModal');
+            const frame = document.getElementById('botUploadIframe');
+            if (!modal || !frame) { window.location.href = '/bot'; return false; }
+            const hash = tabName ? ('#' + tabName) : '';
+            const targetUrl = '/bot?embed=1' + hash;
+            if (!frame.getAttribute('src') || frame.getAttribute('src') === 'about:blank') {
+                frame.setAttribute('src', targetUrl);
+            } else if (tabName && frame.contentWindow) {
+                try { frame.contentWindow.postMessage({ type: 'bot-switch-tab', tab: tabName }, '*'); } catch (_) {}
+            }
+            modal.style.display = 'flex';
+            return false;
+        }
+        function closeBotModal() {
+            const modal = document.getElementById('botUploadModal');
+            if (modal) modal.style.display = 'none';
+        }
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Escape') {
+                const modal = document.getElementById('botUploadModal');
+                if (modal && modal.style.display === 'flex') closeBotModal();
+            }
+        });
+
         // Funciones del Modal de Radar
         function openAudioExtractModal() {
             document.getElementById('audioExtractModal').style.display = 'flex';
@@ -3741,6 +3870,26 @@
         }
 
         // Funciones del Modal Smart Split
+        async function loadSmartCommentaryVoices() {
+            const sel = document.getElementById('smart_commentary_voice');
+            if (!sel) return;
+            const prev = sel.value;
+            try {
+                const r = await fetch('/api/voces');
+                if (!r.ok) return;
+                const voices = await r.json();
+                if (!Array.isArray(voices)) return;
+                [...sel.querySelectorAll('option[data-cloned="1"]')].forEach(o => o.remove());
+                for (const v of voices) {
+                    if (!v || !v.id) continue;
+                    const opt = new Option('Tu voz clonada: ' + (v.nombre || v.id) + ' (VoxCPM2)', 'voice:' + v.id);
+                    opt.dataset.cloned = '1';
+                    sel.add(opt);
+                }
+                if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+            } catch (_) {}
+        }
+
         function openSmartSplitModal() {
             document.getElementById('moduleAuto').style.display = 'none';
             if (document.getElementById('moduleVoiceCloner')) document.getElementById('moduleVoiceCloner').style.display = 'none';
@@ -3749,6 +3898,8 @@
             if (window.event && window.event.currentTarget) {
                 window.event.currentTarget.classList.add('active');
             }
+            loadSmartCommentaryVoices();
+            if (typeof updateSmartCommentary === 'function') updateSmartCommentary();
         }
 
         function openAutoModule() {
@@ -4064,6 +4215,15 @@
                 'Corta todo el intervalo en orden: 0–60, 60–120… La última parte conserva el tiempo restante. No genera títulos ni emojis con IA.';
         }
 
+        function updateSmartCommentary() {
+            const modeEl = document.getElementById('smart_commentary_mode');
+            const panel = document.getElementById('smart_commentary_controls');
+            if (panel && modeEl) {
+                const mode = ['off', 'intro', 'intro_outro'].includes(modeEl.value) ? modeEl.value : 'off';
+                panel.hidden = mode === 'off';
+            }
+        }
+
         function useSmartLowResourceMode() {
             document.getElementById('smart_video_format').value = 'vertical_blur';
             document.getElementById('smart_encuadre').value = 'difuminado';
@@ -4071,11 +4231,19 @@
             document.getElementById('smart_transcripcion').value = 'groq';
             document.getElementById('smart_upscale').value = 'off';
             document.getElementById('smart_best_moments').checked = false;
+            if (document.getElementById('smart_clean_vocals')) document.getElementById('smart_clean_vocals').checked = false;
+            if (document.getElementById('smart_auto_split')) document.getElementById('smart_auto_split').checked = false;
             updateSmartSelectionMode();
+            updateSmartCommentary();
             document.getElementById('smart_preset_status').textContent = 'Modo ligero seleccionado. Guarda los ajustes para usarlos con el bot.';
         }
 
         function collectSmartSettings() {
+            const rawCommMode = document.getElementById('smart_commentary_mode')?.value || 'off';
+            const rawCommStyle = document.getElementById('smart_commentary_style')?.value || 'gancho';
+            const rawCommVoice = document.getElementById('smart_commentary_voice')?.value || 'male';
+            const rawAmbient = document.getElementById('smart_ambient_music')?.value || 'off';
+            const rawThumb = document.getElementById('smart_auto_thumbnail')?.value || 'off';
             return {
                 clip_selection: document.getElementById('smart_best_moments').checked ? 'ai' : 'sequential',
                 moment_focus: document.getElementById('smart_moment_focus').value || 'general',
@@ -4119,6 +4287,16 @@
                 titulo_en_video: document.getElementById('smart_titulo_video') ? document.getElementById('smart_titulo_video').checked : false,
                 transcripcion: document.getElementById('smart_transcripcion') ? document.getElementById('smart_transcripcion').value : 'groq',
                 whisper_local: document.getElementById('smart_whisper_local') ? document.getElementById('smart_whisper_local').value : 'auto',
+                commentary_mode: ['off', 'intro', 'intro_outro'].includes(rawCommMode) ? rawCommMode : 'off',
+                commentary_style: ['gancho', 'opinion', 'contexto', 'debate'].includes(rawCommStyle) ? rawCommStyle : 'gancho',
+                commentary_voice: (rawCommVoice === 'male' || rawCommVoice === 'female' || String(rawCommVoice).startsWith('voice:')) ? rawCommVoice : 'male',
+                cold_open: Boolean(document.getElementById('smart_cold_open')?.checked),
+                jump_cuts: Boolean(document.getElementById('smart_jump_cuts')?.checked),
+                auto_split: Boolean(document.getElementById('smart_auto_split')?.checked),
+                ambient_music: ['off', 'auto', 'suave', 'alegre', 'epico', 'energica', 'terror', 'misterio', 'noticias'].includes(rawAmbient) ? rawAmbient : 'off',
+                clean_vocals: Boolean(document.getElementById('smart_clean_vocals')?.checked),
+                auto_thumbnail: ['off', 'cover_and_jpg', 'jpg_only'].includes(rawThumb) ? rawThumb : 'off',
+                strip_metadata: document.getElementById('smart_strip_metadata') ? Boolean(document.getElementById('smart_strip_metadata').checked) : true,
                 subir_tiktok: document.getElementById('subir_tiktok_smart').value === 'on',
                 subir_youtube: document.getElementById('subir_youtube_smart').value === 'on',
                 subir_facebook: document.getElementById('subir_facebook_smart').value === 'on'

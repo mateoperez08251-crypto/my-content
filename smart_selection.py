@@ -41,9 +41,17 @@ def new_parts(total, duration, count, excluded, base=0):
 
 def needs_groq(options):
     """El corte por tiempo con audio original y sin subtítulos no usa Groq."""
-    if options.get('clip_selection', 'ai') == 'ai' or options.get('dubbing_language', 'original') != 'original':
+    if (options.get('clip_selection', 'ai') == 'ai'
+            or options.get('dubbing_language', 'original') != 'original'
+            or str(options.get('commentary_mode', 'off') or 'off') != 'off'):
         return True
-    return bool(options.get('show_subtitles', True)) and options.get('transcripcion', 'groq') != 'local'
+    needs_words = bool(
+        options.get('show_subtitles', True)
+        or options.get('jump_cuts', False)
+        or options.get('cold_open', False)
+        or str(options.get('auto_thumbnail', 'off') or 'off') != 'off'
+    )
+    return needs_words and options.get('transcripcion', 'groq') != 'local'
 
 
 def validate_selection(mode, duration):

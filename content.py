@@ -1697,6 +1697,16 @@ def run_smart_split_thread(data):
             }.items() if v is not None},
             "efectos": bool(data.get('efectos', True)),
             "vol_musica": float(data.get('vol_musica', 0.2) or 0.2),
+            "commentary_mode": str(data.get("commentary_mode", "off") or "off"),
+            "commentary_style": str(data.get("commentary_style", "gancho") or "gancho"),
+            "commentary_voice": str(data.get("commentary_voice", "male") or "male"),
+            "cold_open": bool(data.get("cold_open", False)),
+            "jump_cuts": bool(data.get("jump_cuts", False)),
+            "auto_split": bool(data.get("auto_split", False)),
+            "ambient_music": str(data.get("ambient_music", "off") or "off"),
+            "clean_vocals": bool(data.get("clean_vocals", False)),
+            "auto_thumbnail": str(data.get("auto_thumbnail", "off") or "off"),
+            "strip_metadata": bool(data.get("strip_metadata", True)),
         }
         if cfg_datos['upscale'] == 'ia':
             from smart_upscale import elegir_python
@@ -1746,6 +1756,15 @@ def run_smart_split_thread(data):
                 if person not in prepared_cast['references'] or actor not in saved:
                     raise RuntimeError('Una voz o persona seleccionada ya no existe. Vuelve a elegirla.')
                 config['cast'][person] = saved[actor]
+        if cfg_datos["commentary_mode"] != "off" and cfg_datos["commentary_voice"].startswith("voice:"):
+            from modulo_ia import liberar_gpu
+            liberar_gpu()
+            vc = _smart_voice_config()
+            cfg_datos["voice_config"] = {
+                "python": vc.get("voice_python", ""),
+                "model_dir": vc.get("voice_model", ""),
+                "tts_worker": vc.get("voice_worker", ""),
+            }
         log(f"Iniciando procesamiento de Smart Split (Escala: {cfg_datos['subtitle_scale']}%, "
             f"Estilo: {cfg_datos['subtitle_style']})...")
         log_telemetry("Iniciando Smart Split", f"Origen: {source}")
@@ -2396,8 +2415,8 @@ def bot_cuenta_editar(cid):
     def guardar():
         _bot().guardar_cuenta(cid, {
             k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
-                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada")})
-        if 'monetizada' in d:
+                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada", "proteger_fyp")})
+        if 'monetizada' in d or 'proteger_fyp' in d:
             from firebase_radar.local_radar import solicitar_revision
             solicitar_revision()
     return _bot_respuesta(guardar)
@@ -2514,7 +2533,10 @@ def remoto_cortar():
         return jsonify({"success": False, "error": "Falta el enlace del video."}), 400
     if not _intentar_iniciar_trabajo():
         return jsonify({"success": False, "ocupado": True, "error": "El servidor está ocupado."}), 409
-    datos = {**(d.get("preset") or {}), "source": source, "download_quality": "best",
+    preset_remoto = dict(d.get("preset") or {})
+    if not preset_remoto.get("respetar_perfil_remoto") and preset_remoto.get("export_profile") in ("fast", "balanced", "", None):
+        preset_remoto["export_profile"] = "quality"
+    datos = {**preset_remoto, "source": source, "download_quality": "best",
              "subir_tiktok": False, "subir_youtube": False, "subir_facebook": False, "_lanzar_error": True}
     jid = uuid.uuid4().hex[:12]
     evento = threading.Event()
@@ -2544,6 +2566,9 @@ def remoto_estado(jid):
         for r in t["rutas"]:
             try:
                 os.remove(r)
+                thumb_r = os.path.splitext(r)[0] + "_miniatura.jpg"
+                if os.path.isfile(thumb_r):
+                    os.remove(thumb_r)
             except OSError:
                 pass
         with _remoto_lock:
@@ -2558,7 +2583,8 @@ def remoto_estado(jid):
     por_archivo = {m.get("archivo"): m for m in t["meta"]}
     clips = [{"n": i, "nombre": os.path.basename(r), "bytes": os.path.getsize(r) if os.path.isfile(r) else 0,
               "publicacion": crear_publicacion(por_archivo.get(r) or {}),
-              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen')}}
+              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto')},
+              "miniatura_bytes": os.path.getsize(os.path.splitext(r)[0] + "_miniatura.jpg") if os.path.isfile(os.path.splitext(r)[0] + "_miniatura.jpg") else 0}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
                     "progreso": progreso, "clips": clips, "error_code": t.get("error_code", "")})
@@ -2571,6 +2597,18 @@ def remoto_clip(jid, n):
     if n < 0 or n >= len(rutas) or not os.path.isfile(rutas[n]):
         return jsonify({"success": False, "error": "Clip no encontrado."}), 404
     return send_from_directory(os.path.dirname(rutas[n]), os.path.basename(rutas[n]), as_attachment=True)
+
+
+@app.route("/api/bot/remoto/<jid>/miniatura/<int:n>", methods=["GET"])
+def remoto_miniatura(jid, n):
+    with _remoto_lock:
+        rutas = list((_remoto_trabajos.get(jid) or {}).get("rutas") or [])
+    if n < 0 or n >= len(rutas):
+        return jsonify({"success": False, "error": "Miniatura no encontrada."}), 404
+    thumb = os.path.splitext(rutas[n])[0] + "_miniatura.jpg"
+    if not os.path.isfile(thumb):
+        return jsonify({"success": False, "error": "Miniatura no encontrada."}), 404
+    return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb), as_attachment=True)
 
 
 @app.route("/api/bot/remoto_probar", methods=["POST"])
@@ -2586,6 +2624,19 @@ def bot_captura(sid):
     if not ruta or os.path.dirname(os.path.abspath(ruta)) != os.path.abspath(carpeta) or not os.path.isfile(ruta):
         return jsonify({"success": False, "error": "Sin captura"}), 404
     return send_from_directory(carpeta, os.path.basename(ruta))
+
+
+@app.route("/api/bot/miniatura/<int:sid>", methods=["GET"])
+def bot_miniatura(sid):
+    s = _bot().db.subida(sid)
+    archivo = (s or {}).get("archivo") or ""
+    if not archivo:
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    thumb = os.path.splitext(os.path.abspath(archivo))[0] + "_miniatura.jpg"
+    raiz_clips = os.path.abspath(os.path.join(paths.DATA_DIR, "bot_clips"))
+    if os.path.commonpath([thumb, raiz_clips]) != raiz_clips or not os.path.isfile(thumb):
+        return jsonify({"success": False, "error": "Sin miniatura"}), 404
+    return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb))
 
 
 @app.route("/api/start", methods=["POST"])
@@ -2635,9 +2686,10 @@ def get_logs():
 def health():
     from editor_controls import CAPACIDAD
     from smart_moments import CAPACIDAD as MOMENTOS_CAPACIDAD
+    from smart_remix import CAPACIDAD_ORIGINALIDAD
     mem = winproc.estado_memoria()
     return jsonify({"ok": True, "status": automation_status,
-                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", MOMENTOS_CAPACIDAD],
+                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", MOMENTOS_CAPACIDAD, CAPACIDAD_ORIGINALIDAD],
                     "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
 
 

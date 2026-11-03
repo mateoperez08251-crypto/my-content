@@ -429,6 +429,10 @@ class Motor:
         self.db.editar_cuenta(cid, **cambios)
         self.despertar()
 
+    @staticmethod
+    def _exige_reciente(c):
+        return bool(c and (c.get('monetizada') or c.get('proteger_fyp')))
+
     def destinos_radar(self, item, popular=False, solo_libres=False):
         regla = self.destino_para(item.get('source_channel') or item.get('channel', ''),
                                  item.get('platform'), item.get('channel_id', '')) or {}
@@ -437,9 +441,9 @@ class Motor:
             c = self.db.cuenta(cid)
             if not c or not c['activa']:
                 continue
-            if popular and (c['plataforma'] != 'tiktok' or c.get('monetizada')):
+            if popular and (c['plataforma'] != 'tiktok' or self._exige_reciente(c)):
                 continue
-            if not popular and self.cfg['radar_populares_configurado'] and c['plataforma'] == 'tiktok' and not c.get('monetizada'):
+            if not popular and self.cfg['radar_populares_configurado'] and c['plataforma'] == 'tiktok' and not self._exige_reciente(c):
                 continue
             if item.get('radar_cuenta') and int(item['radar_cuenta']) != cid:
                 continue
@@ -526,7 +530,7 @@ class Motor:
         anterior = self.db.trabajo_por_clave(clave)
         if anterior and (anterior['estado'] == 'sin_destino' or
                          (anterior['estado'] == 'omitido' and not self._es_viejo(item)
-                          and not str(anterior.get('error', '')).startswith('Cuenta monetizada'))):
+                          and not str(anterior.get('error', '')).startswith(('Cuenta monetizada', 'Protección Para ti')))):
             regla = self.destino_para(canal, item.get('platform'), item.get('channel_id', ''))
             if anterior['estado'] == 'omitido' or (regla and regla.get('cuentas')):
                 self.db.reabrir_radar(clave)
@@ -565,16 +569,18 @@ class Motor:
         return max(0.0, (time.time() - fecha.timestamp()) / 60)
 
     def _filtrar_monetizadas(self, item, cuentas):
-        """Las cuentas monetizadas solo reciben videos muy recientes del radar."""
+        """Las cuentas monetizadas o con protección Para ti solo reciben videos muy recientes del radar."""
         limite = self.cfg['monetizada_max_min']
         edad = self._edad_min(item)
         if edad is not None and edad <= limite:
             return list(cuentas), ''
-        permitidas = [cid for cid in cuentas if not (self.db.cuenta(cid) or {}).get('monetizada')]
+        objetos = [(cid, self.db.cuenta(cid) or {}) for cid in cuentas]
+        permitidas = [cid for cid, c in objetos if not self._exige_reciente(c)]
+        etiqueta = 'Cuenta monetizada' if any(c.get('monetizada') for _, c in objetos) else 'Protección Para ti'
         if edad is None:
-            motivo = 'Cuenta monetizada: no se pudo comprobar la hora de publicación; solo recibe videos verificados recientes.'
+            motivo = f'{etiqueta}: no se pudo comprobar la hora de publicación; solo recibe videos verificados recientes.'
         else:
-            motivo = (f'Cuenta monetizada: el video se publicó hace {duracion(edad * 60)}; '
+            motivo = (f'{etiqueta}: el video se publicó hace {duracion(edad * 60)}; '
                       f'solo recibe videos de los últimos {limite} min.')
         return permitidas, motivo
 
@@ -683,8 +689,9 @@ class Motor:
             if not self.cfg['radar_populares']:
                 self.db.marcar_trabajo(t['id'], 'pendiente', 'Radar de populares en pausa. Trabajo conservado.')
                 return
-            if any((self.db.cuenta(cid) or {}).get('monetizada') for cid in t['cuentas']):
-                self.db.marcar_trabajo(t['id'], 'omitido', 'Cuenta monetizada: se usa solo contenido reciente.')
+            if any(self._exige_reciente(self.db.cuenta(cid)) for cid in t['cuentas']):
+                etiqueta = 'Cuenta monetizada' if any((self.db.cuenta(cid) or {}).get('monetizada') for cid in t['cuentas']) else 'Protección Para ti'
+                self.db.marcar_trabajo(t['id'], 'omitido', f'{etiqueta}: se usa solo contenido reciente.')
                 return
         guardados = archivos.leer_preparados(self.carpeta_clips(t))
         if guardados:
@@ -985,8 +992,9 @@ class Motor:
             if not self.cfg['radar_populares']:
                 return 'Radar de populares en pausa. La cola se conserva.'
             destino = cuenta or self.db.cuenta(s['cuenta_id'])
-            if destino and destino.get('monetizada'):
-                return 'Cuenta monetizada: este clip de populares queda bloqueado; se usa contenido reciente.'
+            if self._exige_reciente(destino):
+                etiqueta = 'Cuenta monetizada' if destino.get('monetizada') else 'Protección Para ti'
+                return f'{etiqueta}: este clip de populares queda bloqueado; se usa contenido reciente.'
         """Motivo visible para una publicación pendiente, sin cambiar sus tiempos."""
         ahora = time.time() if ahora is None else ahora
         if not self.cfg['activo']:
@@ -1149,9 +1157,9 @@ class Motor:
         trabajo_radar = self.db.trabajo(s['trabajo_id']) if s.get('trabajo_id') else None
         if trabajo_radar and trabajo_radar.get('origen') == 'radar_populares':
             control.permiso_publicar = lambda: bool(self.cfg['radar_populares'] and
-                not (self.db.cuenta(s['cuenta_id']) or {}).get('monetizada', True))
+                not self._exige_reciente(self.db.cuenta(s['cuenta_id']) or {'monetizada': True}))
             if not control.permiso_publicar():
-                self.db.marcar_subida(s['id'], 'pendiente', error='Populares en pausa o cuenta monetizada. No se publicará este clip.')
+                self.db.marcar_subida(s['id'], 'pendiente', error='Populares en pausa o cuenta monetizada / Protección Para ti. No se publicará este clip.')
                 return
         mod = POR_NOMBRE[cuenta["plataforma"]]
         nombre = f"{mod.NOMBRE} · {cuenta['nombre']}"
@@ -1174,6 +1182,19 @@ class Motor:
                 mensaje = 'Controles de cuenta monetizada: ' + ' '.join(motivos)
                 self.db.marcar_subida(s['id'], 'error', error=mensaje)
                 self._aviso_subida(s, 'monetizacion', mensaje, 'errores', True)
+                return
+        elif cuenta['plataforma'] == 'tiktok' and cuenta.get('proteger_fyp'):
+            motivos_fyp = []
+            try:
+                duplicado = self.db.conflicto_archivo_monetizado(s['id'], etiqueta='Protección Para ti')
+                if duplicado:
+                    motivos_fyp.append(duplicado)
+            except OSError:
+                motivos_fyp.append('No se pudo comprobar la huella del archivo.')
+            if motivos_fyp:
+                mensaje = 'Controles Para ti: ' + ' '.join(motivos_fyp)
+                self.db.marcar_subida(s['id'], 'error', error=mensaje)
+                self._aviso_subida(s, 'proteger_fyp', mensaje, 'errores', True)
                 return
         for aviso in calidad.get('advertencias', []) + calidad.get('origen', {}).get('advertencias', []):
             self.log('Calidad: ' + aviso)
@@ -1615,6 +1636,9 @@ class Motor:
             except OSError:
                 subida['bytes'], subida['archivo_existe'] = None, False
                 subida['calidad'] = {}
+            subida['tiene_miniatura'] = bool(
+                subida.get('archivo') and os.path.isfile(os.path.splitext(subida['archivo'])[0] + '_miniatura.jpg')
+            )
             if subida['estado'] == 'pendiente':
                 subida['espera'] = self._motivo_subida(subida, por_cuenta.get(subida['cuenta_id']), ahora)
         return {
