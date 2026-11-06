@@ -116,6 +116,20 @@ class TextoPortada(unittest.TestCase):
     def test_no_toca_una_frase_normal(self):
         self.assertEqual(st._limpiar_frase_portada('Nadie sabe la verdad de esto'), 'Nadie sabe la verdad')
 
+    def test_no_amplia_de_mas_aunque_la_cara_sea_pequena(self):
+        frame = np.zeros((720, 1280, 3), np.uint8)
+        recorte, _ = st._encuadre_9_16(frame, (640.0, 300.0, 40.0, 40.0))
+        self.assertGreaterEqual(recorte.shape[0], 720 * 0.82 - 1)
+
+    def test_el_borde_sigue_la_foto_y_no_los_escalones_de_la_mascara(self):
+        img = np.zeros((200, 200, 3), np.uint8)
+        img[:, 100:] = 255
+        mascara = np.zeros((200, 200), np.float32)
+        mascara[:, 92:] = 1.0  # Máscara 8 px fuera del borde real.
+        fina = st._ajustar_a_bordes(mascara, img, radio=12)
+        self.assertLess(fina[100, 96], 0.7)
+        self.assertGreater(fina[100, 104], 0.9)
+
     def test_las_lineas_no_se_pisan(self):
         negro = np.zeros((1920, 1080, 3), np.uint8)
         meta = {'quote': 'QUÉ NO ESTÁ TRABAJANDO HOY Y NADIE LO SABE AQUÍ', 'kicker': ''}

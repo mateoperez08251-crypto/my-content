@@ -312,7 +312,8 @@ def select_best_thumbnail_frame(get_frame_fn, duration: float, target_second: fl
         tc = round(max(0.05, min(dur - 0.05, ancla + off)), 3)
         if tc not in candidatos_t:
             candidatos_t.append(tc)
-    for extra in (round(dur * 0.32, 3), round(dur * 0.64, 3)):
+    for fraccion in (0.12, 0.22, 0.32, 0.42, 0.52, 0.64, 0.74, 0.86):
+        extra = round(dur * fraccion, 3)
         if 0.05 <= extra <= dur - 0.05 and extra not in candidatos_t:
             candidatos_t.append(extra)
 
@@ -371,7 +372,8 @@ def select_best_thumbnail_frame(get_frame_fn, duration: float, target_second: fl
                     rx2, ry2 = min(sw, int(cx + fw * 0.5)), min(sh, int(cy + fh * 0.5))
                     if rx2 > rx1 + 6 and ry2 > ry1 + 6:
                         nitidez_cara = float(cv2.Laplacian(gris[ry1:ry2, rx1:rx2], cv2.CV_64F).var())
-                        bonus_cara += min(30.0, math.log1p(max(0.0, nitidez_cara)) * 5.5)
+                        # Una cara movida arruina la portada aunque el fondo esté nítido.
+                        bonus_cara += min(50.0, math.log1p(max(0.0, nitidez_cara)) * 9.0)
             except Exception:
                 pass
 
@@ -412,7 +414,7 @@ def _encuadre_9_16(rgb, cara):
     """Recorta 9:16 con la cara en el tercio superior, libre del texto. Devuelve `(recorte, cara)`."""
     h, w = rgb.shape[:2]
     alto_max = min(float(h), w * 16.0 / 9.0)
-    alto = min(alto_max, max(alto_max * 0.55, cara[3] / 0.20)) if cara else alto_max
+    alto = min(alto_max, max(alto_max * 0.82, cara[3] / 0.20)) if cara else alto_max
     ancho = alto * 9.0 / 16.0
     cx, cy = (cara[0], cara[1]) if cara else (w / 2.0, h / 2.0)
     x0 = int(round(max(0.0, min(w - ancho, cx - ancho / 2.0))))
@@ -428,7 +430,7 @@ def _mascara_personaje(img, cara):
     import numpy as np
 
     h, w = img.shape[:2]
-    sw, sh = 360, 640
+    sw, sh = 540, 960
     ex, ey = sw / float(w), sh / float(h)
     cx, cy, fw, fh = cara[0] * ex, cara[1] * ey, cara[2] * ex, cara[3] * ey
     m = np.full((sh, sw), cv2.GC_PR_BGD, np.uint8)
@@ -455,9 +457,22 @@ def _mascara_personaje(img, cara):
     # Un recorte que deja fuera la cabeza es peor que el foco suave.
     if float(fg[caja(cx - fw * 0.6, cy - fh * 0.7, cx + fw * 0.6, cy + fh * 0.6)].mean()) < 0.7:
         return None
-    fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-    grande = cv2.resize(fg.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
-    return np.clip(cv2.GaussianBlur(grande, (0, 0), 3.2), 0.0, 1.0)
+    fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)))
+    grande = cv2.resize(fg.astype(np.float32), (w, h), interpolation=cv2.INTER_CUBIC)
+    return _ajustar_a_bordes(np.clip(grande, 0.0, 1.0), img)
+
+
+def _ajustar_a_bordes(mascara, img, radio=20, eps=2e-3):
+    """Filtro guiado: la silueta sigue los bordes reales de la foto y no los escalones de la máscara."""
+    import cv2
+    import numpy as np
+
+    guia = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+    caja = lambda a: cv2.boxFilter(a, -1, (radio * 2 + 1, radio * 2 + 1))
+    media_g, media_m = caja(guia), caja(mascara)
+    a = (caja(guia * mascara) - media_g * media_m) / (caja(guia * guia) - media_g * media_g + eps)
+    b = media_m - a * media_g
+    return np.clip(caja(a) * guia + caja(b), 0.0, 1.0)
 
 
 def _foco_suave(h, w, cara):
@@ -480,27 +495,23 @@ def editar_portada_9_16(frame_rgb):
     recorte, cara = _encuadre_9_16(rgb, _cara_principal(rgb))
     ex, ey = PORTADA_W / float(recorte.shape[1]), PORTADA_H / float(recorte.shape[0])
     interp = cv2.INTER_LANCZOS4 if ex > 1.0 else cv2.INTER_AREA
-    img = cv2.resize(np.ascontiguousarray(recorte), (PORTADA_W, PORTADA_H), interpolation=interp)
+    # Quitar los bloques de compresión antes de ampliar: después serían cuadros visibles.
+    limpio = cv2.fastNlMeansDenoisingColored(np.ascontiguousarray(recorte), None, 2, 4, 5, 15) if ex > 1.0 else recorte
+    img = cv2.resize(np.ascontiguousarray(limpio), (PORTADA_W, PORTADA_H), interpolation=interp)
     cara = (cara[0] * ex, cara[1] * ey, cara[2] * ex, cara[3] * ey) if cara else None
 
     mascara = _mascara_personaje(img, cara) if cara else None
     alfa = mascara if mascara is not None else _foco_suave(PORTADA_H, PORTADA_W, cara)
 
-    # Fondo desenfocado, oscuro y con menos color; personaje más luminoso, saturado y nítido.
-    fondo = cv2.GaussianBlur(img, (0, 0), 16).astype(np.float32)
+    # Como el modo retrato: fondo suave y más oscuro, personaje natural. El borde se funde, no se corta.
+    fondo = cv2.GaussianBlur(img, (0, 0), 11).astype(np.float32)
     gris = fondo.mean(axis=2, keepdims=True)
-    fondo = (gris + (fondo - gris) * 0.55) * 0.42
+    fondo = (gris + (fondo - gris) * 0.75) * 0.62
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
-    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.2, 0, 255)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.08, 0, 255)
     sujeto = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
-    sujeto = cv2.addWeighted(sujeto, 1.45, cv2.GaussianBlur(sujeto, (0, 0), 2.2), -0.45, 0)
-    sujeto = np.clip(sujeto.astype(np.float32) * 1.07 + 6.0, 0, 255)
+    sujeto = cv2.addWeighted(sujeto, 1.3, cv2.GaussianBlur(sujeto, (0, 0), 3.0), -0.3, 0).astype(np.float32)
     salida = sujeto * alfa[:, :, None] + fondo * (1.0 - alfa[:, :, None])
-
-    if mascara is not None:
-        # Halo fino que separa la silueta del fondo.
-        halo = (np.clip(cv2.GaussianBlur(mascara, (0, 0), 7) * 1.8, 0.0, 1.0) * (1.0 - mascara))[:, :, None] * 0.6
-        salida = salida * (1.0 - halo) + np.array((255.0, 230.0, 0.0), np.float32) * halo
     return np.clip(salida, 0, 255).astype(np.uint8)
 
 
@@ -549,11 +560,9 @@ def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None
     # 1. Realce limpio de luminancia (LAB) para que el rostro destaque sin ruido de color
     lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
     l_ch, a_ch, b_ch = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=1.65, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=1.3, tileGridSize=(8, 8))
     l_eq = clahe.apply(l_ch)
-    l_mix = cv2.addWeighted(l_ch, 0.55, l_eq, 0.45, 0)
-    blur_l = cv2.GaussianBlur(l_mix, (0, 0), 1.3)
-    l_sharp = cv2.addWeighted(l_mix, 1.28, blur_l, -0.28, 0)
+    l_sharp = cv2.addWeighted(l_ch, 0.75, l_eq, 0.25, 0)
     img = cv2.cvtColor(cv2.merge((l_sharp, a_ch, b_ch)), cv2.COLOR_LAB2RGB)
 
     # 2. Degradado oscuro cinematográfico inferior (y sutil superior) para contraste perfecto del texto
