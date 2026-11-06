@@ -28,20 +28,20 @@ SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # retira, se usa el siguiente de la lista.
 MOTORES = {
     "ligero": {
-        "nombre": "Ligero (Llama 3.1 8B)",
-        "llm": ["llama-3.1-8b-instant"],
+        "nombre": "Ligero (GPT-OSS 20B)",
+        "llm": ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
         "whisper": "whisper-large-v3-turbo",
         "reencuadre": "ligero",
     },
     "equilibrado": {
         "nombre": "Equilibrado (GPT-OSS 20B)",
-        "llm": ["openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "llm": ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"],
         "whisper": "whisper-large-v3",
         "reencuadre": "equilibrado",
     },
     "pro": {
         "nombre": "Pro (GPT-OSS 120B) - recomendado",
-        "llm": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "llm": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
         "whisper": "whisper-large-v3",
         "reencuadre": "pro",
     },
@@ -103,7 +103,9 @@ def chat(mensajes, modelos, json_mode=True, temperatura=0.4, max_tokens=4000):
                 continue
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"], modelo
-            ultimo = f"{modelo}: HTTP {r.status_code} {r.text[:200]}"
+            # Un modelo retirado no debe tapar la causa real del fallo de los anteriores.
+            if r.status_code != 404 or not ultimo:
+                ultimo = f"{modelo}: HTTP {r.status_code} {r.text[:200]}"
             if r.status_code == 429:
                 time.sleep(float(r.headers.get("retry-after", 5)))
                 continue
@@ -362,7 +364,9 @@ REGLAS DE ORO:
    picos emocionales, consejos muy útiles, momentos "no puedo creer que dijo eso".
 6. EVITA: saludos, introducciones, publicidad/patrocinios, despedidas, relleno, partes que
    dependen de contexto previo.
-7. Los clips no pueden solaparse.
+7. Los clips no pueden solaparse. NORMAS DE TIKTOK: NO elijas momentos con agresiones físicas,
+   amenazas, insultos de odio, humillación a una persona, actos peligrosos, drogas, contenido sexual,
+   menores en riesgo ni anuncios de negocios, precios, teléfonos o llamadas a comprar.
 8. Sé exigente con la puntuación (0-100): 90+ solo para momentos realmente virales.
 9. Escribe en el MISMO idioma del video: "titulo" (3-7 palabras en MAYÚSCULAS, gancho),
    "descripcion" (1-2 frases atractivas para la publicación, con 1-2 emojis) y "hashtags"
@@ -378,8 +382,8 @@ def _lineas(frs):
     return "\n".join(f"[{f['i']}] ({f['start']:.1f}-{f['end']:.1f}s) {f['text']}" for f in frs)
 
 
-def _ventanas(frs, max_palabras=35000):
-    """Parte transcripciones enormes en ventanas que caben en el contexto del modelo."""
+def _ventanas(frs, max_palabras=1800):
+    """Parte la transcripción para respetar el plan gratuito de Groq: 8000 tokens por minuto y petición."""
     ventanas, actual, n = [], [], 0
     for f in frs:
         n += len(f["text"].split())
@@ -482,7 +486,7 @@ def _revisar(elegidos, frs, dur_min, dur_max, modelos, avisar=print, criterio=""
                        + _lineas(frs[lo:hi + 1]))
     try:
         texto, _ = chat([{"role": "system", "content": REVISOR.format(min_s=int(dur_min), max_s=int(dur_max)) + criterio},
-                         {"role": "user", "content": "\n\n".join(bloques)}], modelos, max_tokens=6000)
+                         {"role": "user", "content": "\n\n".join(bloques)}], modelos, max_tokens=2500)
         revisados = {int(r.get("id")): r for r in _leer_json(texto).get("clips") or [] if "id" in r}
     except Exception as e:
         avisar(f"Revisión de clips no disponible ({e}).")
@@ -547,10 +551,10 @@ def seleccionar(frs, num, dur_max, total, motor="pro", avisar=print, moment_focu
     try:
         for v in _ventanas(frs):
             sistema = SISTEMA.format(min_s=int(dur_min), max_s=int(dur_max)) + criterio
-            usuario = (f"Encuentra los {max(num * 3, 6)} mejores momentos virales (ordenados de mejor a "
+            usuario = (f"Encuentra los {min(max(num * 3, 6), 8)} mejores momentos virales (ordenados de mejor a "
                        f"peor). Recuerda: cada clip dura {int(dur_min)} s o más.\n\nTRANSCRIPCIÓN:\n{_lineas(v)}")
             texto, modelo = chat([{"role": "system", "content": sistema},
-                                  {"role": "user", "content": usuario}], modelos, max_tokens=8000)
+                                  {"role": "user", "content": usuario}], modelos, max_tokens=3000)
             avisar(f"Momentos analizados con {modelo}")
             respuesta = _leer_json(texto)
             if not isinstance(respuesta, dict) or not isinstance(respuesta.get('clips'), list):

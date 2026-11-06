@@ -16,7 +16,7 @@ CALIDAD = {
     'commentary_mode': 'off', 'commentary_style': 'gancho', 'commentary_voice': 'male',
     'cold_open': False, 'jump_cuts': False, 'auto_split': False,
     'ambient_music': 'off', 'clean_vocals': False,
-    'auto_thumbnail': 'off', 'strip_metadata': True,
+    'auto_thumbnail': 'off', 'strip_metadata': True, 'auto_hashtags': True, 'politicas_tiktok': 'alto',
 }
 
 
@@ -68,6 +68,11 @@ def snapshot(opciones):
         if not isinstance(sm, bool):
             raise ValueError('El borrado de metadatos debe ser verdadero o falso.')
         result['strip_metadata'] = sm
+    if 'politicas_tiktok' in result:
+        from smart_politicas import validate_policy_mode
+        result['politicas_tiktok'] = validate_policy_mode(result['politicas_tiktok'])
+    if not isinstance(result.get('auto_hashtags', True), bool):
+        raise ValueError('La opción de hashtags debe ser verdadero o falso.')
     mode = result.get('clip_selection', 'ai')
     if mode not in ('ai', 'sequential'):
         raise ValueError('Elige partes consecutivas o mejores momentos.')

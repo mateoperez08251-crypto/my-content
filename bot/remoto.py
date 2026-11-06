@@ -92,6 +92,11 @@ class Cliente:
         from smart_commentary import validate_commentary_options
         from smart_remix import CAPACIDAD_ORIGINALIDAD, es_originalidad_activa, validate_remix_options
         from smart_thumbnail import validate_thumbnail_options
+        if (str(preset.get('commentary_voice', '')).startswith('eleven:')
+                and str(preset.get('commentary_mode', 'off')) != 'off'
+                and 'voz_elevenlabs_v1' not in (self.probar().get('capabilities') or [])):
+            raise FalloTrabajo('Colab tiene una versión antigua sin voces de ElevenLabs. Abre la libreta nueva, '
+                               'ejecuta todas las celdas hasta 6C y pega la URL nueva en el bot.')
         validate_commentary_options(
             preset.get('commentary_mode', 'off'),
             preset.get('commentary_style', 'gancho'),

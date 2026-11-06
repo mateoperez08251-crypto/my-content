@@ -97,3 +97,25 @@ firebase_web.json
 cookies_youtube.txt
 configuracion_local_privada.zip
 live_segments/
+
+# Datos de ejecución de la app (no subir)
+radar_seguimiento.db
+radar_inbox.jsonl
+radar_estado.json
+monitor_history.json
+bot_clips/
+
+# Libreta con claves: nunca subir
+colab/*_PRIVADA.ipynb
+
+# Cola de subida: contiene URLs firmadas
+cola.json
+cola_hecha.json
+cola_cuentas.json
+.cola_estado.json
+.cola.lock
+registro.log
+videos/
+buzon_envios.json
+buzon_url.txt
+cloudflared.log

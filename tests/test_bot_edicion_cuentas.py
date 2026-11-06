@@ -117,6 +117,21 @@ class EdicionesCuentaTests(unittest.TestCase):
         self.assertEqual(nuevo.db.cuenta(self.a)['preset_corte'], 'A')
         self.assertEqual(json.loads(nuevo.db.trabajo(anterior)['opciones'])['style'], 'minimal')
 
+    def test_regla_rechaza_preset_inexistente_y_guarda_el_valido(self):
+        with self.assertRaises(ValueError):
+            self.m.guardar_regla('@canal', [self.a], preset='no-existe')
+        self.assertEqual(self.m.db.reglas(), [])
+        self.m.guardar_regla('@canal', [self.a], preset=' B ')
+        self.assertEqual(self.m.db.reglas()[0]['preset'], 'B')
+
+    def test_inicio_fuera_del_video_no_se_reintenta(self):
+        from editor_controls import ERROR_INTERVALO
+        tid = self.m.encolar('https://youtu.be/x', cuentas=[self.a], devolver_ids=True)[0]
+        with patch.object(self.m, 'smart_split', side_effect=ValueError(ERROR_INTERVALO)):
+            self.m._procesar_trabajo(self.m.db.trabajo(tid))
+        t = self.m.db.trabajo(tid)
+        self.assertEqual((t['estado'], t['intentos']), ('error', 1))
+
     def test_invalido_no_sustituye_asignacion_ni_crea_lote_parcial(self):
         with self.assertRaises(ValueError):
             self.m.guardar_cuenta(self.a, {'preset_corte':'no-existe'})

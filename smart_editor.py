@@ -291,11 +291,18 @@ def _fijar_lista_clips(seleccion, base=0.0):
     for i, c in enumerate(seleccion or []):
         ini = float(c.get("inicio", 0.0)) + float(base or 0.0)
         fin = float(c.get("fin", 0.0)) + float(base or 0.0)
+        pts_raw = c.get("puntuacion")
+        try:
+            pts_val = int(float(pts_raw)) if pts_raw is not None and float(pts_raw) > 0 else None
+        except (TypeError, ValueError):
+            pts_val = None
         nuevos.append({
             "index": i + 1,
             "titulo": str(c.get("titulo") or f"Clip {i + 1}").strip() or f"Clip {i + 1}",
             "inicio": round(ini, 2),
             "fin": round(fin, 2),
+            "puntuacion": pts_val,
+            "gancho": str(c.get("gancho") or "").strip()[:180],
             "estado": "esperando",
             "pct": 0,
             "etapa": "En espera de turno",
@@ -466,7 +473,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         upscale_python="", upscale_model="", moment_focus="general", context_before_seconds=0, moment_query="",
                         commentary_mode="off", commentary_style="gancho", commentary_voice="male", voice_config=None,
                         cold_open=False, jump_cuts=False, auto_split=False, ambient_music="off", clean_vocals=False,
-                        auto_thumbnail="off", strip_metadata=True):
+                        auto_thumbnail="off", strip_metadata=True, auto_hashtags=True, politicas_tiktok="off"):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import bisect
@@ -489,7 +496,12 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         select_cold_open,
         validate_remix_options,
     )
+    from smart_politicas import CLIPS_DE_RESERVA, filtrar_seleccion, validate_policy_mode
+    politicas_tiktok = validate_policy_mode(politicas_tiktok)
     from smart_thumbnail import (
+        PORTADA_H,
+        PORTADA_W,
+        editar_portada_9_16,
         extract_interesting_quote,
         render_viral_thumbnail,
         select_best_thumbnail_frame,
@@ -584,9 +596,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             seleccion = sequential_parts(total_duration, clip_duration)
         else:
             write_progress("Buscando los momentos más virales (IA)...", 22)
+            # Reservas para reemplazar los clips que descarte la revisión de normas.
+            clips_pedidos = int(num_clips) + (CLIPS_DE_RESERVA if politicas_tiktok != "off" else 0)
             frs = cv.frases(words, segmentos)
             seleccion = [] if bot_unique and excluded_ranges else cv.seleccionar(
-                frs, int(num_clips), float(clip_duration), total_duration, motor=motor_ia, avisar=print, **seleccion_opciones)
+                frs, clips_pedidos, float(clip_duration), total_duration, motor=motor_ia, avisar=print, **seleccion_opciones)
         if bot_unique:
             from smart_selection import new_parts
             if clip_selection == "sequential":
@@ -602,7 +616,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     if not phrases:
                         continue
                     try:
-                        nuevos = cv.seleccionar(phrases, int(num_clips), float(clip_duration), b - a,
+                        nuevos = cv.seleccionar(phrases, clips_pedidos, float(clip_duration), b - a,
                                                 motor=motor_ia, avisar=print, **seleccion_opciones)
                     except SinMomentos:
                         continue
@@ -613,11 +627,17 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             c["momento_segundos"] += a
                         if a <= c["inicio"] < c["fin"] <= b:
                             candidates.append(c)
-                    if len(candidates) >= int(num_clips):
+                    if len(candidates) >= clips_pedidos:
                         break
-                seleccion = sorted(candidates, key=lambda c: c["puntuacion"], reverse=True)[:int(num_clips)]
+                seleccion = sorted(candidates, key=lambda c: c["puntuacion"], reverse=True)[:clips_pedidos]
             if not seleccion:
                 raise NoNewClips(ERROR_NUEVOS)
+        if politicas_tiktok != "off":
+            write_progress("Revisando normas de TikTok en texto e imagen...", 24)
+            seleccion = filtrar_seleccion(seleccion, words, lambda t: clip.get_frame(t), politicas_tiktok,
+                                          int(num_clips) if clip_selection == "ai" else None)
+            if not seleccion:
+                raise NoNewClips("Todos los momentos de este video incumplen las normas de TikTok. No se editó ningún clip.")
         for c in seleccion:
             print(f"  Clip {c['inicio']:.1f}-{c['fin']:.1f}s · {c['titulo']}")
         _fn_fijar_clips = globals().get("_fijar_lista_clips")
@@ -880,7 +900,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             style=commentary_style, language=dubbing_language, motor=motor_ia)
                         intro_wav = os.path.join(tl_dir, "comm_intro.wav")
                         _, intro_marks, _, intro_env = synthesize_commentary_line(
-                            comm_meta["intro"], intro_wav, language=comm_meta["language"],
+                            comm_meta.get("intro_voz") or comm_meta["intro"], intro_wav, language=comm_meta["language"],
                             voice=commentary_voice, voice_config=voice_config)
                         intro_pcm = _leer_wav_estereo_48k(intro_wav)
                         intro_dur = len(intro_pcm) / 48000.0
@@ -939,7 +959,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     if commentary_mode == "intro_outro" and comm_meta and comm_meta.get("outro"):
                         outro_wav = os.path.join(tl_dir, "comm_outro.wav")
                         _, outro_marks, _, outro_env = synthesize_commentary_line(
-                            comm_meta["outro"], outro_wav, language=comm_meta["language"],
+                            comm_meta.get("outro_voz") or comm_meta["outro"], outro_wav, language=comm_meta["language"],
                             voice=commentary_voice, voice_config=voice_config)
                         outro_pcm = _leer_wav_estereo_48k(outro_wav)
                         outro_dur = len(outro_pcm) / 48000.0
@@ -1097,14 +1117,16 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         is_live=es_live_src,
                     )
                     _, best_thumb_frame = select_best_thumbnail_frame(
-                        lambda tc: _encuadrar_origen(subclip.get_frame, tc, final_w, final_h, 1.0),
+                        # Fotograma original: la portada no hereda el formato ni el encuadre del preset.
+                        lambda tc: subclip.get_frame(max(0.0, min(raw_dur - 1e-3, float(tc)))),
                         raw_dur,
                         target_second=quote_meta.get("target_second"),
                     )
                     if getattr(best_thumb_frame, "ndim", 0) == 3:
                         thumb_candidate_path = os.path.splitext(out_name)[0] + "_miniatura.jpg"
                         thumb_rgb, saved_jpg = render_viral_thumbnail(
-                            best_thumb_frame, quote_meta, out_w=final_w, out_h=final_h, jpg_path=thumb_candidate_path
+                            editar_portada_9_16(best_thumb_frame), quote_meta,
+                            out_w=PORTADA_W, out_h=PORTADA_H, jpg_path=thumb_candidate_path
                         )
                         thumb_jpg_path = saved_jpg or ""
                         thumb_quote = str(quote_meta.get("quote") or "")
@@ -1112,10 +1134,12 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             _fn_upd_thumb2 = globals().get("_actualizar_thumb_clip_runtime")
                             if callable(_fn_upd_thumb2):
                                 _fn_upd_thumb2(idx, thumb_jpg_path)
-                        if auto_thumbnail == "cover_and_jpg" and getattr(thumb_rgb, "ndim", 0) == 3:
+                        # Una portada 9:16 no cabe dentro de un MP4 horizontal: ahí queda solo el JPG.
+                        if auto_thumbnail == "cover_and_jpg" and getattr(thumb_rgb, "ndim", 0) == 3 and final_h >= final_w:
+                            portada_video = cv2.resize(thumb_rgb, (final_w, final_h), interpolation=cv2.INTER_AREA)
                             audio_ref = getattr(processed_clip, "audio", None)
                             processed_clip = processed_clip.transform(
-                                lambda get, t, cover=thumb_rgb: cover if t < 0.12 else get(t)
+                                lambda get, t, cover=portada_video: cover if t < 0.12 else get(t)
                             )
                             if audio_ref is not None and getattr(processed_clip, "audio", None) is None:
                                 processed_clip = processed_clip.with_audio(audio_ref)
@@ -1173,6 +1197,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     _fn_done_clip(idx, out_name, thumb_jpg_path)
 
                 # 5. Descripción viral lista para publicar (también en un .txt junto al clip)
+                if not auto_hashtags:
+                    info = {**info, "hashtags": [], "publicacion": "",
+                            "descripcion": re.sub(r"\s*#\w+", "", str(info.get("descripcion") or "")).strip()}
                 publicacion = cv.texto_publicacion(info)
                 try:
                     with open(os.path.splitext(out_name)[0] + ".txt", "w", encoding="utf-8") as f:
@@ -1194,7 +1221,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 clip_meta_item = {
                     "archivo": out_name, "titulo": info["titulo"], "descripcion": info["descripcion"],
                     "hashtags": info["hashtags"], "publicacion": publicacion,
-                    "puntuacion": info["puntuacion"], "inicio": base + st, "fin": base + et,
+                    "puntuacion": info["puntuacion"], "gancho": info.get("gancho", ""),
+                    "inicio": base + st, "fin": base + et,
                     "idioma_voz": dubbing_language, "texto_doblaje": translated, "hablantes": speaker_report,
                     "clip_selection": clip_selection, "calidad_origen": calidad_origen,
                     "moment_focus": moment_focus, "context_before_seconds": context_before_seconds,
@@ -1353,7 +1381,9 @@ def main(argv):
                 ambient_music=cfg.get("ambient_music", "off"),
                 clean_vocals=cfg.get("clean_vocals", False),
                 auto_thumbnail=cfg.get("auto_thumbnail", "off"),
-                strip_metadata=cfg.get("strip_metadata", True))
+                strip_metadata=cfg.get("strip_metadata", True),
+                auto_hashtags=cfg.get("auto_hashtags", True),
+                politicas_tiktok=cfg.get("politicas_tiktok", "alto"))
         except InicioFueraDeVideo as e:
             print("RESULT_ERROR:" + json.dumps({"code": "inicio_fuera_video"}))
             write_progress(f"Error: {e}", -1)

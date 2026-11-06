@@ -96,7 +96,51 @@ def login_abierto(perfil):
         return os.path.abspath(perfil) in _logins
 
 
-def _cerrar_proceso(proc, espera_s):
+def _esperar_cierre_perfil(perfil, timeout_s=4.0):
+    """Espera a que terminen los subprocesos del perfil (p. ej. NetworkService guardando Cookies)."""
+    ruta_abs = os.path.abspath(perfil)
+    if not os.path.isdir(ruta_abs):
+        time.sleep(1.5)
+        return
+    try:
+        import psutil
+    except ImportError:
+        time.sleep(2)
+        return
+    if not hasattr(psutil, "process_iter"):
+        time.sleep(2)
+        return
+    fin = time.monotonic() + max(0.5, float(timeout_s))
+    vio_procesos = False
+    vivos = []
+    while time.monotonic() < fin:
+        vivos = []
+        for p in psutil.process_iter(["cmdline"]):
+            try:
+                args = p.info.get("cmdline") or []
+                perfiles = [a.split("=", 1)[1] for a in args[1:] if a.startswith("--user-data-dir=")]
+                perfiles += [args[i + 1] for i, a in enumerate(args[:-1]) if a == "--user-data-dir"]
+                if perfiles and os.path.isabs(perfiles[0]) and _misma_ruta(perfiles[0], ruta_abs) and p.is_running():
+                    vivos.append((p, args))
+            except (psutil.Error, OSError):
+                continue
+        if not vivos:
+            break
+        vio_procesos = True
+        time.sleep(0.25)
+    else:
+        principales = [p for p, a in vivos if not any(x.startswith("--type=") for x in a[1:])]
+        if not principales:
+            for p, _ in vivos:
+                try:
+                    p.terminate()
+                except (psutil.Error, OSError):
+                    pass
+            time.sleep(0.3)
+    time.sleep(0.8 if vio_procesos else 1.5)
+
+
+def _cerrar_proceso(proc, espera_s, perfil=None):
     """Cierre normal del PID comprobado; esperar antes de anunciar éxito."""
     if os.name == 'nt':
         # WM_CLOSE permite que Chromium guarde cookies y cierre sin taskkill.
@@ -117,8 +161,15 @@ def _cerrar_proceso(proc, espera_s):
             return True
         user32.EnumWindows(close_window, 0)
         if not any(sent):
-            raise ValueError('Encontré el proceso del perfil, pero no una ventana que acepte el cierre. '
-                             'Revisa si Chrome muestra un aviso y cierra la ventana de esa cuenta con la X.')
+            if perfil is not None and hasattr(proc, "terminate"):
+                try:
+                    proc.terminate()
+                except Exception:
+                    raise ValueError('Encontré el proceso del perfil, pero no una ventana que acepte el cierre. '
+                                     'Revisa si Chrome muestra un aviso y cierra la ventana de esa cuenta con la X.') from None
+            else:
+                raise ValueError('Encontré el proceso del perfil, pero no una ventana que acepte el cierre. '
+                                 'Revisa si Chrome muestra un aviso y cierra la ventana de esa cuenta con la X.')
     else:
         proc.terminate()
     try:
@@ -130,26 +181,94 @@ def _cerrar_proceso(proc, espera_s):
 def cerrar_normal(perfil, espera_s=10, *, recuperar=False, navegador="auto"):
     """Cierra la ventana registrada o recupera el perfil exacto de esta cuenta.
     Devuelve True si no había hilo de login encargado de comprobar al cerrar."""
+    ruta_abs = os.path.abspath(perfil)
     with _logins_guard:
-        proc = _logins.get(os.path.abspath(perfil))
-    if proc is not None and proc.poll() is None:
-        _cerrar_proceso(proc, espera_s)
+        proc = _logins.get(ruta_abs)
+    if proc is not None:
+        if proc.poll() is None:
+            _cerrar_proceso(proc, espera_s, perfil=ruta_abs)
+        # Si proc.poll() ya no es None, la ventana acaba de cerrarse y _hilo_login
+        # está guardando cookies para comprobar la sesión automáticamente.
         return False
     if not recuperar:
         raise ValueError('No hay una ventana de inicio de sesión abierta para esta cuenta.')
     lk = _lock(perfil)
-    if not lk.acquire(blocking=False):
+    if not lk.acquire(timeout=0.4):
         raise PerfilOcupado('El bot está usando esta cuenta para comprobar o subir. Espera a que termine.')
     try:
         _, ruta = _ejecutable_login(navegador)
         proc = _recuperar_login(perfil, ruta)
+        if (proc is None or proc.poll() is not None) and navegador in ("auto", "", None):
+            for alt in ("brave", "chrome", "edge"):
+                for candidato in _EJECUTABLES.get(alt, []):
+                    if candidato and candidato != ruta and os.path.isfile(candidato):
+                        proc = _recuperar_login(perfil, candidato)
+                        if proc is not None and proc.poll() is None:
+                            break
+                if proc is not None and proc.poll() is None:
+                    break
         if proc is None or proc.poll() is not None:
+            if _limpiar_arranque(perfil) > 0:
+                return True
             raise ValueError('No encontré una ventana normal de esta cuenta para cerrar. '
-                             'Revisa el navegador elegido y cierra cualquier otra copia de My Content. '
-                             'Si no hay ventanas abiertas, pulsa Comprobar sesión.')
-        _cerrar_proceso(proc, espera_s)
-        time.sleep(2)  # Dejar que el perfil termine de guardar sus datos.
+                             'Si ya la cerraste, pulsa «Comprobar sesión» o usa «Cerrar sesión» para reiniciar el acceso.')
+        _cerrar_proceso(proc, espera_s, perfil=ruta_abs)
+        _esperar_cierre_perfil(ruta_abs)
         return True
+    finally:
+        lk.release()
+
+
+def cerrar_sesion_perfil(perfil, navegador="auto"):
+    """Cierra cualquier ventana de este perfil aislado y borra sus cookies/sesión sin reiniciar la app."""
+    import shutil
+    ruta_abs = os.path.abspath(perfil)
+    if os.path.basename(os.path.dirname(ruta_abs)) != "bot_perfiles":
+        raise ValueError("Ruta de perfil no válida para limpiar sesión.")
+    try:
+        cerrar_normal(ruta_abs, espera_s=8, recuperar=True, navegador=navegador)
+    except ValueError:
+        pass
+    lk = _lock(ruta_abs)
+    if not lk.acquire(timeout=5.0):
+        raise PerfilOcupado("Espera a que termine la comprobación o subida actual antes de cerrar la sesión.")
+    try:
+        _limpiar_arranque(ruta_abs)
+        _esperar_cierre_perfil(ruta_abs, timeout_s=3.0)
+        for candado in _CANDADOS:
+            p_candado = os.path.join(ruta_abs, candado)
+            try:
+                if os.path.lexists(p_candado):
+                    os.remove(p_candado)
+            except OSError:
+                pass
+        default_dir = os.path.join(ruta_abs, "Default")
+        archivos_sesion = (
+            os.path.join(default_dir, "Network", "Cookies"),
+            os.path.join(default_dir, "Network", "Cookies-journal"),
+            os.path.join(default_dir, "Network", "Cookies-wal"),
+            os.path.join(default_dir, "Network", "Cookies-shm"),
+            os.path.join(default_dir, "Cookies"),
+            os.path.join(default_dir, "Cookies-journal"),
+            os.path.join(default_dir, "Web Data"),
+            os.path.join(default_dir, "Web Data-journal"),
+        )
+        carpetas_sesion = (
+            os.path.join(default_dir, "Local Storage"),
+            os.path.join(default_dir, "Session Storage"),
+            os.path.join(default_dir, "IndexedDB"),
+            os.path.join(default_dir, "Sessions"),
+            os.path.join(default_dir, "Service Worker"),
+        )
+        for arch in archivos_sesion:
+            try:
+                if os.path.lexists(arch):
+                    os.remove(arch)
+            except OSError:
+                pass
+        for carp in carpetas_sesion:
+            if os.path.isdir(carp):
+                shutil.rmtree(carp, ignore_errors=True)
     finally:
         lk.release()
 
@@ -194,8 +313,9 @@ def usar_ahorro_ram() -> bool:
         return False
 
 
-def args_lanzamiento() -> list[str]:
-    return ARGS + ARGS_BAJA_RAM if usar_ahorro_ram() else list(ARGS)
+def args_lanzamiento(headless: bool = False) -> list[str]:
+    base = [a for a in ARGS if a != "--start-maximized"] + ["--window-size=1280,800"] if headless else list(ARGS)
+    return base + ARGS_BAJA_RAM if usar_ahorro_ram() else base
 
 
 class SinNavegador(Exception):
@@ -305,7 +425,7 @@ def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False, naveg
         os.makedirs(perfil, exist_ok=True)
         nombre, ruta = buscar_navegador(navegador)
         with sync_playwright() as p:
-            opciones = dict(user_data_dir=perfil, headless=headless, args=args_lanzamiento(), no_viewport=True,
+            opciones = dict(user_data_dir=perfil, headless=headless, args=args_lanzamiento(headless=headless), no_viewport=True,
                             ignore_default_args=["--enable-automation"], locale="es-ES",
                             accept_downloads=False, timeout=LAUNCH_TIMEOUT_MS)
             if ruta:
@@ -314,20 +434,31 @@ def abrir(perfil: str, headless: bool = False, esperar_lock: bool = False, naveg
                 try:
                     ctx = p.chromium.launch_persistent_context(**opciones)
                 except Exception as primero:
-                    if not _es_timeout_arranque(primero):
-                        raise
-                    # Arranque colgado: limpiar restos del perfil y reintentar una vez.
-                    _limpiar_arranque(perfil)
-                    try:
-                        ctx = p.chromium.launch_persistent_context(**opciones)
-                    except Exception as segundo:
-                        if not _es_timeout_arranque(segundo):
+                    if es_perfil_ocupado(primero) and not login_abierto(perfil):
+                        # Si quedó un navegador automatizado huérfano o candado viejo tras un fallo previo,
+                        # limpiarlo y reintentar automáticamente sin obligar a reiniciar la app.
+                        candados_antes = any(os.path.lexists(os.path.join(perfil, c)) for c in _CANDADOS)
+                        limpiados = _limpiar_arranque(perfil)
+                        candados_despues = any(os.path.lexists(os.path.join(perfil, c)) for c in _CANDADOS)
+                        if limpiados > 0 or (candados_antes and not candados_despues):
+                            ctx = p.chromium.launch_persistent_context(**opciones)
+                        else:
                             raise
+                    elif not _es_timeout_arranque(primero):
+                        raise
+                    else:
+                        # Arranque colgado: limpiar restos del perfil y reintentar una vez.
                         _limpiar_arranque(perfil)
-                        raise NavegadorNoArranca(
-                            f"{nombre.capitalize()} no terminó de abrir en {LAUNCH_TIMEOUT_MS // 1000} s "
-                            "(2 intentos). Cierra las ventanas del navegador de esta cuenta, comprueba que "
-                            f"{nombre.capitalize()} abre normal y se reintentará solo.") from None
+                        try:
+                            ctx = p.chromium.launch_persistent_context(**opciones)
+                        except Exception as segundo:
+                            if not _es_timeout_arranque(segundo):
+                                raise
+                            _limpiar_arranque(perfil)
+                            raise NavegadorNoArranca(
+                                f"{nombre.capitalize()} no terminó de abrir en {LAUNCH_TIMEOUT_MS // 1000} s "
+                                "(2 intentos). Cierra las ventanas del navegador de esta cuenta, comprueba que "
+                                f"{nombre.capitalize()} abre normal y se reintentará solo.") from None
             except NavegadorNoArranca:
                 raise
             except Exception as e:
@@ -432,7 +563,7 @@ def abrir_normal(perfil: str, url: str, navegador: str = "auto", limite_s: int =
         except subprocess.TimeoutExpired:
             cerrar_normal(perfil)
             proc.wait(timeout=30)
-        time.sleep(2)  # que el navegador termine de guardar las cookies
+        _esperar_cierre_perfil(perfil)  # esperar a que terminen de escribirse las cookies en disco
         return nombre
     finally:
         with _logins_guard:

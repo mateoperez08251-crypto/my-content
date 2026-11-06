@@ -183,7 +183,7 @@ class LimitePublicacion(unittest.TestCase):
         self.h.escribir.assert_called_once_with(self.editor, self.texto)
         self.parches["_esperar_publicacion"].assert_called_once_with(
             self.page, set(), texto=self.texto, publicaciones_antes=frozenset(), informar=self.h.informar)
-        self.assertEqual(self.h.informar.call_count, 5)
+        self.assertEqual(self.h.informar.call_count, 6)
 
     def test_texto_incorrecto_detiene_sin_publicar(self):
         self.h.escribir.side_effect = None

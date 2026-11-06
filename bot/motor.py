@@ -14,13 +14,14 @@ import threading
 import time
 import traceback
 from datetime import datetime
+from editor_controls import ERROR_INTERVALO
 from texto_publicacion import crear_publicacion, limpiar_titulo
 from firebase_radar.functions.canales import coincide, permitido
 import winproc
 
 from . import archivos, cookies_auto, locales, navegador, remoto
 from .planificacion import estimar
-from .ritmo import horario, intervalo
+from .ritmo import franjas, intervalo
 from .presets import NOMBRE_CALIDAD, snapshot
 from .db import DB
 from .cancelacion import ControlSubida, SubidaCancelada
@@ -99,6 +100,10 @@ def _en_horario(inicio: str, fin: str, ahora=None) -> bool:
     return a <= x < b if a < b else (x >= a or x < b)
 
 
+def _en_franjas(cuenta, cfg, ahora=None) -> bool:
+    return any(_en_horario(inicio, fin, ahora) for inicio, fin in franjas(cuenta, cfg))
+
+
 class Motor:
     def __init__(self, carpeta, smart_split=None, descargar=None, ocupar=None, liberar=None,
                  log=print, notificar=None, firebase=None, cargar_preset=None, almacenamiento=None):
@@ -138,6 +143,7 @@ class Motor:
         self._ultimo_firebase = 0.0
         self._libre_global = self.cfg['proxima_global']
         self._remoto_caido_hasta = 0.0
+        self._remoto_fallos = 0
         self._remoto_estado = ""
         self._remoto_avisado = False   # ya se avisó por WhatsApp de que Colab se cayó
         self._lives = None
@@ -147,6 +153,8 @@ class Motor:
         self._cookies_estado = ''
         self._cookies_intento = 0.0
         self._cookies_bloqueo = 0.0
+        self._detalle_sesion: dict[int, str] = {}
+        self._stat_cache: dict[str, tuple[float, bool, int | None, int | None, bool]] = {}
         navegador.configurar_ahorro_ram(self.cfg.get("ahorro_ram", "auto"))
         self.db.reparar_al_arrancar()
         self._avisos = Avisos(self.db, self.notificar, lambda: self.cfg, self.log)
@@ -213,6 +221,7 @@ class Motor:
         nueva["remoto_url"] = nueva["remoto_url"].strip().rstrip("/")
         if "remoto_url" in (cambios or {}) or "remoto_clave" in (cambios or {}):
             self._remoto_caido_hasta = 0
+            self._remoto_fallos = 0
             self._ultimo_vigilar = 0
         nueva['gap_max'] = max(nueva['gap_min'], nueva['gap_max'])
         nueva['pausa_max'] = max(nueva['pausa_min'], nueva['pausa_max'])
@@ -336,6 +345,12 @@ class Motor:
         extra = f' Empiezo desde {duracion(float(inicio))} del video original.' if inicio else ''
         return f'Voy a editar en {lugar}: {partes}, {subs}.{extra} Es lo configurado; aún no hay clips nuevos guardados.'
 
+    def _fallo_definitivo(self, error, intentos):
+        """Reintentar no cambia estos errores: dependen del video o del preset, no de la conexión."""
+        texto = str(error)
+        return (getattr(error, 'code', '') == 'sin_momentos' or intentos >= self.cfg['max_intentos']
+                or any(m in texto for m in ('No quedan fragmentos nuevos', 'sin tiempos registrados', ERROR_INTERVALO)))
+
     def _detalle_fallo(self, error, intentos, reintento=0):
         detalle = f'Intento {intentos}/{self.cfg["max_intentos"]}. {motivo_fallo(error)}'
         if reintento:
@@ -446,7 +461,10 @@ class Motor:
                     self._ultimo_firebase = time.time()
                     self.revisar_firebase()
                 self._cookies_periodicas()
-                if self.cfg['modo_cola'] != 'solo_subir' and self.cfg["remoto_url"] and time.time() - self._ultimo_vigilar > 300:
+                intervalo_vigilar = max(300.0, self._remoto_caido_hasta - time.time()) if self._remoto_fallos else 300.0
+                if (self.cfg['modo_cola'] != 'solo_subir' and self.cfg["remoto_url"]
+                        and time.time() >= self._remoto_caido_hasta
+                        and time.time() - self._ultimo_vigilar > min(1800.0, intervalo_vigilar)):
                     self._ultimo_vigilar = time.time()
                     self._vigilar_remoto()
                 if self.cfg["activo"]:
@@ -538,6 +556,14 @@ class Motor:
             cambios = {**cambios, 'preset_corte': nombre}
         self.db.editar_cuenta(cid, **cambios)
         self.despertar()
+
+    def guardar_regla(self, origen, cuentas, preset='', texto_fijo='', cortar=True, rid=None):
+        if not isinstance(preset, str) or len(preset) > 100:
+            raise ValueError('Elige un preset de edición válido.')
+        nombre = preset.strip()
+        if nombre:
+            snapshot(self.cargar_preset(nombre) or {})
+        return self.db.guardar_regla(origen, cuentas, nombre, texto_fijo, cortar, rid)
 
     @staticmethod
     def _exige_reciente(c):
@@ -896,7 +922,7 @@ class Motor:
             if self._reintentar_con_cookies(t, e):
                 return
             intentos = t["intentos"] + 1
-            if getattr(e, 'code', '') == 'sin_momentos' or intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
+            if self._fallo_definitivo(e, intentos):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos)
                 self._aviso_trabajo(t, f'error:{intentos}', 'No pude prepararlo en la PC. ' + self._detalle_fallo(e, intentos), 'errores', True)
             else:
@@ -978,18 +1004,22 @@ class Motor:
         return remoto.Cliente(self.cfg["remoto_url"], self.cfg["remoto_clave"])
 
     def _remoto_caido(self, e):
-        self._remoto_caido_hasta = time.time() + 5 * 60
+        self._remoto_fallos = min(self._remoto_fallos + 1, 6)
+        espera_s = (300, 600, 900, 1800)[min(self._remoto_fallos - 1, 3)]
+        self._remoto_caido_hasta = time.time() + espera_s
         accion = 'Usaré el respaldo local.' if self.cfg['remoto_respaldo_local'] else 'Guardaré los trabajos hasta que vuelva.'
         self._remoto_estado = f'Sin conexión ({e}). {accion}'
-        self.log(f'Servidor de cortes no responde: {e}. {accion}')
+        if self._remoto_fallos <= 2:
+            self.log(f'Servidor de cortes no responde: {e}. {accion}')
         if not self._remoto_avisado:
             self._remoto_avisado = True
             self.avisar('sistema', f'colab:caido:{time.time_ns()}',
                         'Se desconectó el servidor de cortes. ' + motivo_fallo(e) + '\n' + accion +
-                        ' Los clips guardados en esta PC siguen su turno de publicación. Revisaré la conexión cada 5 minutos.', True)
+                        ' Los clips guardados en esta PC siguen su turno de publicación. Revisaré la conexión automáticamente.', True)
 
     def _remoto_volvio(self):
         self._remoto_caido_hasta = 0
+        self._remoto_fallos = 0
         cantidad_reanudada = self.db.reanudar_remotos()
         if cantidad_reanudada:
             self.log(f'Servidor recuperado: {cantidad_reanudada} trabajo(s) vuelven a la cola sin perder sus ajustes.')
@@ -1051,7 +1081,7 @@ class Motor:
                 return
             intentos = t["intentos"] + 1
             extra = {'remoto_id':'', 'remoto_url':''} if isinstance(e, remoto.FalloCorte) else {}
-            if getattr(e, 'code', '') == 'sin_momentos' or intentos >= self.cfg["max_intentos"] or "No quedan fragmentos nuevos" in str(e) or "sin tiempos registrados" in str(e):
+            if self._fallo_definitivo(e, intentos):
                 self.db.marcar_trabajo(t["id"], "error", str(e), intentos=intentos, **extra)
                 self._aviso_trabajo(t, f'error:{intentos}', 'No pude terminar con el servidor de cortes. ' + self._detalle_fallo(e, intentos), 'errores', True)
             else:
@@ -1284,9 +1314,9 @@ class Motor:
             return 'El archivo del clip no está en esta PC.'
         if c.get('abierta', False) or navegador.ocupado(self.perfil(c)):
             return 'Cierra la ventana de sesión de esta cuenta.'
-        inicio, fin = horario(c, self.cfg)
-        if not _en_horario(inicio, fin):
-            return f"Fuera de horario de esta cuenta ({inicio}–{fin}, hora de esta PC)."
+        if not _en_franjas(c, self.cfg):
+            ventanas = ', '.join(f'{inicio}–{fin}' for inicio, fin in franjas(c, self.cfg))
+            return f"Fuera de horario de esta cuenta ({ventanas}, hora de esta PC)."
         if self.db.subidas_ok_hoy(c['id']) >= c['limite_dia']:
             return 'La cuenta alcanzó su límite diario. Espera al siguiente día con horario.'
         limite = max(s.get('proximo_intento', 0), self._libre_global,
@@ -1310,7 +1340,7 @@ class Motor:
             c = cuentas.get(s["cuenta_id"])
             if not c or (c["proxima_libre"] > ahora and not s.get('adelantada')) or navegador.ocupado(self.perfil(c)):
                 continue
-            if not _en_horario(*horario(c, self.cfg)):
+            if not _en_franjas(c, self.cfg):
                 continue
             if self.db.subidas_ok_hoy(c["id"]) >= c["limite_dia"]:
                 continue
@@ -1613,19 +1643,38 @@ class Motor:
         return {'importadas': len(cookies)}
 
     def cerrar_login(self, cid):
+        cid = int(cid)
         cuenta = self.db.cuenta(cid)
         if not cuenta:
             raise ValueError("Cuenta no encontrada.")
+        with self._sesiones_guard:
+            ya_comprobando = cid in self._comprobando
+        if ya_comprobando and not navegador.login_abierto(self.perfil(cuenta)):
+            return {"mensaje": "La ventana ya se cerró; estoy comprobando la sesión ahora mismo…", "en_curso": True}
         try:
             recuperada = navegador.cerrar_normal(self.perfil(cuenta), recuperar=True, navegador=self.cfg['navegador'])
         except Exception as error:
             self.log(f"No pude cerrar la ventana de {cuenta['nombre']}: {error}")
             raise
         if recuperada:
-            # Una ventana de una ejecución anterior no tiene hilo de login.
+            # Una ventana de una ejecución anterior (o un candado huérfano liberado) no tiene hilo de login.
             self.log(f"Ventana recuperada y cerrada: {cuenta['nombre']}. Compruebo la sesión…")
             self.solicitar_comprobacion(cid)
         return {"mensaje": "Ventana cerrada. Compruebo la sesión en segundo plano."}
+
+    def cerrar_sesion_cuenta(self, cid):
+        cid = int(cid)
+        cuenta = self.db.cuenta(cid)
+        if not cuenta:
+            raise ValueError("Cuenta no encontrada.")
+        with self._sesiones_guard:
+            if cid in self._comprobando:
+                raise ValueError("Espera unos segundos a que termine la comprobación actual.")
+        navegador.cerrar_sesion_perfil(self.perfil(cuenta), navegador=self.cfg["navegador"])
+        self.db.editar_cuenta(cid, estado="sin_login")
+        self._detalle_sesion[cid] = "Sesión cerrada manualmente."
+        self.log(f"{POR_NOMBRE[cuenta['plataforma']].NOMBRE} · {cuenta['nombre']}: sesión cerrada manualmente.")
+        return {"mensaje": f"Sesión cerrada en {cuenta['nombre']}. Pulsa «Iniciar sesión» cuando quieras vincularla de nuevo."}
 
     def abrir_login(self, cid, espera_s=45):
         """Abre el navegador de la cuenta en la página de inicio de sesión. Al cerrarlo, se comprueba.
@@ -1842,18 +1891,34 @@ class Motor:
         mod = POR_NOMBRE[cuenta["plataforma"]]
         ok = False
         etapa = 'abrir'
+        page = None
         # Verificar nunca debe abrir otra ventana después de cerrar el login.
         try:
             with navegador.abrir(self.perfil(cuenta), headless=True, navegador=self.cfg["navegador"]) as ctx:
                 etapa = 'cargar'
                 page = navegador.pagina(ctx)
-                page.goto(cuenta["url_subida"] or mod.URL_SUBIDA, wait_until="domcontentloaded")
-                page.wait_for_timeout(6000)
+                page.goto(cuenta["url_subida"] or mod.URL_SUBIDA, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(4500)
                 ok = mod.sesion_abierta(page)
+                url_actual = str(getattr(page, "url", "") or "").lower()
+                if not ok and any(t in url_actual for t in ("passport", "servicelogin", "checkcookie", "sso")):
+                    # Redirección intermedia de validación SSO: esperar a que termine antes de dar falso negativo.
+                    page.wait_for_timeout(3500)
+                    ok = mod.sesion_abierta(page)
                 if ok:
                     etapa = 'confirmar'
-                    page.locator('input[type="file"]').first.wait_for(state="attached", timeout=30000)
+                    page.locator('input[type="file"]').first.wait_for(state="attached", timeout=25000)
+                    ok = mod.sesion_abierta(page)
         except Exception as e:
+            if etapa == 'confirmar' and page is not None:
+                try:
+                    if not mod.sesion_abierta(page):
+                        self.db.editar_cuenta(cid, estado="sin_login")
+                        self._detalle_sesion[cid] = "La plataforma pidió iniciar sesión."
+                        self.log(f"{mod.NOMBRE} · {cuenta['nombre']}: sin sesión ❌")
+                        return False
+                except Exception:
+                    pass
             # Un fallo al abrir/cargar no prueba que se haya perdido la sesión.
             # Mantener bloqueada la publicación hasta lograr una comprobación.
             if navegador.es_perfil_ocupado(e):
@@ -1862,19 +1927,39 @@ class Motor:
             elif etapa == 'abrir':
                 motivo = 'No se pudo abrir el navegador. Ejecuta preparar_navegador_bot.bat y revisa el navegador elegido.'
             elif etapa == 'confirmar':
-                motivo = 'No apareció el formulario de subida. Abre Sesión, revisa si la web pide algún paso y cierra la ventana para comprobar de nuevo.'
+                motivo = 'No apareció el formulario de subida. Abre Iniciar sesión, revisa si la web pide algún paso y cierra la ventana.'
             else:
                 motivo = 'No se pudo cargar la página de subida. Revisa la conexión y vuelve a pulsar Comprobar sesión.'
             self.db.editar_cuenta(cid, estado='sin_comprobar')
+            self._detalle_sesion[cid] = motivo
             self.log(f"{mod.NOMBRE} · {cuenta['nombre']}: sin comprobar. {motivo}")
             return False
         self.db.editar_cuenta(cid, estado="ok" if ok else "sin_login")
+        self._detalle_sesion[cid] = "Sesión activa y lista." if ok else "Sin sesión activa en esta cuenta."
         self.log(f"{mod.NOMBRE} · {cuenta['nombre']}: " + ("sesión lista ✅" if ok else "sin sesión ❌"))
         self._despertar.set()
         return ok
 
     # -- panel ----------------------------------------------------------
+    def _info_archivo_rapida(self, ruta: str, ahora_mono: float):
+        if not ruta:
+            return False, None, None, False
+        prev = self._stat_cache.get(ruta)
+        if prev is not None and (ahora_mono - prev[0]) < 2.5:
+            return prev[1], prev[2], prev[3], prev[4]
+        try:
+            st = os.stat(ruta)
+            existe, tam, mtime_ns = True, st.st_size, st.st_mtime_ns
+        except OSError:
+            existe, tam, mtime_ns = False, None, None
+        portada = bool(existe and os.path.isfile(os.path.splitext(ruta)[0] + '_miniatura.jpg'))
+        if len(self._stat_cache) > 600:
+            self._stat_cache.clear()
+        self._stat_cache[ruta] = (ahora_mono, existe, tam, mtime_ns, portada)
+        return existe, tam, mtime_ns, portada
+
     def estado(self):
+        ahora_mono = time.monotonic()
         cuentas = []
         with self._sesiones_guard:
             comprobando = set(self._comprobando)
@@ -1884,21 +1969,21 @@ class Motor:
             c["abierta"] = navegador.ocupado(self.perfil(c))
             c["login_abierto"] = navegador.login_abierto(self.perfil(c))
             c["comprobando"] = c['id'] in comprobando
+            c["detalle_sesion"] = self._detalle_sesion.get(c["id"], "")
             cuentas.append(c)
         pendientes = self.db.subidas_pendientes()
         for s in pendientes:
-            s['archivo_existe'] = os.path.isfile(s['archivo'])
-            s['tiene_portada_ia'] = bool(
-                s.get('archivo') and os.path.isfile(os.path.splitext(s['archivo'])[0] + '_miniatura.jpg')
-            )
-            s['tiene_miniatura'] = bool(s['archivo_existe'])
+            existe, _, _, portada = self._info_archivo_rapida(s.get('archivo') or '', ahora_mono)
+            s['archivo_existe'] = existe
+            s['tiene_portada_ia'] = portada
+            s['tiene_miniatura'] = bool(existe)
         plan = estimar(pendientes, cuentas, self.cfg, time.time(), self._libre_global)
         plan['por_preparar'] = self.db.por_preparar()
         plan['esperando_remoto'] = self.db.esperando_remotos()
         plan['retenida'] = (not self.cfg['activo'] or self.cfg['modo_cola'] == 'solo_preparar' or
                             (self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True) > 0))
         guardados = self.db.archivos_preparados()
-        plan['clips_en_pc'] = sum(os.path.isfile(r['archivo']) for r in guardados)
+        plan['clips_en_pc'] = sum(1 for r in guardados if self._info_archivo_rapida(r.get('archivo') or '', ahora_mono)[0])
         plan['clips_ausentes'] = len(guardados) - plan['clips_en_pc']
         plan['carpeta_clips'] = os.path.join(self.carpeta, 'bot_clips')
         for cuenta in cuentas:
@@ -1909,28 +1994,69 @@ class Motor:
             siguiente = next((s for s in cola if proxima and s['id'] == proxima['id']), cola[0] if cola else None)
             cuenta['siguiente'] = siguiente
             cuenta['espera'] = self._motivo_subida(siguiente, cuenta) if siguiente else 'Sin clips pendientes.'
+        from calidad_video import calcular_calificacion_video
         recientes = self.db.subidas_recientes(toda_cola=True)
         por_cuenta = {c['id']: c for c in cuentas}
         ahora = time.time()
+        est_seg_sub = max(20.0, float(self.cfg.get('estimacion_subida_min') or 1.5) * 60.0)
+        subidas_por_id = {}
         for subida in recientes:
             cuenta = por_cuenta.get(subida['cuenta_id']) or {}
             subida['no_antes'] = max(subida.get('proximo_intento', 0),
                                     0 if subida.get('adelantada') else cuenta.get('proxima_libre', 0), self._libre_global)
-            try:
-                stat = os.stat(subida['archivo'])
-                subida['bytes'] = stat.st_size
-                if subida.get('calidad', {}).get('huella') != [stat.st_size, stat.st_mtime_ns]:
+            existe, tam, mtime_ns, portada = self._info_archivo_rapida(subida.get('archivo') or '', ahora_mono)
+            if existe:
+                subida['bytes'] = tam
+                if subida.get('calidad', {}).get('huella') != [tam, mtime_ns]:
                     subida['calidad'] = {}
                 subida['archivo_existe'] = True
-            except OSError:
+            else:
                 subida['bytes'], subida['archivo_existe'] = None, False
                 subida['calidad'] = {}
-            subida['tiene_portada_ia'] = bool(
-                subida.get('archivo') and os.path.isfile(os.path.splitext(subida['archivo'])[0] + '_miniatura.jpg')
+            subida['tiene_portada_ia'] = portada
+            subida['tiene_miniatura'] = bool(existe)
+            if subida['estado'] == 'subiendo':
+                transcurrido_s = max(2.0, ahora - float(subida.get('actualizado') or ahora))
+                subida['pct_subida'] = max(14, min(94, int(round((transcurrido_s / est_seg_sub) * 90.0)) + 12))
+            elif subida['estado'] == 'ok':
+                subida['pct_subida'] = 100
+            else:
+                subida['pct_subida'] = 0
+            meta_clip = {}
+            if subida.get('trabajo_id') and subida.get('archivo'):
+                carpeta_tr = os.path.join(self.carpeta, 'bot_clips', f"trabajo_{int(subida['trabajo_id'])}")
+                meta_clip = archivos.leer_meta_clip(carpeta_tr, subida['archivo'])
+            dur_clip = None
+            if subida.get('clip_inicio') is not None and subida.get('clip_fin') is not None:
+                try:
+                    dif_c = float(subida['clip_fin']) - float(subida['clip_inicio'])
+                    if dif_c > 0:
+                        dur_clip = dif_c
+                except (TypeError, ValueError):
+                    pass
+            subida['calificacion'] = calcular_calificacion_video(
+                archivo=subida.get('archivo') if existe else '',
+                calidad=subida.get('calidad'),
+                puntuacion_ia=meta_clip.get('puntuacion'),
+                gancho=meta_clip.get('gancho') or '',
+                clip_selection=meta_clip.get('clip_selection') or '',
+                duracion=dur_clip,
+                texto=subida.get('texto') or '',
+                titulo=subida.get('video_titulo') or meta_clip.get('titulo') or '',
+                edicion=subida.get('edicion'),
+                tiene_portada_ia=portada,
+                bytes_archivo=tam,
+                calidad_origen=meta_clip.get('calidad_origen'),
             )
-            subida['tiene_miniatura'] = bool(subida['archivo_existe'])
+            subidas_por_id[subida['id']] = subida
             if subida['estado'] == 'pendiente':
                 subida['espera'] = self._motivo_subida(subida, por_cuenta.get(subida['cuenta_id']), ahora)
+        for cuenta in cuentas:
+            sig = cuenta.get('siguiente')
+            if isinstance(sig, dict) and sig.get('id') in subidas_por_id:
+                enriq = subidas_por_id[sig['id']]
+                sig['calificacion'] = enriq.get('calificacion')
+                sig['pct_subida'] = enriq.get('pct_subida', 0)
         trabajos_rec = self.db.trabajos_recientes()
         vasos_activos = self._construir_vasos_activos(trabajos_rec, recientes, ahora)
         return {
@@ -1942,7 +2068,7 @@ class Motor:
             "plan": plan,
             "carpeta_datos": self.almacenamiento,
             "actividad": self.actividad,
-            "en_horario": any(_en_horario(*horario(c, self.cfg)) for c in cuentas if c['activa']),
+            "en_horario": any(_en_franjas(c, self.cfg) for c in cuentas if c['activa']),
             "cuentas": cuentas,
             "reglas": self.db.reglas(),
             "trabajos": trabajos_rec,
@@ -1993,6 +2119,22 @@ class Motor:
                                     f"/api/smart_split_live/thumb/{idx}?r={st.get('run_id', '')}&p={int(c.get('pct') or 0)}"
                                     if tiene_th else thumb_trabajo_base
                                 )
+                                cal_vaso = None
+                                if listo or c.get('puntuacion'):
+                                    from calidad_video import calcular_calificacion_video as _calc_cal_v
+                                    dur_v = None
+                                    if c.get('inicio') is not None and c.get('fin') is not None:
+                                        try:
+                                            dur_v = max(0.0, float(c['fin']) - float(c['inicio'])) or None
+                                        except (TypeError, ValueError):
+                                            dur_v = None
+                                    cal_vaso = _calc_cal_v(
+                                        archivo=c.get('archivo') if listo else '',
+                                        puntuacion_ia=c.get('puntuacion'),
+                                        gancho=c.get('gancho') or '',
+                                        duracion=dur_v,
+                                        titulo=c.get('titulo') or '',
+                                    )
                                 vasos.append({
                                     'id': f"corte_{tid_act}_{idx}",
                                     'tipo': 'live' if es_live_job else 'corte',
@@ -2003,6 +2145,7 @@ class Motor:
                                     'etapa': c.get('etapa') or 'Procesando…',
                                     'thumb_url': thumb_u,
                                     'video_url': f"/api/smart_split_live/video/{idx}?r={st.get('run_id', '')}" if listo else '',
+                                    'calificacion': cal_vaso,
                                     'accion_cancelar': accion_tr,
                                 })
                             leido_local = bool(vasos)
@@ -2015,17 +2158,27 @@ class Motor:
                         fn for fn in os.listdir(carpeta_imp)
                         if fn.lower().endswith(('.mp4', '.mov')) and not fn.endswith('.part')
                     )
+                    from calidad_video import calcular_calificacion_video as _calc_cal_imp
                     for idx_i, fn_i in enumerate(archivos_imp):
+                        ruta_imp_i = os.path.join(carpeta_imp, fn_i)
+                        meta_imp_i = archivos.leer_meta_clip(carpeta_imp, ruta_imp_i)
                         vasos.append({
                             'id': f"remoto_imp_{tid_act}_{idx_i}",
                             'tipo': 'corte',
-                            'titulo': f"Clip {idx_i + 1} · ya en tu PC",
+                            'titulo': meta_imp_i.get('titulo') or f"Clip {idx_i + 1} · ya en tu PC",
                             'subtitulo': trabajo_activo.get('titulo') or 'Colab GPU → PC',
                             'estado': 'listo',
                             'pct': 100,
                             'etapa': 'Importado · listo para subir',
                             'thumb_url': f"/api/bot/trabajos/{tid_act}/miniatura?n={idx_i}",
                             'video_url': f"/api/bot/trabajos/{tid_act}/clip?n={idx_i}",
+                            'calificacion': _calc_cal_imp(
+                                archivo=ruta_imp_i,
+                                puntuacion_ia=meta_imp_i.get('puntuacion'),
+                                gancho=meta_imp_i.get('gancho') or '',
+                                clip_selection=meta_imp_i.get('clip_selection') or '',
+                                titulo=meta_imp_i.get('titulo') or trabajo_activo.get('titulo') or '',
+                            ),
                             'accion_cancelar': accion_tr,
                         })
             if not leido_local:
@@ -2107,9 +2260,11 @@ class Motor:
             pass
         for s in subidas:
             if s.get('estado') == 'subiendo':
-                transcurrido = max(2.0, ahora - float(s.get('actualizado') or ahora))
-                est_seg = max(20.0, float(self.cfg.get('estimacion_subida_min') or 1.5) * 60.0)
-                pct_sub = max(14, min(94, int(round((transcurrido / est_seg) * 90.0)) + 12))
+                pct_sub = int(s.get('pct_subida') or 0)
+                if not pct_sub:
+                    transcurrido = max(2.0, ahora - float(s.get('actualizado') or ahora))
+                    est_seg = max(20.0, float(self.cfg.get('estimacion_subida_min') or 1.5) * 60.0)
+                    pct_sub = max(14, min(94, int(round((transcurrido / est_seg) * 90.0)) + 12))
                 sid = int(s['id'])
                 texto_s = (s.get('texto') or '').splitlines()
                 titulo_s = s.get('video_titulo') or (texto_s[0] if texto_s else f"Publicación #{sid}")
@@ -2123,6 +2278,7 @@ class Motor:
                     'etapa': 'Publicando en plataforma…',
                     'thumb_url': f"/api/bot/miniatura/{sid}" if s.get('tiene_miniatura') else '',
                     'video_url': f"/api/bot/clip/{sid}" if s.get('archivo_existe') else '',
+                    'calificacion': s.get('calificacion'),
                     'accion_cancelar': {'tipo': 'subida', 'id': sid},
                 })
         return vasos

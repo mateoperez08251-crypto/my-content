@@ -34,6 +34,31 @@ if not getattr(sys, "frozen", False):
 if MODO_SERVIDOR:
     os.environ["CONTENTAPP_SERVIDOR"] = "1"
 
+
+def _seguir_sin_consola():
+    """Abierta con doble clic o py.exe, cerrar la consola mataba app y bot sin dejar registro.
+    Se relanza con pythonw, fuera de esa consola. CONTENTAPP_CONSOLA=1 la conserva para depurar."""
+    if sys.platform != "win32" or getattr(sys, "frozen", False) or MODO_SERVIDOR             or os.environ.get("CONTENTAPP_CONSOLA") == "1":
+        return False
+    import ctypes
+    import subprocess
+    pythonw = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "pythonw.exe")
+    if not ctypes.windll.kernel32.GetConsoleWindow() or not os.path.exists(pythonw):
+        return False
+    orden = [pythonw, os.path.abspath(__file__), *sys.argv[1:]]
+    base = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    for flags in (base | subprocess.CREATE_BREAKAWAY_FROM_JOB, base):
+        try:
+            subprocess.Popen(orden, creationflags=flags)
+            return True
+        except OSError:
+            pass  # El job del lanzador puede no permitir salir de él.
+    return False
+
+
+if __name__ == "__main__" and _seguir_sin_consola():
+    sys.exit(0)
+
 import atexit
 import collections
 import functools
@@ -85,13 +110,9 @@ threading.excepthook = lambda a: _registrar_excepcion(
     a.exc_type, a.exc_value, a.exc_traceback, getattr(a.thread, "name", "?"))
 
 # ---------------------------------------------------------------------------
-# Firebase (opcional)
+# Firebase (opcional, carga diferida para no frenar el arranque ni gastar RAM)
 # ---------------------------------------------------------------------------
-try:
-    import firebase_admin  # noqa: E402
-    from firebase_admin import credentials, firestore  # noqa: E402
-except ImportError:  # sin firebase-admin: la app funciona igual, sin telemetría
-    firebase_admin = credentials = firestore = None
+firebase_admin = credentials = firestore = None
 
 FIREBASE_KEY_PATH = paths.res_path("firebase-key.json")
 if not os.path.exists(FIREBASE_KEY_PATH):
@@ -100,20 +121,27 @@ firebase_db = None
 
 
 def init_firebase_async():
-    global firebase_db
-    if firebase_admin is not None and os.path.exists(FIREBASE_KEY_PATH):
+    global firebase_admin, credentials, firestore, firebase_db
+    if not os.path.exists(FIREBASE_KEY_PATH):
+        return
+    try:
+        import firebase_admin as _fa
+        from firebase_admin import credentials as _cred, firestore as _fs
+        firebase_admin, credentials, firestore = _fa, _cred, _fs
+    except ImportError:
+        return
+    try:
+        cred = credentials.Certificate(FIREBASE_KEY_PATH)
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
         try:
-            cred = credentials.Certificate(FIREBASE_KEY_PATH)
-            if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred)
-            try:
-                firebase_db = firestore.client(database_id="contentvideos-2d335")
-            except TypeError:
-                print("El SDK de Firebase es antiguo y no soporta database_id, actualizalo o usa (default)")
-                firebase_db = firestore.client()
-            print(">>> FIREBASE CONECTADO CORRECTAMENTE <<<")
-        except Exception as e:
-            print(">>> ERROR CONECTANDO FIREBASE:", e)
+            firebase_db = firestore.client(database_id="contentvideos-2d335")
+        except TypeError:
+            print("El SDK de Firebase es antiguo y no soporta database_id, actualizalo o usa (default)")
+            firebase_db = firestore.client()
+        print(">>> FIREBASE CONECTADO CORRECTAMENTE <<<")
+    except Exception as e:
+        print(">>> ERROR CONECTANDO FIREBASE:", e)
 
 
 is_blocked = False
@@ -399,7 +427,8 @@ keyboard_listener = None
 # Logs: cola acotada (no crece sin límite si la ventana está oculta).
 _logs_lock = threading.Lock()
 logs_queue = collections.deque(maxlen=1200 if winproc.es_equipo_baja_ram() else 5000)
-# Envío al dashboard central en un hilo aparte: log() nunca bloquea.
+# Envío al dashboard central solo cuando está habilitado explícitamente.
+_DASHBOARD_ACTIVO = bool(os.environ.get("CONTENTAPP_DASHBOARD", "").strip())
 _dashboard_queue = queue.Queue(maxsize=400 if winproc.es_equipo_baja_ram() else 2000)
 
 monitor_running = False
@@ -466,10 +495,11 @@ def log(msg):
         pass
     with _logs_lock:
         logs_queue.append(msg)
-    try:
-        _dashboard_queue.put_nowait(msg)
-    except queue.Full:
-        pass
+    if _DASHBOARD_ACTIVO:
+        try:
+            _dashboard_queue.put_nowait(msg)
+        except queue.Full:
+            pass
 
 
 def _hilo_dashboard():
@@ -1238,6 +1268,50 @@ def _probar_groq(clave):
     return False, f"Groq respondió {r.status_code}."
 
 
+@app.route("/api/clave_elevenlabs", methods=["GET", "POST", "DELETE"])
+def clave_elevenlabs():
+    """Clave opcional del narrador expresivo; se guarda en secrets.json de este equipo."""
+    from app_secrets import load_secrets, save_secrets
+    if request.method == "GET":
+        clave = get_secret("elevenlabs", "api_key", env="ELEVENLABS_API_KEY") or ""
+        return jsonify({"success": True, "hay": bool(clave),
+                        "vista": (clave[:4] + "…" + clave[-4:]) if len(clave) > 12 else ""})
+    datos = load_secrets()
+    if request.method == "DELETE":
+        datos.get("elevenlabs", {}).pop("api_key", None)
+        save_secrets(datos)
+        return jsonify({"success": True, "hay": False})
+    clave = str((request.get_json(silent=True) or {}).get("clave", "")).strip().strip('"\'')
+    if len(clave) < 20:
+        return jsonify({"success": False, "error": "Pega la clave completa de ElevenLabs."}), 400
+    datos.setdefault("elevenlabs", {})["api_key"] = clave
+    save_secrets(datos)
+    return jsonify({"success": True, "hay": True, "vista": clave[:4] + "…" + clave[-4:]})
+
+
+@app.route("/api/elevenlabs/voces", methods=["GET"])
+def elevenlabs_voces():
+    """Voces de la cuenta de ElevenLabs, con las de español primero."""
+    clave = get_secret("elevenlabs", "api_key", env="ELEVENLABS_API_KEY")
+    if not clave:
+        return jsonify({"success": True, "voces": []})
+    try:
+        r = requests.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": clave}, timeout=20)
+        r.raise_for_status()
+        crudas = r.json().get("voices", [])
+    except (requests.RequestException, ValueError) as e:
+        return jsonify({"success": False, "error": f"ElevenLabs no respondió ({type(e).__name__})."}), 502
+    voces = []
+    for v in crudas:
+        etiquetas = v.get("labels") or {}
+        voces.append({"id": v.get("voice_id"), "nombre": v.get("name") or v.get("voice_id"),
+                      "espanol": str(etiquetas.get("language") or "").startswith("es"),
+                      "propia": v.get("category") in ("generated", "cloned"),
+                      "muestra": v.get("preview_url") or ""})
+    voces.sort(key=lambda v: (not v["espanol"], not v["propia"], str(v["nombre"]).casefold()))
+    return jsonify({"success": True, "voces": voces})
+
+
 @app.route("/api/clave_groq", methods=["GET", "POST", "DELETE"])
 def clave_groq():
     """La clave de Groq (gsk_...) se guarda en secrets.json de este equipo, nunca en el repo."""
@@ -1324,10 +1398,18 @@ def open_file():
     return jsonify({"success": False, "error": "File not found"})
 
 
+_ultimo_chrome_especial = 0.0
+
+
 @app.route("/api/abrir_chrome", methods=["POST"])
 def abrir_chrome():
+    global _ultimo_chrome_especial
     from bot.navegador import buscar_navegador
+    ahora = time.monotonic()
+    if ahora - _ultimo_chrome_especial < 2.5:
+        return jsonify({"success": True, "navegador": "en curso"})
     base_dir = paths.data_path("chrome_tiktok")
+    os.makedirs(base_dir, exist_ok=True)
     try:
         nombre, exe = buscar_navegador("auto")  # Brave > Chrome > Edge
     except Exception:
@@ -1336,12 +1418,20 @@ def abrir_chrome():
         return jsonify({"success": False, "error": "No encontré Brave, Chrome ni Edge instalado."})
     log(f"Abriendo {nombre.capitalize()} especial...")
     args = [exe,
+            "--no-first-run", "--no-default-browser-check", "--disable-background-mode",
             "--restore-last-session", "--disable-blink-features=AutomationControlled",
             "--disable-infobars", "--remote-debugging-port=9222",
-            f"--user-data-dir={base_dir}", "--profile-directory=Default",
+            f"--user-data-dir={base_dir}", "--profile-directory=Default", "--new-window",
             "https://www.tiktok.com/tiktokstudio/upload"]
+    opciones = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if winproc.ES_WINDOWS:
+        inicio = subprocess.STARTUPINFO()
+        inicio.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        inicio.wShowWindow = 1  # SW_SHOWNORMAL: abrir ventana visible al frente, nunca oculta
+        opciones["startupinfo"] = inicio
     try:
-        subprocess.Popen(args, **winproc.popen_kwargs())
+        subprocess.Popen(args, **opciones)
+        _ultimo_chrome_especial = ahora
         return jsonify({"success": True, "navegador": nombre})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -1507,6 +1597,39 @@ def _escanear_clips_pc(limit=48):
                 encontrados.append((st.st_mtime, st.st_size, origen_lbl, full, real))
     encontrados.sort(key=lambda x: x[0], reverse=True)
     encontrados = encontrados[: max(1, min(120, int(limit or 48)))]
+    from calidad_video import calcular_calificacion_video
+    estado_bot_por_ruta = {}
+    try:
+        from bot import motor as _bot_motor_mod
+        inst_bot = _bot_motor_mod.obtener()
+        if inst_bot is not None:
+            ahora_b = time.time()
+            est_seg_b = max(20.0, float(inst_bot.cfg.get("estimacion_subida_min") or 1.5) * 60.0)
+            for sb in inst_bot.db.subidas_recientes(limite=120, toda_cola=True):
+                r_sb = sb.get("archivo") or ""
+                if not r_sb:
+                    continue
+                real_sb = os.path.realpath(r_sb)
+                est_sb = sb.get("estado") or "pendiente"
+                prio = {"subiendo": 4, "pendiente": 3, "revisar": 2, "error": 2, "ok": 1}.get(est_sb, 0)
+                prev_sb = estado_bot_por_ruta.get(real_sb)
+                if prev_sb and prev_sb["prio"] >= prio:
+                    continue
+                pct_sb = 100 if est_sb == "ok" else 0
+                if est_sb == "subiendo":
+                    tr_b = max(2.0, ahora_b - float(sb.get("actualizado") or ahora_b))
+                    pct_sb = max(14, min(94, int(round((tr_b / est_seg_b) * 90.0)) + 12))
+                estado_bot_por_ruta[real_sb] = {
+                    "prio": prio,
+                    "estado_cola": "subiendo" if est_sb == "subiendo" else ("en_cola" if est_sb == "pendiente" else ("publicado" if est_sb == "ok" else est_sb)),
+                    "pct_subida": pct_sb,
+                    "cuenta_nombre": sb.get("cuenta_nombre") or "",
+                    "plataforma": sb.get("plataforma") or "",
+                    "edicion": sb.get("edicion") or {},
+                    "texto": sb.get("texto") or "",
+                }
+    except Exception:
+        estado_bot_por_ruta = {}
     items = []
     nuevo_mapa = {}
     for mtime, size, origen_lbl, full, real in encontrados:
@@ -1524,6 +1647,15 @@ def _escanear_clips_pc(limit=48):
                     titulo = primera[:110]
             except OSError:
                 pass
+        info_cola = estado_bot_por_ruta.get(real) or {}
+        calificacion = calcular_calificacion_video(
+            archivo=full,
+            texto=info_cola.get("texto") or "",
+            titulo=titulo,
+            edicion=info_cola.get("edicion"),
+            tiene_portada_ia=portada_ia,
+            bytes_archivo=size,
+        )
         items.append({
             "key": clave,
             "nombre": os.path.basename(full),
@@ -1533,6 +1665,11 @@ def _escanear_clips_pc(limit=48):
             "tamano_mb": round(size / (1024 * 1024), 1),
             "mtime": mtime,
             "tiene_portada_ia": portada_ia,
+            "estado_cola": info_cola.get("estado_cola") or "preparado",
+            "pct_subida": int(info_cola.get("pct_subida") or 0),
+            "cuenta_nombre": info_cola.get("cuenta_nombre") or "",
+            "plataforma": info_cola.get("plataforma") or "",
+            "calificacion": calificacion,
             "thumb_url": f"/api/clips_pc/thumb/{clave}?t={int(mtime)}",
             "video_url": f"/api/clips_pc/video/{clave}",
         })
@@ -1832,6 +1969,8 @@ def run_smart_split_thread(data):
             "ambient_music": str(data.get("ambient_music", "off") or "off"),
             "clean_vocals": bool(data.get("clean_vocals", False)),
             "auto_thumbnail": str(data.get("auto_thumbnail", "off") or "off"),
+            "auto_hashtags": data.get("auto_hashtags", True) is not False,
+            "politicas_tiktok": str(data.get("politicas_tiktok", "alto") or "off"),
             "strip_metadata": bool(data.get("strip_metadata", True)),
             "_trabajo_id": data.get("_trabajo_id"),
         }
@@ -2068,11 +2207,30 @@ def get_smart_split_progress():
             thumb_c = c.get("thumb") or ""
             listo = c.get("estado") == "listo" and bool(archivo_c and os.path.isfile(archivo_c))
             tiene_th = bool(thumb_c and os.path.isfile(thumb_c)) or listo
+            cal_ui = None
+            if listo or c.get("puntuacion"):
+                from calidad_video import calcular_calificacion_video as _calc_cal_ss
+                dur_ss = None
+                if c.get("inicio") is not None and c.get("fin") is not None:
+                    try:
+                        dur_ss = max(0.0, float(c["fin"]) - float(c["inicio"])) or None
+                    except (TypeError, ValueError):
+                        dur_ss = None
+                cal_ui = _calc_cal_ss(
+                    archivo=archivo_c if listo else "",
+                    puntuacion_ia=c.get("puntuacion"),
+                    gancho=c.get("gancho") or "",
+                    duracion=dur_ss,
+                    titulo=c.get("titulo") or "",
+                )
             clips_ui.append({
                 "index": idx,
                 "titulo": c.get("titulo") or f"Clip {idx}",
                 "inicio": c.get("inicio"),
                 "fin": c.get("fin"),
+                "puntuacion": c.get("puntuacion"),
+                "gancho": c.get("gancho") or "",
+                "calificacion": cal_ui,
                 "estado": c.get("estado") or "preparando",
                 "pct": max(0, min(100, int(c.get("pct") or 0))),
                 "etapa": c.get("etapa") or "",
@@ -2482,9 +2640,9 @@ def _iniciar_bot():
         carpeta=paths.DATA_DIR, almacenamiento=preparar(paths.DATA_DIR), smart_split=run_smart_split_thread, descargar=_bot_descargar,
         ocupar=_intentar_iniciar_trabajo, liberar=_terminar_trabajo, log=log,
         notificar=_bot_notificar, firebase=lambda: firebase_db, cargar_preset=_bot_preset)
-    motor.lives()  # Recuperar segmentos cerrados; nunca reinicia una captura sin petición.
-    from firebase_radar.local_radar import ensure_background
-    ensure_background()
+    if motor.cfg.get("radar_auto", True):
+        from firebase_radar.local_radar import ensure_background
+        ensure_background()
     return motor
 
 
@@ -2497,10 +2655,12 @@ def _bot():
 
 
 def _bot_respuesta(fn):
+    from bot import navegador as bot_nav
     try:
         res = fn()
         return jsonify({"success": True, **(res if isinstance(res, dict) else {})})
-    except (ValueError, KeyError, TypeError) as e:
+    except (ValueError, KeyError, TypeError,
+            bot_nav.PerfilOcupado, bot_nav.SinNavegador, bot_nav.NavegadorNoArranca) as e:
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         log(f"[bot] error en el panel: {e}")
@@ -2520,7 +2680,13 @@ def bot_estado():
 @app.route("/api/bot/config", methods=["POST"])
 def bot_config():
     data = request.get_json(silent=True) or {}
-    return _bot_respuesta(lambda: _bot().guardar_cfg(data))
+    def guardar():
+        m = _bot()
+        m.guardar_cfg(data)
+        if m.cfg.get("radar_auto"):
+            from firebase_radar.local_radar import ensure_background
+            ensure_background()
+    return _bot_respuesta(guardar)
 
 
 @app.route('/api/bot/subidas/lanzar', methods=['POST'])
@@ -2687,16 +2853,34 @@ def bot_cuenta_editar(cid):
     def guardar():
         _bot().guardar_cuenta(cid, {
             k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
-                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada", "proteger_fyp")})
+                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "franjas", "monetizada", "proteger_fyp")})
         if 'monetizada' in d or 'proteger_fyp' in d:
             from firebase_radar.local_radar import solicitar_revision
             solicitar_revision()
     return _bot_respuesta(guardar)
 
 
+@app.route("/api/bot/buzon", methods=["GET"])
+def bot_buzon_estado():
+    import buzon_panel
+    return _bot_respuesta(lambda: buzon_panel.estado(buzon_panel.cs.BASE, _bot().db.cuentas()))
+
+
+@app.route("/api/bot/buzon/cuentas/<int:cid>", methods=["POST"])
+def bot_buzon_cuenta(cid):
+    import buzon_panel
+    d = request.get_json(silent=True) or {}
+    return _bot_respuesta(lambda: buzon_panel.cambiar(buzon_panel.cs.BASE, _bot().db.cuentas(), cid, d.get("recibe")))
+
+
 @app.route("/api/bot/cuentas/<int:cid>/cerrar", methods=["POST"])
 def bot_cuenta_cerrar(cid):
     return _bot_respuesta(lambda: _bot().cerrar_login(cid))
+
+
+@app.route("/api/bot/cuentas/<int:cid>/cerrar_sesion", methods=["POST"])
+def bot_cuenta_cerrar_sesion(cid):
+    return _bot_respuesta(lambda: _bot().cerrar_sesion_cuenta(cid))
 
 
 @app.route("/api/bot/cuentas/<int:cid>/login", methods=["POST"])
@@ -2730,7 +2914,7 @@ def bot_cuenta_probar(cid):
 @app.route("/api/bot/reglas", methods=["POST"])
 def bot_regla_guardar():
     d = request.get_json(silent=True) or {}
-    return _bot_respuesta(lambda: {"id": _bot().db.guardar_regla(
+    return _bot_respuesta(lambda: {"id": _bot().guardar_regla(
         d.get("origen"), d.get("cuentas") or [], d.get("preset", ""), d.get("texto_fijo", ""),
         d.get("cortar", True), d.get("id"))})
 
@@ -2939,7 +3123,7 @@ def remoto_estado(jid):
     por_archivo = {m.get("archivo"): m for m in t["meta"]}
     clips = [{"n": i, "nombre": os.path.basename(r), "bytes": os.path.getsize(r) if os.path.isfile(r) else 0,
               "publicacion": crear_publicacion(por_archivo.get(r) or {}),
-              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto')},
+              **{k: por_archivo.get(r, {}).get(k) for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto', 'puntuacion', 'gancho', 'clip_selection', 'titulo')},
               "miniatura_bytes": os.path.getsize(os.path.splitext(r)[0] + "_miniatura.jpg") if os.path.isfile(os.path.splitext(r)[0] + "_miniatura.jpg") else 0}
              for i, r in enumerate(t["rutas"])]
     return jsonify({"success": True, "estado": t["estado"], "error": t["error"],
@@ -3062,7 +3246,7 @@ def health():
     from smart_remix import CAPACIDAD_ORIGINALIDAD
     mem = winproc.estado_memoria()
     return jsonify({"ok": True, "status": automation_status,
-                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", MOMENTOS_CAPACIDAD, CAPACIDAD_ORIGINALIDAD, "streaming_clips_v1"],
+                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", "voz_elevenlabs_v1", MOMENTOS_CAPACIDAD, CAPACIDAD_ORIGINALIDAD, "streaming_clips_v1"],
                     "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
 
 
@@ -3070,7 +3254,9 @@ def health():
 # Arranque
 # ---------------------------------------------------------------------------
 PUERTO_PREFERIDO = 5001
-_log_arranque = open(os.path.join(paths.LOGS_DIR, "arranque.log"), "w", encoding="utf-8", buffering=1)
+# En "a": una segunda copia o una prueba no debe borrar el rastro de un arranque fallido.
+_log_arranque = open(os.path.join(paths.LOGS_DIR, "arranque.log"), "a", encoding="utf-8", buffering=1)
+_pagina_cargada = threading.Event()
 
 
 def _arranque(msg):
@@ -3147,13 +3333,47 @@ def mostrar_ventana():
         try:
             _window.show()
             _window.restore()
+            if not _pagina_cargada.is_set():
+                _vigilar_en_hilo(_window, _window.get_current_url() or f"http://127.0.0.1:{PUERTO_PREFERIDO}")
         except Exception:
             pass
     return jsonify({"success": True})
 
 
-def _salir_limpio():
+def _vigilar_carga(ventana, url, espera=15, abrir_navegador=None):
+    """WebView2 a veces no navega y deja solo el color de fondo: reintenta y, si no, usa el navegador."""
+    for intento in (1, 2):
+        if _pagina_cargada.wait(espera):
+            return True
+        _arranque(f"La ventana no cargó la página en {espera} s; reintento {intento}.")
+        try:
+            ventana.load_url(url)
+        except Exception as e:
+            _arranque(f"ERROR al recargar la ventana: {e}")
+    if _pagina_cargada.wait(espera):
+        return True
+    _arranque("ERROR: la ventana sigue sin página; se abre en el navegador.")
+    if abrir_navegador:
+        abrir_navegador(url)
+    return False
+
+
+def _vigilar_en_hilo(ventana, url):
+    import webbrowser
+    threading.Thread(target=_vigilar_carga, args=(ventana, url), kwargs={"abrir_navegador": webbrowser.open},
+                     daemon=True, name="vigilar-carga").start()
+
+
+def _hilo_latido():
+    """Un hueco en el log indica que la app o la PC se detuvieron, no falta de trabajo."""
+    while True:
+        time.sleep(600)
+        log("[app] Activa.")
+
+
+def _salir_limpio(motivo="menú de la bandeja"):
     global current_subprocess
+    log(f"[app] Cerrando la app: {motivo}.")
     _bandeja.cerrar()
     from bot import motor as bot_motor
     motor = bot_motor.obtener()
@@ -3203,6 +3423,10 @@ if __name__ == "__main__":
 
     if not _instancia_unica():
         _arranque("Ya hay una copia abierta: se le pide que muestre su ventana.")
+        if "--navegador" in sys.argv:
+            import webbrowser
+            webbrowser.open(f"http://127.0.0.1:{PUERTO_PREFERIDO}")
+            sys.exit(0)
         if not hidden_mode:
             try:
                 requests.post(f"http://127.0.0.1:{PUERTO_PREFERIDO}/api/_mostrar_ventana", timeout=3)
@@ -3215,14 +3439,18 @@ if __name__ == "__main__":
     # Job y mueren con la app, incluso si crashea.
     winproc.activar_job_object()
 
-    threading.Thread(target=init_firebase_async, daemon=True, name="firebase").start()
-    threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
-    threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
+    if winproc.ES_WINDOWS and winproc.es_equipo_baja_ram() and not os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"):
+        os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+            "--disable-features=msVisualSearch,msEdgeSidebarV2,Translate "
+            "--renderer-process-limit=2 --disk-cache-size=33554432 --media-cache-size=16777216"
+        )
+
+    if _DASHBOARD_ACTIVO:
+        threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
 
     PUERTO = _elegir_puerto()
     URL_APP = f"http://127.0.0.1:{PUERTO}"
     _arranque(f"Iniciando servidor web en {URL_APP}...")
-    log_telemetry("Aplicación Iniciada", "La aplicación de escritorio ha sido arrancada.")
 
     _error_servidor = []
 
@@ -3237,11 +3465,11 @@ if __name__ == "__main__":
 
     threading.Thread(target=start_server, daemon=True, name="flask").start()
 
-    # Esperar a que el servidor responda ANTES de abrir la ventana (máx. 30 s).
-    for _ in range(150):
-        if _error_servidor or _responde(PUERTO, timeout=1):
+    # Esperar a que el servidor responda ANTES de abrir la ventana (sondeo ágil cada 50 ms).
+    for _ in range(400):
+        if _error_servidor or _responde(PUERTO, timeout=0.5):
             break
-        time.sleep(0.2)
+        time.sleep(0.05)
     if _error_servidor or not _responde(PUERTO, timeout=2):
         _arranque("ERROR: el servidor web no responde.")
         _aviso_windows("Content App - Error al iniciar",
@@ -3274,15 +3502,24 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[inbox] Error en purga automática de Firebase: {e}")
 
-    def _arrancar_bot():
+    def _arrancar_servicios_diferidos():
+        # Dejar que WebView2 abra y pinte primero la interfaz antes de iniciar hilos secundarios.
+        time.sleep(2.2)
+        if os.path.exists(FIREBASE_KEY_PATH):
+            init_firebase_async()
+            log_telemetry("Aplicación Iniciada", "La aplicación de escritorio ha sido arrancada.")
+            threading.Thread(target=_hilo_killswitch, daemon=True, name="killswitch").start()
         try:
             _iniciar_bot()
         except Exception as e:
             print(f"[bot] no arrancó: {e}")
+        threading.Thread(target=_hilo_latido, daemon=True, name="latido").start()
 
-    threading.Thread(target=_arrancar_bot, daemon=True, name="bot-arranque").start()
+    threading.Thread(target=_arrancar_servicios_diferidos, daemon=True, name="servicios-diferidos").start()
 
     try:
+        if "--navegador" in sys.argv:
+            raise ImportError("Modo navegador elegido")
         import webview  # type: ignore
 
         window = webview.create_window(
@@ -3296,6 +3533,10 @@ if __name__ == "__main__":
             hidden=hidden_mode,
         )
         _window = window
+        window.events.loaded += lambda: _pagina_cargada.set()
+        # pywebview avisa aquí si WebView2 no inicia; sin esto el fallo no deja rastro.
+        import logging
+        logging.getLogger("pywebview").addHandler(logging.StreamHandler(_log_arranque))
 
         def on_closing():
             if not _bandeja.disponible:
@@ -3313,15 +3554,19 @@ if __name__ == "__main__":
         def show_window():
             window.show()
             window.restore()
+            if not _pagina_cargada.is_set():
+                _vigilar_en_hilo(window, URL_APP)
 
         if winproc.ES_WINDOWS:
             _bandeja.iniciar(show_window, _salir_limpio)
         _arranque("Abriendo ventana...")
+        if not hidden_mode:
+            _vigilar_en_hilo(window, URL_APP)
         webview.start(private_mode=False, icon=paths.res_path('static', 'icons',
                        'my-content.ico' if winproc.ES_WINDOWS else 'my-content.png'))
-        _salir_limpio()
+        _salir_limpio("la ventana se cerró sin bandeja disponible")
     except ImportError:
-        print("Módulo pywebview no encontrado. Abriendo en el navegador...")
+        print("Abriendo en el navegador...")
         import webbrowser
         if winproc.ES_WINDOWS:
             _bandeja.iniciar(lambda: webbrowser.open(URL_APP), _salir_limpio)
@@ -3332,7 +3577,7 @@ if __name__ == "__main__":
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            _salir_limpio()
+            _salir_limpio("interrupción desde la consola")
 
 
 

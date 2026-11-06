@@ -152,7 +152,7 @@ class Integracion(unittest.TestCase):
         node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_salir_limpio')
         events = []
         motor = SimpleNamespace(obtener=lambda: SimpleNamespace(detener=lambda: events.append('bot')))
-        scope = {'_bandeja': SimpleNamespace(cerrar=lambda: events.append('tray')),
+        scope = {'_bandeja': SimpleNamespace(cerrar=lambda: events.append('tray')), 'log': lambda mensaje: None,
                  'current_subprocess': None, '_estado_lock': threading.Lock(),
                  'winproc': SimpleNamespace(matar_arbol=lambda p: events.append('children')),
                  'os': SimpleNamespace(_exit=lambda code: events.append('exit'))}

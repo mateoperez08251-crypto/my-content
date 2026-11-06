@@ -22,6 +22,20 @@ def _copiar_atomico(ruta_origen, ruta_destino):
     os.replace(ruta_destino + '.part', ruta_destino)
 
 
+_CAMPOS_META_CLIP = (
+    'inicio', 'fin', 'calidad_origen', 'miniatura_texto',
+    'puntuacion', 'gancho', 'clip_selection', 'titulo',
+)
+
+
+def _copiar_laterales_clip(ruta_origen, ruta_destino):
+    for sufijo in ('_miniatura.jpg', '.txt'):
+        lat_origen = os.path.splitext(ruta_origen)[0] + sufijo
+        lat_destino = os.path.splitext(ruta_destino)[0] + sufijo
+        if os.path.isfile(lat_origen) and os.path.getsize(lat_origen) > 0:
+            _copiar_atomico(lat_origen, lat_destino)
+
+
 def guardar_manifest(carpeta, clips, metadatos=None):
     os.makedirs(carpeta, exist_ok=True)
     registros = []
@@ -33,7 +47,7 @@ def guardar_manifest(carpeta, clips, metadatos=None):
         if metadatos and ruta in metadatos:
             registros[-1].update({
                 k: metadatos[ruta][k]
-                for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto')
+                for k in _CAMPOS_META_CLIP
                 if k in metadatos[ruta]
             })
         miniatura = os.path.splitext(ruta)[0] + '_miniatura.jpg'
@@ -67,7 +81,7 @@ def guardar_manifest_parcial(carpeta, clips, metadatos=None):
         if metadatos and ruta in metadatos:
             registros[-1].update({
                 k: metadatos[ruta][k]
-                for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto')
+                for k in _CAMPOS_META_CLIP
                 if k in metadatos[ruta]
             })
         miniatura = os.path.splitext(ruta)[0] + '_miniatura.jpg'
@@ -88,10 +102,8 @@ def conservar_uno(carpeta, indice, ruta, texto, meta=None):
     os.makedirs(carpeta, exist_ok=True)
     destino = os.path.join(carpeta, f'{int(indice) + 1:04d}_' + os.path.basename(ruta))
     _copiar_atomico(ruta, destino)
-    thumb_origen = os.path.splitext(ruta)[0] + '_miniatura.jpg'
+    _copiar_laterales_clip(ruta, destino)
     thumb_destino = os.path.splitext(destino)[0] + '_miniatura.jpg'
-    if os.path.isfile(thumb_origen) and os.path.getsize(thumb_origen) > 0:
-        _copiar_atomico(thumb_origen, thumb_destino)
     size = os.path.getsize(destino)
     if size <= 0:
         raise ValueError('El servidor entregó un clip vacío.')
@@ -99,7 +111,7 @@ def conservar_uno(carpeta, indice, ruta, texto, meta=None):
     if isinstance(meta, dict):
         nuevo_reg.update({
             k: meta[k]
-            for k in ('inicio', 'fin', 'calidad_origen', 'miniatura_texto')
+            for k in _CAMPOS_META_CLIP
             if k in meta
         })
     if os.path.isfile(thumb_destino) and os.path.getsize(thumb_destino) > 0:
@@ -150,10 +162,7 @@ def conservar(carpeta, clips, metadatos=None):
         destino = os.path.join(carpeta, f'{i + 1:04d}_' + os.path.basename(ruta))
         if os.path.abspath(ruta) != os.path.abspath(destino):
             _copiar_atomico(ruta, destino)
-            thumb_origen = os.path.splitext(ruta)[0] + '_miniatura.jpg'
-            thumb_destino = os.path.splitext(destino)[0] + '_miniatura.jpg'
-            if os.path.isfile(thumb_origen) and os.path.getsize(thumb_origen) > 0:
-                _copiar_atomico(thumb_origen, thumb_destino)
+            _copiar_laterales_clip(ruta, destino)
         salida.append((destino, texto))
         if metadatos and ruta in metadatos:
             trasladados[destino] = metadatos[ruta]
@@ -167,14 +176,19 @@ def leer_intervalos(carpeta):
                 for r in json.load(f) if 'inicio' in r and 'fin' in r}
 
 
-def leer_calidad_origen(carpeta, archivo):
+def leer_meta_clip(carpeta, archivo):
+    objetivo = os.path.basename(archivo)
     for nombre_json in ('clips.json', 'clips_parcial.json'):
         try:
             with open(os.path.join(carpeta, nombre_json), encoding='utf-8') as f:
                 for registro in json.load(f):
-                    if registro.get('nombre') == os.path.basename(archivo):
-                        valor = registro.get('calidad_origen', {})
-                        return valor if isinstance(valor, dict) else {}
+                    if isinstance(registro, dict) and registro.get('nombre') == objetivo:
+                        return dict(registro)
         except (OSError, ValueError, TypeError, AttributeError):
             pass
     return {}
+
+
+def leer_calidad_origen(carpeta, archivo):
+    valor = leer_meta_clip(carpeta, archivo).get('calidad_origen', {})
+    return valor if isinstance(valor, dict) else {}

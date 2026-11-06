@@ -124,6 +124,8 @@ class DB:
             for campo, tipo in [('intervalo_horas', 'REAL'), ('hora_inicio', 'TEXT'), ('hora_fin', 'TEXT')]:
                 if campo not in cuentas:
                     self._con.execute(f'ALTER TABLE cuentas ADD COLUMN {campo} {tipo}')
+            if 'franjas' not in cuentas:
+                self._con.execute("ALTER TABLE cuentas ADD COLUMN franjas TEXT NOT NULL DEFAULT ''")
             if 'intervalo_unidad' not in cuentas:
                 self._con.execute("ALTER TABLE cuentas ADD COLUMN intervalo_unidad TEXT NOT NULL DEFAULT 'horas'")
             subidas = {r[1] for r in self._con.execute('PRAGMA table_info(subidas)')}
@@ -189,7 +191,7 @@ class DB:
     def editar_cuenta(self, cid, **campos):
         from .ritmo import validar
         permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre", "preset_corte",
-                      "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "monetizada", "proteger_fyp"}
+                      "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "franjas", "monetizada", "proteger_fyp"}
         sets = {k: v for k, v in campos.items() if k in permitidos}
         if 'monetizada' in sets:
             if type(sets['monetizada']) is not bool:

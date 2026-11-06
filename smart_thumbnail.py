@@ -20,6 +20,7 @@ import os
 import re
 
 THUMBNAIL_MODES = ("off", "cover_and_jpg", "jpg_only")
+PORTADA_W, PORTADA_H = 1080, 1920  # Siempre 9:16, aunque el clip se exporte en 16:9.
 
 _STOPWORDS_BORDE = {
     "a", "al", "con", "como", "cuando", "de", "del", "donde", "el", "en", "es", "esa",
@@ -59,6 +60,10 @@ def _limpiar_frase_portada(frase: str, max_palabras: int = 7) -> str:
     texto = re.sub(r"\s+", " ", str(frase or "")).strip(" \"'“”«».,;:-—")
     if not texto:
         return ""
+    # La ventana puede arrancar en la cola de otra oración: "cuenta? ¿Por qué no está...".
+    oraciones = [o for o in re.split(r"(?<=[.!?…])\s+", texto) if len(o.split()) >= 3]
+    if oraciones:
+        texto = max(oraciones, key=lambda o: len(o.split()))
     partes = texto.split()
     # Quitar muletillas iniciales débiles
     while len(partes) > 3 and _normalizar_token(partes[0]) in {"eh", "emm", "bueno", "entonces", "pues", "y", "pero", "que"}:
@@ -383,6 +388,122 @@ def select_best_thumbnail_frame(get_frame_fn, duration: float, target_second: fl
     return mejor_t, mejor_frame
 
 
+def _cara_principal(rgb):
+    """`(cx, cy, ancho, alto)` de la cara mayor en píxeles de `rgb`, o None."""
+    import cv2
+    import reencuadre
+
+    h, w = rgb.shape[:2]
+    escala = min(1.0, 960.0 / max(h, w, 1))
+    sw, sh = max(32, int(round(w * escala))), max(32, int(round(h * escala)))
+    small = cv2.cvtColor(cv2.resize(rgb, (sw, sh), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2BGR)
+    try:
+        det = reencuadre._crear_detector(sw, sh)
+        caras = reencuadre._detectar(det, None if det is not None else reencuadre._haar(), small)
+    except Exception:
+        return None
+    if not caras:
+        return None
+    cx, cy, fw, fh = max(caras, key=lambda c: c[2] * c[3])[:4]
+    return cx / escala, cy / escala, fw / escala, fh / escala
+
+
+def _encuadre_9_16(rgb, cara):
+    """Recorta 9:16 con la cara en el tercio superior, libre del texto. Devuelve `(recorte, cara)`."""
+    h, w = rgb.shape[:2]
+    alto_max = min(float(h), w * 16.0 / 9.0)
+    alto = min(alto_max, max(alto_max * 0.55, cara[3] / 0.20)) if cara else alto_max
+    ancho = alto * 9.0 / 16.0
+    cx, cy = (cara[0], cara[1]) if cara else (w / 2.0, h / 2.0)
+    x0 = int(round(max(0.0, min(w - ancho, cx - ancho / 2.0))))
+    y0 = int(round(max(0.0, min(h - alto, cy - alto * 0.34))))
+    x1, y1 = min(w, x0 + int(round(ancho))), min(h, y0 + int(round(alto)))
+    relativa = (cara[0] - x0, cara[1] - y0, cara[2], cara[3]) if cara else None
+    return rgb[y0:y1, x0:x1], relativa
+
+
+def _mascara_personaje(img, cara):
+    """Recorta a la persona con GrabCut desde su cara. Devuelve máscara 0..1 o None si no es fiable."""
+    import cv2
+    import numpy as np
+
+    h, w = img.shape[:2]
+    sw, sh = 360, 640
+    ex, ey = sw / float(w), sh / float(h)
+    cx, cy, fw, fh = cara[0] * ex, cara[1] * ey, cara[2] * ex, cara[3] * ey
+    m = np.full((sh, sw), cv2.GC_PR_BGD, np.uint8)
+    caja = lambda x0, y0, x1, y1: (slice(max(0, int(y0)), min(sh, int(y1))), slice(max(0, int(x0)), min(sw, int(x1))))
+    m[caja(cx - fw * 2.6, cy - fh, cx + fw * 2.6, sh)] = cv2.GC_PR_FGD
+    m[:4, :] = cv2.GC_BGD
+    m[:, :4] = cv2.GC_BGD
+    m[:, -4:] = cv2.GC_BGD
+    m[caja(cx - fw * 0.38, cy - fh * 0.42, cx + fw * 0.38, cy + fh * 0.42)] = cv2.GC_FGD
+    m[caja(cx - fw * 0.55, cy + fh * 0.8, cx + fw * 0.55, cy + fh * 2.2)] = cv2.GC_FGD
+    small = cv2.cvtColor(cv2.resize(img, (sw, sh), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2BGR)
+    try:
+        cv2.grabCut(small, m, None, np.zeros((1, 65)), np.zeros((1, 65)), 4, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return None
+    fg = ((m == cv2.GC_FGD) | (m == cv2.GC_PR_FGD)).astype(np.uint8)
+    _, etiquetas = cv2.connectedComponents(fg)
+    grupo = etiquetas[min(sh - 1, max(0, int(cy))), min(sw - 1, max(0, int(cx)))]
+    if grupo == 0:
+        return None
+    fg = (etiquetas == grupo).astype(np.uint8)
+    if not 0.03 <= float(fg.mean()) <= 0.72:
+        return None
+    # Un recorte que deja fuera la cabeza es peor que el foco suave.
+    if float(fg[caja(cx - fw * 0.6, cy - fh * 0.7, cx + fw * 0.6, cy + fh * 0.6)].mean()) < 0.7:
+        return None
+    fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    grande = cv2.resize(fg.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+    return np.clip(cv2.GaussianBlur(grande, (0, 0), 3.2), 0.0, 1.0)
+
+
+def _foco_suave(h, w, cara):
+    """Sin recorte fiable: foco elíptico sobre la cara o el centro de la imagen."""
+    import numpy as np
+
+    cx, cy = (cara[0], cara[1]) if cara else (w / 2.0, h * 0.40)
+    rx, ry = (max(cara[2] * 2.4, w * 0.34), max(cara[3] * 3.2, h * 0.28)) if cara else (w * 0.48, h * 0.36)
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    d = ((xs - cx) / rx) ** 2 + ((ys - cy) / ry) ** 2
+    return np.exp(-(d ** 1.6)).astype(np.float32)
+
+
+def editar_portada_9_16(frame_rgb):
+    """Convierte el fotograma ORIGINAL en una portada 9:16 con el personaje resaltado sobre fondo apagado."""
+    import cv2
+    import numpy as np
+
+    rgb = np.ascontiguousarray(frame_rgb[:, :, :3])
+    recorte, cara = _encuadre_9_16(rgb, _cara_principal(rgb))
+    ex, ey = PORTADA_W / float(recorte.shape[1]), PORTADA_H / float(recorte.shape[0])
+    interp = cv2.INTER_LANCZOS4 if ex > 1.0 else cv2.INTER_AREA
+    img = cv2.resize(np.ascontiguousarray(recorte), (PORTADA_W, PORTADA_H), interpolation=interp)
+    cara = (cara[0] * ex, cara[1] * ey, cara[2] * ex, cara[3] * ey) if cara else None
+
+    mascara = _mascara_personaje(img, cara) if cara else None
+    alfa = mascara if mascara is not None else _foco_suave(PORTADA_H, PORTADA_W, cara)
+
+    # Fondo desenfocado, oscuro y con menos color; personaje más luminoso, saturado y nítido.
+    fondo = cv2.GaussianBlur(img, (0, 0), 16).astype(np.float32)
+    gris = fondo.mean(axis=2, keepdims=True)
+    fondo = (gris + (fondo - gris) * 0.55) * 0.42
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.2, 0, 255)
+    sujeto = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+    sujeto = cv2.addWeighted(sujeto, 1.45, cv2.GaussianBlur(sujeto, (0, 0), 2.2), -0.45, 0)
+    sujeto = np.clip(sujeto.astype(np.float32) * 1.07 + 6.0, 0, 255)
+    salida = sujeto * alfa[:, :, None] + fondo * (1.0 - alfa[:, :, None])
+
+    if mascara is not None:
+        # Halo fino que separa la silueta del fondo.
+        halo = (np.clip(cv2.GaussianBlur(mascara, (0, 0), 7) * 1.8, 0.0, 1.0) * (1.0 - mascara))[:, :, None] * 0.6
+        salida = salida * (1.0 - halo) + np.array((255.0, 230.0, 0.0), np.float32) * halo
+    return np.clip(salida, 0, 255).astype(np.uint8)
+
+
 def _partir_lineas_portada(frase: str, max_chars_linea: int = 16, max_lineas: int = 3) -> list[str]:
     palabras = [p for p in str(frase or "").upper().split() if p]
     if not palabras:
@@ -399,6 +520,12 @@ def _partir_lineas_portada(frase: str, max_chars_linea: int = 16, max_lineas: in
     if actual:
         lineas.append(" ".join(actual))
     return lineas[:max_lineas]
+
+
+def _alto_linea(draw, fuente, borde: int) -> tuple[int, int]:
+    """`(alto sobre la base, alto de línea)` contando tildes, colas y borde: las líneas no se pisan."""
+    caja = draw.textbbox((0, 0), "ÁÉÑQ¿", font=fuente, stroke_width=borde, anchor="ls")
+    return -caja[1], caja[3] - caja[1] + borde
 
 
 def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None,
@@ -453,6 +580,9 @@ def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None
     tam_base = int(round((w * 0.108) if es_vertical else (h * 0.125)))
     tam_font = max(24, tam_base)
     margen_max_w = int(round(w * 0.86))
+    # Zona segura inferior (evita botones inferiores de TikTok/Reels y deja libre la cara arriba)
+    base_inferior = int(round(h * (0.855 if es_vertical else 0.88)))
+    margen_max_h = base_inferior - int(round(h * 0.48))
     while tam_font > 22:
         font_main = subtitulos.fuente("anton", tam_font)
         stroke_w = max(2, int(round(tam_font * 0.085)))
@@ -460,16 +590,13 @@ def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None
         for ln in lineas:
             bb = draw.textbbox((0, 0), ln, font=font_main, stroke_width=stroke_w)
             anchos.append(bb[2] - bb[0])
-        if max(anchos or [0]) <= margen_max_w:
+        if max(anchos or [0]) <= margen_max_w and _alto_linea(draw, font_main, stroke_w)[1] * len(lineas) <= margen_max_h:
             break
         tam_font = int(tam_font * 0.91)
     font_main = subtitulos.fuente("anton", tam_font)
     stroke_w = max(2, int(round(tam_font * 0.085)))
-    interlineado = int(round(tam_font * 1.12))
+    sobre_base, interlineado = _alto_linea(draw, font_main, stroke_w)
     bloque_h = interlineado * len(lineas)
-
-    # Zona segura inferior (evita botones inferiores de TikTok/Reels y deja libre la cara arriba)
-    base_inferior = int(round(h * (0.855 if es_vertical else 0.88)))
     y_inicio = max(int(round(h * 0.48)), base_inferior - bloque_h)
 
     # 3. Pastilla superior contextual (`EN PLENO LIVE` / `LO DIJO CLARO`)
@@ -513,19 +640,20 @@ def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None
         medidas = []
         total_w = 0
         for tk in toks:
-            bb = draw.textbbox((0, 0), tk, font=font_main, stroke_width=stroke_w)
+            bb = draw.textbbox((0, 0), tk, font=font_main, stroke_width=stroke_w, anchor="ls")
             tw = bb[2] - bb[0]
             medidas.append((tk, tw, bb))
             total_w += tw
         total_w += espacio_w * max(0, len(toks) - 1)
         cursor_x = (w - total_w) // 2
-        cy_line = y_inicio + idx_l * interlineado
+        # Línea base común: una tilde ya no desplaza su palabra respecto a las demás.
+        base_linea = y_inicio + idx_l * interlineado + sobre_base
 
         for tk, tw, bb in medidas:
             es_key = _normalizar_token(tk) in resaltadas
             color_txt = (255, 230, 0, 255) if es_key else (255, 255, 255, 255)
             tx = cursor_x - bb[0]
-            ty = cy_line - bb[1]
+            ty = base_linea
             # Sombra profunda 3D
             draw.text(
                 (tx + sombra_off, ty + sombra_off),
@@ -534,6 +662,7 @@ def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None
                 fill=(0, 0, 0, 210),
                 stroke_width=stroke_w,
                 stroke_fill=(0, 0, 0, 210),
+                anchor="ls",
             )
             # Texto principal con borde negro nítido
             draw.text(
@@ -543,6 +672,7 @@ def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None
                 fill=color_txt,
                 stroke_width=stroke_w,
                 stroke_fill=(8, 10, 16, 255),
+                anchor="ls",
             )
             cursor_x += tw + espacio_w
 

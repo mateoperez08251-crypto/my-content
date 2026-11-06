@@ -421,6 +421,9 @@ def solicitar_revision():
 
 def start_background_loop():
     """Una sola ronda de detección; las entregas pendientes se revisan cada minuto."""
+    # No saturar red/CPU justo mientras la ventana principal está abriendo (salvo revisión manual).
+    if not _wake.is_set() and not _stop.is_set():
+        _wake.wait(12)
     siguiente = 0
     while not _stop.is_set():
         if _wake.is_set():

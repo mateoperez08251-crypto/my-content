@@ -21,7 +21,7 @@ assert(card.includes('Ver detalles'));
 const groups=ctx.gruposSubidas([{id:1,estado:'ok'},{id:2,estado:'subiendo'},{id:3,estado:'error'}]);
 assert.deepEqual(Array.from(groups.pendientes,s=>s.id),[2,3]);
 assert.deepEqual(Array.from(groups.publicadas,s=>s.id),[1]);
-assert(html.indexOf('id="historial-publicadas"') > html.indexOf('id="registro"'));
+assert(html.indexOf('id="historial-publicadas"') > html.indexOf('id="trabajos"'));
 const detailsA={open:false},detailsB={open:false},history={open:false};
 const nodes={subidas:{querySelectorAll:()=>[detailsA]},'subidas-publicadas':{querySelectorAll:()=>[detailsB]},'publicadas-desplegable':history};
 ctx.$=id=>nodes[id];ctx.expandirSubidas(true);

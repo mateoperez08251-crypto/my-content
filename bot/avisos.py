@@ -165,15 +165,21 @@ class Avisos:
                 resultado = self.enviar(texto, omitidos=omitidos) if omitidos else self.enviar(texto)
             except Exception:
                 resultado = False
+            sin_canal_remoto = False
             if isinstance(resultado, dict):
                 aceptados = set(json.loads(confirmados)) | {c for c, ok in resultado.items() if ok}
                 for row in rows:
                     self.db._q('UPDATE bot_avisos SET confirmados=? WHERE id=?', (json.dumps(sorted(aceptados)), row['id']))
                 canales = {c: ok for c, ok in resultado.items() if not c.startswith('_')}
+                sin_canal_remoto = not canales and not (aceptados - {'_escritorio'})
                 resultado = bool(canales or (aceptados - {'_escritorio'})) and all(canales.values())
             # None mantiene la compatibilidad de callbacks antiguos sin retorno.
             if resultado is not False:
                 self._marcar(rows, 'enviado')
+            elif sin_canal_remoto:
+                # Sin WhatsApp/correo configurados: ya se mostró el aviso de escritorio; no repetir cada 60 s
+                # ni saturar el registro con falsos errores. Se conserva pendiente por si configura el Radar luego.
+                self._marcar(rows, 'pendiente', proximo=ahora + 1800)
             else:
                 for row in rows:
                     intentos = row['intentos'] + 1

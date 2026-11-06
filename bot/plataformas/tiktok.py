@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """TikTok Studio: comprobar cada paso y no repetir una publicación incierta."""
+import os
 import re
 import time
 import unicodedata
@@ -28,6 +29,20 @@ _EXITO = re.compile(
     r"(?:\s+successfully)?)[.!¡\s]*$", re.I)
 _RECHAZO = [r"l[ií]mite diario|demasiad[oa]s (videos|publicaciones)|daily limit|too many",
             r"no se pudo subir|couldn.t upload|formato no compatible|unsupported"]
+
+
+# Studio cambia clases e idioma: texto primero, clases conocidas después.
+_PORTADA_ABRIR = [':text-matches("^(editar|cambiar|seleccionar) (la )?portada$|^(edit|change|select) cover$", "i")',
+                  'div[class*="cover-container"] [class*="edit-container"]',
+                  'div.edit-container',
+                  'div[class*="cover-container"]',
+                  'img[class*="cover-image"]']
+_PORTADA_PANEL = ['div[class*="cover-edit-container"]',
+                  '[role="dialog"]:has(input[type="file"][accept*="image"])']
+_PORTADA_ARCHIVO = ['input[type="file"][accept*="image"]']
+_PORTADA_PESTANA = re.compile(r"^(subir|cargar|upload)( la| una)?( portada| cover| imagen| image)?$", re.I)
+_PORTADA_GUARDAR = re.compile(r"^(guardar|confirmar|listo|hecho|save|confirm|done)$", re.I)
+_PORTADA_CANCELAR = re.compile(r"^(cancelar|cancel)$", re.I)
 
 
 def sesion_abierta(page) -> bool:
@@ -182,6 +197,85 @@ def _preparar_publicar(page, publicar, h):
                       "el bot conservará el clip para reintentar.") from None
 
 
+def _en_panel(page, buscar, timeout):
+    """Primer elemento visible dentro del editor de portada: nunca toca el botón Publicar."""
+    fin = time.monotonic() + timeout
+    while True:
+        _revisar(page)
+        for selector in _PORTADA_PANEL:
+            loc = buscar(page.locator(selector))
+            for i in range(loc.count()):
+                if loc.nth(i).is_visible():
+                    return loc.nth(i)
+        if time.monotonic() >= fin:
+            return None
+        page.wait_for_timeout(500)
+
+
+def _panel_abierto(page):
+    return any(page.locator(selector).first.is_visible() for selector in _PORTADA_PANEL)
+
+
+def _aplicar_portada(page, h, portada):
+    h.clic(primero(page, _PORTADA_ABRIR, timeout=20))
+    fin = time.monotonic() + 15
+    while not _panel_abierto(page):
+        if time.monotonic() >= fin:
+            raise ErrorSubida("no se abrió el editor de portada")
+        page.wait_for_timeout(500)
+    pestana = _en_panel(page, lambda p: p.get_by_text(_PORTADA_PESTANA), 4)
+    if pestana is not None:
+        h.clic(pestana)
+    primero(page, _PORTADA_ARCHIVO, timeout=15, visible=False).set_input_files(portada)
+    h.pausa(1.5, 3)
+    guardar = _en_panel(page, lambda p: p.get_by_role("button", name=_PORTADA_GUARDAR), 30)
+    if guardar is None:
+        raise ErrorSubida("no apareció Guardar en el editor de portada")
+    esperar_habilitado(guardar, timeout=60, page=page, revisar=lambda: _revisar(page))
+    h.clic(guardar)
+    fin = time.monotonic() + 30
+    while _panel_abierto(page):
+        if time.monotonic() >= fin:
+            raise ErrorSubida("TikTok no cerró el editor de portada")
+        page.wait_for_timeout(500)
+
+
+def _cerrar_portada(page):
+    """Sin esto el editor abierto taparía Publicar y fallaría la subida entera."""
+    try:
+        if not _panel_abierto(page):
+            return
+        cancelar = _en_panel(page, lambda p: p.get_by_role("button", name=_PORTADA_CANCELAR), 2)
+        if cancelar is not None:
+            cancelar.click(timeout=5000)
+        else:
+            page.keyboard.press("Escape")
+        page.wait_for_timeout(800)
+    except (SubidaCancelada, SesionCerrada, Rechazado):
+        raise
+    except Exception:
+        pass
+
+
+def _poner_portada(page, h, video):
+    """Sube `<clip>_miniatura.jpg` como portada. Si Studio falla, el video se publica igual."""
+    portada = os.path.splitext(video)[0] + "_miniatura.jpg"
+    if not os.path.isfile(portada) or not os.path.getsize(portada):
+        h.informar("Este clip no tiene miniatura; TikTok usará su portada automática")
+        return False
+    h.informar("Poniendo la portada 9:16 en TikTok")
+    try:
+        _aplicar_portada(page, h, portada)
+    except (SubidaCancelada, SesionCerrada, Rechazado):
+        raise
+    except Exception as exc:
+        _cerrar_portada(page)
+        h.informar(f"No pude poner la portada ({exc}); publico con la portada de TikTok")
+        return False
+    h.informar("Portada puesta en TikTok")
+    return True
+
+
 def subir(page, h, video, texto, url_subida=""):
     if len(texto) > MAX_TEXTO:
         raise Rechazado(f"La descripción supera el límite configurado del bot ({MAX_TEXTO} "
@@ -201,6 +295,7 @@ def subir(page, h, video, texto, url_subida=""):
     publicar = _buscar(page, _PUBLICAR, "el botón Publicar", timeout=180,
                        boton=_NOMBRE_PUBLICAR)
     esperar_habilitado(publicar, timeout=900, page=page, revisar=lambda: _revisar(page))
+    _poner_portada(page, h, video)
 
     h.informar("Escribiendo y comprobando la descripción")
     for intento in range(2):

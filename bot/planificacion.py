@@ -1,7 +1,7 @@
 """Estimación de la cola. No reserva horas ni publica contenido."""
 from collections import defaultdict
 from datetime import datetime, timedelta
-from .ritmo import horario, intervalo
+from .ritmo import franjas, intervalo
 
 
 def siguiente_horario(instant, inicio, fin):
@@ -17,6 +17,10 @@ def siguiente_horario(instant, inicio, fin):
             return a.timestamp()
         return instant if dt < b else (a + timedelta(days=1)).timestamp()
     return instant if dt >= a or dt < b else a.timestamp()
+
+
+def siguiente_franja(instant, ventanas):
+    return min(siguiente_horario(instant, inicio, fin) for inicio, fin in ventanas)
 
 
 def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
@@ -39,7 +43,7 @@ def simular(subidas, cuentas, cfg, ahora, libre_global, extremo):
             cid = s['cuenta_id']
             t = max(reloj, 0 if s.get('adelantada') else libres[cid], s['proximo_intento'])
             for _ in range(3700):
-                t = siguiente_horario(t, *horario(cuentas[cid], cfg))
+                t = siguiente_franja(t, franjas(cuentas[cid], cfg))
                 dt = datetime.fromtimestamp(t)
                 if usados[cid, dt.date()] < cuentas[cid]['limite_dia']:
                     break

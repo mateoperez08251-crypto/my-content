@@ -1919,10 +1919,82 @@
             transform: scale(1.04);
         }
 
+        .pc-clip-card.es-subiendo {
+            border-color: rgba(52, 211, 153, 0.56);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 16px 36px rgba(16, 185, 129, 0.24);
+        }
+
+        .pc-clip-card.es-en-cola, .pc-clip-card.es-preparado {
+            border-color: rgba(90, 200, 250, 0.34);
+        }
+
+        .pc-clip-liquid {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+            pointer-events: none;
+            background: linear-gradient(180deg, rgba(90, 200, 250, 0.44) 0%, rgba(10, 132, 255, 0.40) 55%, rgba(52, 211, 153, 0.38) 100%);
+            transition: height 0.75s var(--apple-spring);
+            animation: pcPulseCola 3.4s ease-in-out infinite;
+        }
+
+        .pc-clip-card.es-subiendo .pc-clip-liquid {
+            background: linear-gradient(180deg, rgba(52, 211, 153, 0.64) 0%, rgba(10, 132, 255, 0.58) 52%, rgba(94, 92, 230, 0.70) 100%);
+            animation: none;
+        }
+
+        @keyframes pcPulseCola {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+
+        .pc-clip-upload-flow {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+            opacity: 0.42;
+            background: repeating-linear-gradient(180deg, transparent 0px, transparent 24px, rgba(90, 200, 250, 0.12) 34px, rgba(52, 211, 153, 0.20) 44px, transparent 56px);
+            background-size: 100% 112px;
+            animation: pcUploadFlow 2.6s linear infinite;
+        }
+
+        .pc-clip-card.es-subiendo .pc-clip-upload-flow {
+            opacity: 0.92;
+            animation-duration: 1.6s;
+        }
+
+        @keyframes pcUploadFlow {
+            0% { background-position: 0 112px; }
+            100% { background-position: 0 0; }
+        }
+
+        .vessel-rating-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.70rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 99px;
+            font-variant-numeric: tabular-nums;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(10, 14, 24, 0.78);
+            color: #f8fafc;
+            backdrop-filter: blur(10px);
+        }
+        .vessel-rating-pill.nivel-viral { background: linear-gradient(135deg, rgba(245, 158, 11, 0.30), rgba(16, 185, 129, 0.28)); border-color: rgba(251, 191, 36, 0.56); color: #fef3c7; }
+        .vessel-rating-pill.nivel-alta { background: rgba(16, 185, 129, 0.22); border-color: rgba(52, 211, 153, 0.48); color: #a7f3d0; }
+        .vessel-rating-pill.nivel-media { background: rgba(10, 132, 255, 0.22); border-color: rgba(90, 200, 250, 0.45); color: #bae6fd; }
+        .vessel-rating-pill.nivel-baja { background: rgba(245, 158, 11, 0.20); border-color: rgba(251, 146, 60, 0.45); color: #fed7aa; }
+
         .pc-clip-overlay {
             position: absolute;
             inset: 0;
-            background: linear-gradient(180deg, rgba(0,0,0,0.42) 0%, transparent 40%, rgba(0,0,0,0.74) 100%);
+            z-index: 2;
+            background: linear-gradient(180deg, rgba(0,0,0,0.46) 0%, transparent 40%, rgba(0,0,0,0.78) 100%);
             display: flex;
             flex-direction: column;
             justify-content: space-between;
@@ -1958,7 +2030,9 @@
             .vessel-liquid, .clip-vessel-card, .pc-clip-card { transition: none !important; }
         }
 
-    </style>
+    /* Solo lo que queda oculto tras el bot: pausar todo congelaba modales y avisos en opacidad 0. */
+    body.modo-bot-activo .dashboard-main *,body.modo-bot-activo .dashboard-main *::before,body.modo-bot-activo .dashboard-main *::after,body.modo-bot-activo::before,body.modo-bot-activo::after{animation-play-state:paused!important}
+</style>
 </head>
 
 <body>
@@ -2320,6 +2394,25 @@
             }
         });
         });
+
+        function cerrarSesionApp() {
+            try { localStorage.removeItem('mySessionId'); } catch (_) {}
+            const finalizar = () => {
+                const overlay = document.getElementById('firebaseLoginOverlay');
+                if (overlay) overlay.style.display = 'flex';
+                window.location.reload();
+            };
+            if (window.firebase && firebase.apps && firebase.apps.length && typeof firebase.auth === 'function') {
+                let terminado = false;
+                const done = () => { if (!terminado) { terminado = true; finalizar(); } };
+                setTimeout(done, 2000);
+                try {
+                    firebase.auth().signOut().then(done).catch(done);
+                    return;
+                } catch (_) {}
+            }
+            finalizar();
+        }
 
         function handleFirebaseLogin() {
             const email = document.getElementById('authEmail').value;
@@ -2971,7 +3064,7 @@
                     </div>
                 </div>
                 <button
-                    onclick="firebase.auth().signOut().then(() => { localStorage.removeItem('mySessionId'); window.location.reload(); })"
+                    onclick="cerrarSesionApp()"
                     title="Cerrar Sesión"
                     style="background: rgba(255,0,0,0.1); color: #ff4444; border: none; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                     <i class="ph-bold ph-sign-out"></i>
@@ -4229,6 +4322,10 @@
             document.body.classList.remove('modo-bot-activo', 'modo-bot-inmersivo');
             const modBot = document.getElementById('moduleBotUpload');
             if (modBot) modBot.style.display = 'none';
+            const frame = document.getElementById('botUploadIframe');
+            if (frame && frame.contentWindow) {
+                try { frame.contentWindow.postMessage({ type: 'bot-visibility', visible: false }, '*'); } catch (_) {}
+            }
         }
 
         function openBotModule(ev, tabName) {
@@ -4253,8 +4350,11 @@
             const targetUrl = '/bot?embed=1' + hash;
             if (!frame.getAttribute('src') || frame.getAttribute('src') === 'about:blank') {
                 frame.setAttribute('src', targetUrl);
-            } else if (tabName && frame.contentWindow) {
-                try { frame.contentWindow.postMessage({ type: 'bot-switch-tab', tab: tabName }, '*'); } catch (_) {}
+            } else if (frame.contentWindow) {
+                try { frame.contentWindow.postMessage({ type: 'bot-visibility', visible: true }, '*'); } catch (_) {}
+                if (tabName) {
+                    try { frame.contentWindow.postMessage({ type: 'bot-switch-tab', tab: tabName }, '*'); } catch (_) {}
+                }
             }
             return false;
         }
@@ -4816,7 +4916,7 @@
                 whisper_local: document.getElementById('smart_whisper_local') ? document.getElementById('smart_whisper_local').value : 'auto',
                 commentary_mode: ['off', 'intro', 'intro_outro'].includes(rawCommMode) ? rawCommMode : 'off',
                 commentary_style: ['gancho', 'opinion', 'contexto', 'debate'].includes(rawCommStyle) ? rawCommStyle : 'gancho',
-                commentary_voice: (rawCommVoice === 'male' || rawCommVoice === 'female' || String(rawCommVoice).startsWith('voice:')) ? rawCommVoice : 'male',
+                commentary_voice: (rawCommVoice === 'male' || rawCommVoice === 'female' || String(rawCommVoice).startsWith('voice:') || String(rawCommVoice).startsWith('eleven:')) ? rawCommVoice : 'male',
                 cold_open: Boolean(document.getElementById('smart_cold_open')?.checked),
                 jump_cuts: Boolean(document.getElementById('smart_jump_cuts')?.checked),
                 auto_split: Boolean(document.getElementById('smart_auto_split')?.checked),
@@ -4970,8 +5070,9 @@
                         </div>
                         <div class="vessel-shine"></div>
                         <div class="vessel-hud">
-                            <div class="vessel-top-row">
+                            <div class="vessel-top-row" style="flex-wrap:wrap;">
                                 <span class="vessel-badge">Clip ${Number(c.index)}</span>
+                                <span class="vessel-rating-slot"></span>
                                 <span class="vessel-badge vessel-status-pill">En espera</span>
                             </div>
                             <div class="vessel-center">
@@ -4998,8 +5099,17 @@
 
                 const pill = card.querySelector('.vessel-status-pill');
                 if (pill) {
-                    pill.textContent = esListo ? 'Listo ✓' : (c.estado === 'llenando' ? 'Llenando' : c.estado === 'error' ? 'Error' : 'En espera');
+                    pill.textContent = esListo ? '↑ Preparado ✓' : (c.estado === 'llenando' ? 'Llenando' : c.estado === 'error' ? 'Error' : 'En espera');
                     pill.classList.toggle('ok', esListo);
+                }
+                const ratingSlot = card.querySelector('.vessel-rating-slot');
+                if (ratingSlot) {
+                    if (c.calificacion && Number.isFinite(Number(c.calificacion.nota))) {
+                        const niv = ['viral','alta','media','baja'].includes(c.calificacion.nivel) ? c.calificacion.nivel : 'media';
+                        ratingSlot.innerHTML = `<span class="vessel-rating-pill nivel-${niv}" title="${escapeHtml(c.calificacion.resumen || '')}">${escapeHtml(c.calificacion.icono || '⭐')} ${Number(c.calificacion.nota).toFixed(1)}</span>`;
+                    } else {
+                        ratingSlot.innerHTML = '';
+                    }
                 }
                 const pctEl = card.querySelector('.vessel-pct');
                 if (pctEl) {
@@ -5080,29 +5190,50 @@
                 }
                 grid.innerHTML = data.clips.map(c => {
                     const tEsc = escapeHtml(c.titulo || c.nombre);
-                    const vJs = JSON.stringify(c.video_url);
-                    const thJs = JSON.stringify(c.thumb_url);
-                    const tiJs = JSON.stringify(c.titulo || c.nombre).replace(/</g, '\u003c');
-                    const ruJs = JSON.stringify(c.ruta || '').replace(/</g, '\u003c');
+                    const safeJs = v => JSON.stringify(v ?? '').replace(/</g, '\\u003c').replace(/'/g, '\\u0027');
+                    const vJs = safeJs(c.video_url);
+                    const thJs = safeJs(c.thumb_url);
+                    const tiJs = safeJs(c.titulo || c.nombre);
+                    const ruJs = safeJs(c.ruta || '');
+                    const estCola = c.estado_cola || 'preparado';
+                    const esSubiendo = estCola === 'subiendo';
+                    const esEnCola = estCola === 'en_cola';
+                    const esPublicado = estCola === 'publicado';
+                    const pctLiq = esSubiendo ? Math.max(14, Math.min(96, parseInt(c.pct_subida) || 32)) : (esPublicado ? 18 : 26);
+                    const claseCard = esSubiendo ? ' es-subiendo' : (esEnCola ? ' es-en-cola' : ' es-preparado');
+                    const etqEstado = esSubiendo ? `↑ Subiendo ${pctLiq}%` : (esEnCola ? '↑ En cola' : (esPublicado ? 'Publicado ✓' : '↑ Preparado'));
+                    const cal = c.calificacion && Number.isFinite(Number(c.calificacion.nota)) ? c.calificacion : null;
+                    const nivCal = cal && ['viral','alta','media','baja'].includes(cal.nivel) ? cal.nivel : 'media';
+                    const pillCal = cal
+                        ? `<span class="vessel-rating-pill nivel-${nivCal}" title="${escapeHtml((cal.etiqueta || '') + ' · ' + (cal.resumen || ''))}">${escapeHtml(cal.icono || '⭐')} ${Number(cal.nota).toFixed(1)}/10</span>`
+                        : '';
                     return `
-                    <article class="pc-clip-card">
+                    <article class="pc-clip-card${claseCard}">
                         <div class="pc-clip-thumb-wrap" onclick='openQuickVideoPreview(${vJs}, ${thJs}, ${tiJs}, ${ruJs})'>
                             <img src="${escapeHtml(c.thumb_url)}" loading="lazy" alt="${tEsc}" onerror="this.src='/static/logo.png'">
+                            ${!esPublicado ? `<div class="pc-clip-upload-flow"></div>` : ''}
+                            <div class="pc-clip-liquid" style="height:${pctLiq}%;">
+                                <div class="vessel-wave-wrap">${_WAVE_SVG_PATH}</div>
+                            </div>
                             <div class="pc-clip-overlay">
-                                <div style="display:flex; justify-content:space-between; gap:6px;">
-                                    <span class="vessel-badge">${escapeHtml(c.origen)}</span>
-                                    ${c.tiene_portada_ia ? '<span class="vessel-badge ok">Portada IA</span>' : ''}
+                                <div style="display:flex; justify-content:space-between; align-items:center; gap:5px; flex-wrap:wrap;">
+                                    <span class="vessel-badge${esSubiendo || esPublicado ? ' ok' : ''}">${escapeHtml(etqEstado)}</span>
+                                    ${pillCal}
                                 </div>
                                 <div style="display:flex; align-items:center; justify-content:center; margin:auto 0;">
                                     <span class="vessel-play-btn"><i class="ph-fill ph-play"></i></span>
                                 </div>
-                                <div style="font-size:0.73rem; color:#e2e8f0; text-align:right; font-variant-numeric:tabular-nums;">${Number(c.tamano_mb).toFixed(1)} MB</div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.72rem; color:#e2e8f0; font-variant-numeric:tabular-nums;">
+                                    <span>${escapeHtml(c.origen)}${c.tiene_portada_ia ? ' · IA' : ''}</span>
+                                    <span>${Number(c.tamano_mb).toFixed(1)} MB</span>
+                                </div>
                             </div>
                         </div>
                         <div class="pc-clip-meta">
                             <div class="pc-clip-title" title="${tEsc}">${tEsc}</div>
+                            ${cal ? `<div style="font-size:0.72rem; color:#93c5fd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(cal.resumen || '')}">${escapeHtml(cal.etiqueta || 'Calificado')} · ${escapeHtml(cal.resumen || '')}</div>` : ''}
                             <div class="pc-clip-sub">
-                                <span>${escapeHtml(c.nombre)}</span>
+                                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.cuenta_nombre ? (c.cuenta_nombre + ' · ' + c.nombre) : c.nombre)}</span>
                                 <button type="button" onclick='event.stopPropagation(); openFilePreview(${ruJs})' title="Abrir archivo en PC" style="background:none; border:none; color:#7dd3fc; cursor:pointer; padding:2px 4px; font-size:0.95rem;"><i class="ph ph-folder-open"></i></button>
                             </div>
                         </div>
