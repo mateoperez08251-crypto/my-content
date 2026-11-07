@@ -15,20 +15,28 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import smart_thumbnail as st
 from bot.plataformas import tiktok
 
+# Como la pantalla real de TikTok Studio (captura del 2026-11-06): Cancelar y Guardar van en
+# una barra superior FUERA del panel, y el menú lateral tiene un «Cargar» que no se debe pulsar.
 PAGINA = """<!doctype html><title>x</title>
+<nav><a href="#" onclick="window.menu=true">Cargar</a></nav>
 <div class="cover-container"><img class="cover-image" width=90 height=160 alt=c>
   <div class="edit-container" onclick="abrir()">Editar portada</div></div>
-<div class="cover-edit-container" id=panel style="display:none">
-  <div id=pestana onclick="document.getElementById('zona').style.display='block'">Subir portada</div>
-  <div id=zona style="display:none"><input id=archivo type=file accept="image/png, image/jpeg, image/jpg"
-    onchange="document.getElementById('ok').disabled=false"></div>
-  <button id=no onclick="cerrar()"><div>Cancelar</div></button>
-  <button id=ok disabled onclick="guardar()"><div>Guardar</div></button>
+<div id=barra style="display:none;position:fixed;inset:0;background:#fff">
+  <header><b>Editar portada</b>
+    <button id=no onclick="cancelar()"><div>Cancelar</div></button>
+    <button id=ok disabled onclick="guardar()"><div>Guardar</div></button></header>
+  <div class="cover-edit-container" id=panel>
+    <div id=pestana onclick="document.getElementById('zona').style.display='block'">Subir portada</div>
+    <div id=zona style="display:none"><input id=archivo type=file accept="image/png, image/jpeg, image/jpg"
+      onchange="document.getElementById('ok').disabled=false"></div>
+  </div>
 </div>
+<button onclick="window.borrador=true">Guardar borrador</button>
 <button id=publicar onclick="window.publicado=true">Publicar</button>
 <script>
-function abrir(){ if(!window.roto) document.getElementById('panel').style.display='block' }
-function cerrar(){ document.getElementById('panel').style.display='none' }
+function abrir(){ if(!window.roto) document.getElementById('barra').style.display='block' }
+function cerrar(){ document.getElementById('barra').style.display='none' }
+function cancelar(){ if(!window.sinCancelar) cerrar() }
 function guardar(){ if(window.atascado) return; window.portada=document.getElementById('archivo').files[0].name; cerrar() }
 </script>"""
 
@@ -86,13 +94,15 @@ class PortadaEnPagina(unittest.TestCase):
     def test_sube_el_jpg_y_cierra_el_editor(self):
         self.assertTrue(tiktok._poner_portada(self.page, self.h, self.video))
         self.assertEqual(self.page.evaluate('window.portada'), 'clip_miniatura.jpg')
-        self.assertFalse(self.page.locator('#panel').is_visible())
+        self.assertFalse(self.page.locator('#barra').is_visible())
         self.assertIsNone(self.page.evaluate('window.publicado ?? null'))
+        self.assertIsNone(self.page.evaluate('window.borrador ?? null'))
+        self.assertIsNone(self.page.evaluate('window.menu ?? null'))
 
     def test_sin_miniatura_no_abre_el_editor(self):
         os.remove(self.jpg)
         self.assertFalse(tiktok._poner_portada(self.page, self.h, self.video))
-        self.assertFalse(self.page.locator('#panel').is_visible())
+        self.assertFalse(self.page.locator('#barra').is_visible())
         self.assertIn('no tiene miniatura', self.h.pasos[-1])
 
     def test_si_el_editor_no_abre_avisa_y_sigue(self):
@@ -103,9 +113,17 @@ class PortadaEnPagina(unittest.TestCase):
     def test_si_guardar_se_atasca_cierra_para_no_tapar_publicar(self):
         self.page.evaluate('window.atascado = true')
         self.assertFalse(tiktok._poner_portada(self.page, self.h, self.video))
-        self.assertFalse(self.page.locator('#panel').is_visible())
+        self.assertFalse(self.page.locator('#barra').is_visible())
         self.page.locator('#publicar').click(trial=True, timeout=2000)
         self.assertIsNone(self.page.evaluate('window.publicado ?? null'))
+
+    def test_si_cancelar_no_cierra_guarda_para_liberar_publicar(self):
+        self.page.evaluate('window.sinCancelar = true')
+        self.page.locator('.edit-container').click()
+        self.page.locator('#pestana').click()
+        self.page.locator('#archivo').set_input_files(self.jpg)
+        tiktok._cerrar_portada(self.page)
+        self.assertFalse(self.page.locator('#barra').is_visible())
 
 
 class TextoPortada(unittest.TestCase):

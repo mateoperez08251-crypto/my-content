@@ -212,29 +212,47 @@ def _en_panel(page, buscar, timeout):
         page.wait_for_timeout(500)
 
 
-def _panel_abierto(page):
-    return any(page.locator(selector).first.is_visible() for selector in _PORTADA_PANEL)
+def _boton_visible(page, nombre):
+    """Guardar y Cancelar viven en la barra superior del editor, fuera de su panel."""
+    botones = page.get_by_role("button", name=nombre)
+    for i in range(botones.count()):
+        if botones.nth(i).is_visible():
+            return botones.nth(i)
+    return None
+
+
+def _esperar_boton(page, nombre, timeout):
+    fin = time.monotonic() + timeout
+    while True:
+        _revisar(page)
+        boton = _boton_visible(page, nombre)
+        if boton is not None or time.monotonic() >= fin:
+            return boton
+        page.wait_for_timeout(500)
+
+
+def _editor_abierto(page):
+    # «Guardar» exacto solo existe en el editor; la página de subida tiene «Guardar borrador».
+    return _boton_visible(page, _PORTADA_GUARDAR) is not None
 
 
 def _aplicar_portada(page, h, portada):
     h.clic(primero(page, _PORTADA_ABRIR, timeout=20))
-    fin = time.monotonic() + 15
-    while not _panel_abierto(page):
-        if time.monotonic() >= fin:
-            raise ErrorSubida("no se abrió el editor de portada")
-        page.wait_for_timeout(500)
+    if _esperar_boton(page, _PORTADA_GUARDAR, 15) is None:
+        raise ErrorSubida("no se abrió el editor de portada")
+    # Solo dentro del panel: en toda la página coincidiría con «Cargar» del menú y perdería la subida.
     pestana = _en_panel(page, lambda p: p.get_by_text(_PORTADA_PESTANA), 4)
     if pestana is not None:
         h.clic(pestana)
     primero(page, _PORTADA_ARCHIVO, timeout=15, visible=False).set_input_files(portada)
     h.pausa(1.5, 3)
-    guardar = _en_panel(page, lambda p: p.get_by_role("button", name=_PORTADA_GUARDAR), 30)
+    guardar = _esperar_boton(page, _PORTADA_GUARDAR, 30)
     if guardar is None:
         raise ErrorSubida("no apareció Guardar en el editor de portada")
     esperar_habilitado(guardar, timeout=60, page=page, revisar=lambda: _revisar(page))
     h.clic(guardar)
     fin = time.monotonic() + 30
-    while _panel_abierto(page):
+    while _editor_abierto(page):
         if time.monotonic() >= fin:
             raise ErrorSubida("TikTok no cerró el editor de portada")
         page.wait_for_timeout(500)
@@ -243,14 +261,13 @@ def _aplicar_portada(page, h, portada):
 def _cerrar_portada(page):
     """Sin esto el editor abierto taparía Publicar y fallaría la subida entera."""
     try:
-        if not _panel_abierto(page):
-            return
-        cancelar = _en_panel(page, lambda p: p.get_by_role("button", name=_PORTADA_CANCELAR), 2)
-        if cancelar is not None:
-            cancelar.click(timeout=5000)
-        else:
-            page.keyboard.press("Escape")
-        page.wait_for_timeout(800)
+        for nombre in (_PORTADA_CANCELAR, _PORTADA_GUARDAR):
+            if not _editor_abierto(page):
+                return
+            boton = _boton_visible(page, nombre)
+            if boton is not None:
+                boton.click(timeout=5000)
+                page.wait_for_timeout(1500)
     except (SubidaCancelada, SesionCerrada, Rechazado):
         raise
     except Exception:

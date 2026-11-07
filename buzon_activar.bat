@@ -15,6 +15,8 @@ schtasks /Create /F /SC ONLOGON /TN "MyContent Buzon" /TR "\"%APP_PYTHONW%\" \"%
 if errorlevel 1 goto carpeta_inicio
 schtasks /Create /F /SC ONLOGON /TN "MyContent Tunel" /TR "\"%APP_PYTHONW%\" \"%~dp0buzon_tunel.py\"" >nul 2>&1
 if errorlevel 1 goto carpeta_inicio
+rem Con tareas, el .vbs de un intento anterior abriria una segunda copia al iniciar sesion.
+del "%INICIO%\MyContent_Buzon.vbs" >nul 2>&1
 echo Inicio automatico: Programador de tareas.
 goto arrancar
 :carpeta_inicio
