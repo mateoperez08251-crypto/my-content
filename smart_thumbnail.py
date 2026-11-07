@@ -2,9 +2,9 @@
 """Generador de miniaturas automáticas con frase clave real del live o video.
 
 Características:
-- Extrae una cita o frase gancho corta (3 a 7 palabras) realmente dicha en el clip
-  (con IA anclada a la transcripción si hay clave configurada, o selector determinista
-  instantáneo para modo secuencial / sin conexión / lives).
+- Con IA (clave de Groq/OpenRouter) escribe en 3 a 6 palabras QUÉ PASA en el clip, anclado
+  a la transcripción; sin IA usa la frase dicha más fuerte (modo secuencial / sin conexión).
+- Con GPU, `restauracion_ia` amplía el fotograma con Real-ESRGAN y rehace las caras con GFPGAN.
 - Busca el fotograma más nítido y expresivo cerca del instante exacto de esa frase
   (descarta desenfoque de movimiento, pantallazos negros o rostros cortados).
 - Compone una portada limpia de alto impacto (viñeta cinematográfica inferior, etiqueta
@@ -14,7 +14,6 @@ Características:
 """
 from __future__ import annotations
 
-import json
 import math
 import os
 import re
@@ -210,19 +209,16 @@ def _extraer_frase_determinista(words: list[dict] | None, clip_info: dict | None
     }
 
 
-def _cita_anclada_en_transcripcion(cita: str, texto_real: str) -> bool:
-    """Comprueba que las palabras de contenido de la cita provengan realmente del clip."""
-    palabras_cita = [
-        _normalizar_token(p) for p in cita.split()
-        if len(_normalizar_token(p)) >= 4 and _normalizar_token(p) not in _STOPWORDS_BORDE
-    ]
-    if not palabras_cita:
-        return False
-    corpus = {_normalizar_token(p) for p in str(texto_real or "").split() if _normalizar_token(p)}
+def _resumen_anclado(resumen: str, texto_real: str) -> bool:
+    """Un resumen usa palabras propias, pero al menos una de contenido debe salir del clip (no inventa)."""
+    corpus = {_normalizar_token(p) for p in str(texto_real or "").split() if len(_normalizar_token(p)) >= 4}
     if not corpus:
         return True
-    aciertos = sum(1 for p in palabras_cita if p in corpus or any(c.startswith(p[:4]) or p.startswith(c[:4]) for c in corpus if len(c) >= 4))
-    return aciertos >= max(1, int(math.ceil(len(palabras_cita) * 0.6)))
+    contenido = [
+        _normalizar_token(p) for p in resumen.split()
+        if len(_normalizar_token(p)) >= 4 and _normalizar_token(p) not in _STOPWORDS_BORDE
+    ]
+    return any(p in corpus or any(c.startswith(p[:5]) or p.startswith(c[:5]) for c in corpus) for p in contenido)
 
 
 def _buscar_segundo_de_cita(cita: str, words: list[dict] | None, fallback_t: float) -> float:
@@ -262,26 +258,41 @@ def extract_interesting_quote(words: list[dict] | None = None, clip_info: dict |
 
     try:
         import clips_virales
-        if not clips_virales._clave("groq") and not clips_virales._clave("openrouter"):
+        try:
+            hay_clave = bool(clips_virales._clave())
+        except Exception:
+            hay_clave = bool(clips_virales._openrouter_key())
+        if not hay_clave:
             return base
+        info = clip_info if isinstance(clip_info, dict) else {}
+        contexto = "\n".join(
+            f"{nombre}: {str(info.get(clave) or '').strip()[:300]}"
+            for clave, nombre in (("titulo", "TÍTULO"), ("descripcion", "DESCRIPCIÓN"), ("gancho", "POR QUÉ ENGANCHA"))
+            if str(info.get(clave) or "").strip()
+        )
         prompt = (
             "Eres un editor experto en portadas de Shorts, Reels y TikTok.\n"
-            "Elige UNA frase corta y literal (de 3 a 6 palabras MÁXIMO) dicha realmente en la transcripción "
-            "que despierte curiosidad inmediata como texto grande de miniatura.\n"
+            "Escribe el texto grande de la miniatura: debe contar QUÉ PASA en este clip, la acción concreta "
+            "(quién hace qué o qué se descubre), como 'LA SUEGRA LA ECHA DE CASA' o 'DESCUBRE QUE SU HIJO MIENTE'.\n"
             "REGLAS ESTRICTAS:\n"
-            "- Usa SOLO palabras o ideas dichas de verdad en la transcripción; PROHIBIDO inventar datos.\n"
-            "- Máximo 6 palabras, directa, impactante y fácil de leer en medio segundo.\n"
+            "- NO pongas el tema general ('AMOR Y TRAICIÓN', 'DRAMA FAMILIAR') ni una frase suelta del diálogo.\n"
+            "- De 3 a 6 palabras, en presente, fácil de leer en medio segundo, que dé ganas de ver el final.\n"
+            "- Solo hechos que pasan de verdad en la transcripción; PROHIBIDO inventar personajes o sucesos.\n"
+            "- kicker: 2 o 3 palabras de emoción, por ejemplo 'NO LO ESPERABA' o 'TODO SALE A LA LUZ'.\n"
             "- Responde ÚNICAMENTE con un objeto JSON válido:\n"
-            '{"quote": "FRASE CORTA DE PORTADA", "highlight": ["PALABRA1", "PALABRA2"], '
-            '"kicker": "LO DIJO CLARO"}\n\n'
+            '{"quote": "QUÉ PASA EN EL CLIP", "highlight": ["PALABRA1", "PALABRA2"], '
+            '"kicker": "NO LO ESPERABA"}\n\n'
             f"{'ORIGEN: Transmisión en vivo (LIVE).\n' if is_live else ''}"
+            f"{contexto + chr(10) if contexto else ''}"
             f"TRANSCRIPCIÓN REAL DEL CLIP:\n\"\"\"\n{texto_real[:2200]}\n\"\"\""
         )
-        raw = clips_virales._pedir_ia(prompt, motor=motor, json_mode=True)
-        m = re.search(r"\{.*\}", raw or "", flags=re.S)
-        data = json.loads(m.group(0) if m else (raw or ""))
+        modelos = clips_virales.MOTORES.get(motor, clips_virales.MOTORES["pro"])["llm"]
+        raw, _ = clips_virales.chat([{"role": "user", "content": prompt}], modelos, temperatura=0.5, max_tokens=1500)
+        data = clips_virales._leer_json(raw)
+        if not isinstance(data, dict):
+            return base
         cand = _limpiar_frase_portada(data.get("quote", ""), max_palabras=7)
-        if len(cand.split()) >= 2 and _cita_anclada_en_transcripcion(cand, texto_real):
+        if len(cand.split()) >= 2 and _resumen_anclado(cand, texto_real + " " + contexto):
             kicker = _limpiar_frase_portada(data.get("kicker", ""), max_palabras=3).upper()
             if is_live and not kicker:
                 kicker = "EN PLENO LIVE"
@@ -494,10 +505,18 @@ def editar_portada_9_16(frame_rgb):
     rgb = np.ascontiguousarray(frame_rgb[:, :, :3])
     recorte, cara = _encuadre_9_16(rgb, _cara_principal(rgb))
     ex, ey = PORTADA_W / float(recorte.shape[1]), PORTADA_H / float(recorte.shape[0])
-    interp = cv2.INTER_LANCZOS4 if ex > 1.0 else cv2.INTER_AREA
-    # Quitar los bloques de compresión antes de ampliar: después serían cuadros visibles.
-    limpio = cv2.fastNlMeansDenoisingColored(np.ascontiguousarray(recorte), None, 2, 4, 5, 15) if ex > 1.0 else recorte
-    img = cv2.resize(np.ascontiguousarray(limpio), (PORTADA_W, PORTADA_H), interpolation=interp)
+    img = None
+    try:
+        import restauracion_ia
+        # Con GPU: Real-ESRGAN amplía sin pixelar y GFPGAN rehace las caras.
+        img = restauracion_ia.mejorar(recorte, PORTADA_W, PORTADA_H)
+    except Exception:
+        img = None
+    if img is None:
+        interp = cv2.INTER_LANCZOS4 if ex > 1.0 else cv2.INTER_AREA
+        # Quitar los bloques de compresión antes de ampliar: después serían cuadros visibles.
+        limpio = cv2.fastNlMeansDenoisingColored(np.ascontiguousarray(recorte), None, 2, 4, 5, 15) if ex > 1.0 else recorte
+        img = cv2.resize(np.ascontiguousarray(limpio), (PORTADA_W, PORTADA_H), interpolation=interp)
     cara = (cara[0] * ex, cara[1] * ey, cara[2] * ex, cara[3] * ey) if cara else None
 
     mascara = _mascara_personaje(img, cara) if cara else None
