@@ -16,7 +16,7 @@ CALIDAD = {
     'commentary_mode': 'off', 'commentary_style': 'gancho', 'commentary_voice': 'male',
     'cold_open': False, 'jump_cuts': False, 'auto_split': False,
     'ambient_music': 'off', 'clean_vocals': False,
-    'auto_thumbnail': 'off', 'strip_metadata': True, 'auto_hashtags': True, 'politicas_tiktok': 'alto',
+    'auto_thumbnail': 'off', 'thumbnail_engine': 'clasico', 'strip_metadata': True, 'auto_hashtags': True, 'politicas_tiktok': 'alto',
 }
 
 
@@ -63,6 +63,9 @@ def snapshot(opciones):
     if 'auto_thumbnail' in result:
         from smart_thumbnail import validate_thumbnail_options
         result['auto_thumbnail'] = validate_thumbnail_options(result.get('auto_thumbnail', 'off'))
+    if 'thumbnail_engine' in result:
+        from portada_generativa import validate_engine
+        result['thumbnail_engine'] = validate_engine(result.get('thumbnail_engine', 'clasico'))
     if 'strip_metadata' in result:
         sm = result.get('strip_metadata', True)
         if not isinstance(sm, bool):

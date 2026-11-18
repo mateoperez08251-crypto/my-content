@@ -2932,7 +2932,7 @@
                 </form>
                 <section style="margin-top:20px;border-top:1px solid #444;padding-top:16px" aria-labelledby="radar-seguimiento-titulo">
                     <h3 id="radar-seguimiento-titulo">Estado del Radar y de sus entregas</h3>
-                    <p>La PC debe estar encendida para editar. Seguir un canal detecta sus videos; configura sus cuentas de destino en <a href="/bot" onclick="return openBotModal(event, 'cuentas')">Bot → Reglas</a>. La nube revisa cada 30 minutos si está desplegada; la frecuencia elegida arriba corresponde a esta PC.</p>
+                    <p>La PC debe estar encendida para editar. Seguir un canal detecta sus videos; configura sus cuentas de destino en <a href="/clip#cuentas" onclick="return openBotModal(event, 'cuentas')">My Content Clip → Cuentas</a>. La nube revisa cada 30 minutos si está desplegada; la frecuencia elegida arriba corresponde a esta PC.</p>
                     <button type="button" id="radar-revisar" class="btn" onclick="revisarRadarAhora()">Revisar ahora</button>
                     <button type="button" id="radar-populares" class="btn" data-activo="0" onclick="alternarRadarPopulares()">Iniciar radar de populares</button>
                     <p>Populares usa el ranking histórico de YouTube y solo cuentas de TikTok no monetizadas de tus reglas. Al iniciarlo, las cuentas monetizadas siguen únicamente publicaciones recientes. Respeta la edición, horarios y cola de cada cuenta. Pausar conserva los trabajos; una publicación ya enviada a TikTok no se puede retirar con este botón.</p>
@@ -3081,7 +3081,7 @@
                     class="ph-duotone ph-film-strip"></i> Estudio Creador IA</a>
             <a href="#" class="nav-item" onclick="openVoiceClonerModal()"><i class="ph-duotone ph-microphone-stage"></i>
                 Clonador de Voz</a>
-            <a href="/bot" class="nav-item" id="btn-nav-bot" onclick="return openBotModule(event)"><i class="ph-duotone ph-robot"></i> Bot de subida</a>
+            <a href="/clip" class="nav-item" id="btn-nav-bot" onclick="return openBotModule(event)" title="Abre My Content Clip en su propia ventana"><i class="ph-duotone ph-film-slate"></i> My Content Clip <i class="ph ph-arrow-square-out" style="margin-left:auto;opacity:.6"></i></a>
             <a href="#" class="nav-item" onclick="openChrome()"><i class="ph-duotone ph-browser"></i> Abrir navegador
                 Studio</a>
             <a href="#" class="nav-item" onclick="openAudioExtractModal()"><i class="ph-duotone ph-waveform"></i>
@@ -4328,8 +4328,18 @@
             }
         }
 
+        // My Content Clip es una app aparte: se abre en su propia ventana (mismos datos y bot).
         function openBotModule(ev, tabName) {
             if (ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button === 1)) return true;
+            if (ev && ev.preventDefault) ev.preventDefault();
+            const ruta = '/clip' + (tabName ? ('#' + tabName) : '');
+            fetch('/api/_abrir_clip', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (!d || !d.ventana) window.open(ruta, '_blank', 'noopener'); })
+                .catch(() => window.open(ruta, '_blank', 'noopener'));
+            return false;
+        }
+        function openBotModuleIntegrado(ev, tabName) {
             if (ev && ev.preventDefault) ev.preventDefault();
             const modBot = document.getElementById('moduleBotUpload');
             const frame = document.getElementById('botUploadIframe');

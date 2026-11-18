@@ -1,4 +1,4 @@
-"""YouTube Live -> segmentos cerrados -> cola persistente de Smart Split/bot.
+"""Live (YouTube/Twitch/Kick/TikTok) -> segmentos cerrados -> cola persistente de Smart Split/bot.
 
 La captura no espera al procesado ni comparte el hilo de subidas. Las URL firmadas
 solo existen en memoria; el estado público no expone rutas, cookies ni cabeceras.
@@ -39,19 +39,47 @@ class NotLive(LiveError):
     pass
 
 
-def youtube_url(url):
+PLATAFORMAS = {
+    'youtube': ('YouTube', ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be')),
+    'twitch': ('Twitch', ('twitch.tv', 'www.twitch.tv', 'm.twitch.tv')),
+    'kick': ('Kick', ('kick.com', 'www.kick.com')),
+    'tiktok': ('TikTok', ('tiktok.com', 'www.tiktok.com', 'm.tiktok.com')),
+}
+
+
+def plataforma(url):
+    """Clave de plataforma ('youtube', 'twitch', 'kick', 'tiktok') de una URL ya validada."""
+    host = (urlsplit(str(url or '').strip()).hostname or '').lower()
+    for clave, (_, hosts) in PLATAFORMAS.items():
+        if host in hosts:
+            return clave
+    return ''
+
+
+def nombre_plataforma(url):
+    return PLATAFORMAS.get(plataforma(url), ('Live', ()))[0]
+
+
+def live_url(url):
     if not isinstance(url, str) or len(url) > 2048:
-        raise LiveError('Pega una URL de YouTube Live.')
+        raise LiveError('Pega una URL de live de YouTube, Twitch, Kick o TikTok.')
     try:
         parsed = urlsplit(url.strip())
-        valid = (parsed.scheme == 'https' and parsed.hostname in
-                 ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be')
+        valid = (parsed.scheme == 'https' and bool(plataforma(url))
                  and parsed.port in (None, 443) and not parsed.username and not parsed.password)
     except ValueError:
         valid = False
     if not valid:
-        raise LiveError('Esta versión acepta enlaces HTTPS de YouTube o youtu.be.')
+        raise LiveError('Acepta enlaces HTTPS de YouTube, Twitch, Kick o TikTok.')
     return url.strip()
+
+
+def youtube_url(url):
+    """Compatibilidad: solo YouTube."""
+    url = live_url(url)
+    if plataforma(url) != 'youtube':
+        raise LiveError('Esta función acepta enlaces HTTPS de YouTube o youtu.be.')
+    return url
 
 
 def number(value, minimum, maximum, label):
@@ -106,46 +134,52 @@ class QuietLogger:
         self.warning(message)
 
 
-def _access_error(error, logger, has_cookies):
+def _access_error(error, logger, has_cookies, nombre='YouTube'):
     kind = _error_kind(error)
     if kind in ('format', 'unknown'):
         for hint in ('login', 'cookie_file', 'javascript'):
             if hint in logger.issues:
                 kind = hint
                 break
-    update = 'Actualiza el soporte de YouTube (en Windows: actualizar_youtube.bat) y reinicia la app.'
-    cookies = ('Hay cookies cargadas en esta PC, pero YouTube pide iniciar sesión o verificar el acceso. '
+    update = f'Actualiza el soporte de {nombre} (en Windows: actualizar_youtube.bat) y reinicia la app.'
+    cookies = (f'Hay cookies cargadas en esta PC, pero {nombre} pide iniciar sesión o verificar el acceso. '
                'Abre el live con tu cuenta y vuelve a exportarlas.' if has_cookies else
-               'YouTube pide iniciar sesión o verificar el acceso. Abre el live con tu cuenta y carga '
-               'sus cookies en «Cookies de YouTube» → «Esta PC».')
+               f'{nombre} pide iniciar sesión o verificar el acceso. Abre el live con tu cuenta y carga '
+               'sus cookies en «Cookies»  → «Esta PC».')
     messages = {
         'cookie_file': 'No se pudo leer el archivo de cookies. Vuelve a guardarlo desde «Cookies de YouTube» → «Esta PC».',
         'login': cookies,
-        'restricted': 'YouTube indica que el live es privado, para miembros o no está disponible en tu región. Comprueba que tu cuenta tenga acceso.',
-        'rate': 'YouTube está limitando las peticiones (HTTP 429). Espera antes de iniciar otra captura.',
-        'forbidden': 'YouTube denegó el acceso a la señal (HTTP 403). Comprueba el live en tu navegador. ' + update,
-        'network': 'No se pudo conectar con YouTube. Revisa la conexión de esta PC.',
-        'javascript': 'No se pudo resolver la señal con el soporte JavaScript de YouTube. ' + update,
-        'format': 'YouTube no ofreció el formato de video y audio que necesita esta captura. ' + update,
-        'unavailable': 'YouTube indica que el video no está disponible o fue retirado. Comprueba el enlace.',
+        'restricted': f'{nombre} indica que el live es privado, para miembros o no está disponible en tu región. Comprueba que tu cuenta tenga acceso.',
+        'rate': f'{nombre} está limitando las peticiones (HTTP 429). Espera antes de iniciar otra captura.',
+        'forbidden': f'{nombre} denegó el acceso a la señal (HTTP 403). Comprueba el live en tu navegador. ' + update,
+        'network': f'No se pudo conectar con {nombre}. Revisa la conexión de esta PC.',
+        'javascript': f'No se pudo resolver la señal con el soporte JavaScript de {nombre}. ' + update,
+        'format': f'{nombre} no ofreció el formato de video y audio que necesita esta captura. ' + update,
+        'unavailable': f'{nombre} indica que el video no está disponible o fue retirado. Comprueba el enlace.',
         'unknown': 'No se pudo obtener la señal del live. Comprueba el enlace en tu navegador. ' + update,
     }
     return LiveError(messages[kind], retryable=kind in ('network', 'unknown'))
 
 
+FORMATO_YOUTUBE = 'bestvideo[height<=720][vcodec^=avc1][protocol*=m3u8]+bestaudio[acodec^=mp4a][protocol*=m3u8]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/worstvideo+bestaudio/worst'
+
+
 def resolve_live(url):
-    url = youtube_url(url)
+    url = live_url(url)
+    clave, nombre = plataforma(url), nombre_plataforma(url)
     import yt_dlp
     import yt_downloader
     logger = QuietLogger()
+    formato = (FORMATO_YOUTUBE if clave == 'youtube' else
+               'best[height<=720][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo[height<=720]+bestaudio/best')
     opts = dict(yt_downloader.opciones_base(), quiet=True, noplaylist=True,
                 socket_timeout=15, retries=1, extractor_retries=1, logger=logger, no_warnings=False,
-                format='bestvideo[height<=720][vcodec^=avc1][protocol*=m3u8]+bestaudio[acodec^=mp4a][protocol*=m3u8]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/worstvideo+bestaudio/worst')
+                format=formato)
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:
-        raise _access_error(exc, logger, bool(opts.get('cookiefile'))) from None
+        raise _access_error(exc, logger, bool(opts.get('cookiefile')), nombre) from None
     status = info.get('live_status')
     if status == 'is_upcoming':
         raise NotLive('El live está programado y todavía no empieza. Inícialo cuando esté transmitiendo.')
@@ -157,8 +191,12 @@ def resolve_live(url):
         address = item.get('url', '')
         parsed = urlsplit(address)
         host = parsed.hostname or ''
-        if parsed.scheme != 'https' or not (host.endswith('.googlevideo.com') or host in ('youtube.com','www.youtube.com')):
-            raise LiveError('YouTube no devolvió una señal HTTPS compatible para capturar.')
+        if clave == 'youtube':
+            ok = parsed.scheme == 'https' and (host.endswith('.googlevideo.com') or host in ('youtube.com','www.youtube.com'))
+        else:  # Twitch/Kick/TikTok usan CDN propias (ttvnw, live-video.net, tiktokcdn...).
+            ok = parsed.scheme in ('https', 'http' if clave == 'tiktok' else 'https') and bool(host)
+        if not ok:
+            raise LiveError(f'{nombre} no devolvió una señal HTTPS compatible para capturar.')
         # MKV admite VP9/AV1 y Opus sin recodificar durante la captura.
         vcodec, acodec = item.get('vcodec') or '', item.get('acodec') or ''
         tiene_video = (vcodec not in ('', 'none') or (not vcodec and (
@@ -181,8 +219,8 @@ def resolve_live(url):
     if not any(x['video'] for x in streams):
         raise LiveError('No se encontró una pista de video para el live.')
     if not any(x['audio'] for x in streams):
-        raise LiveError('YouTube devolvió video sin una pista de audio. No se iniciará una captura silenciosa; comprueba el enlace del live.', retryable=False)
-    return {'id':str(info.get('id', '')), 'title':str(info.get('title', 'YouTube Live'))[:160], 'streams':streams}
+        raise LiveError(f'{nombre} devolvió video sin una pista de audio. No se iniciará una captura silenciosa; comprueba el enlace del live.', retryable=False)
+    return {'id':str(info.get('id', '')), 'title':str(info.get('title') or f'{nombre} Live')[:160], 'plataforma':clave, 'streams':streams}
 
 
 def ffmpeg_command(ffmpeg, streams, folder, prefix, seconds):
@@ -285,20 +323,20 @@ class LiveManager:
             cfg = json.loads(anterior['config'])
             textos = {'capturando': f"Encontré la señal. Voy a capturar bloques de unos {cfg['window']} s; hay que esperar a que se cierre cada bloque para editarlo.",
                       'reconectando': 'Se perdió o no pude abrir la señal. Estoy intentando conectar otra vez; puede faltar un tramo del live.',
-                      'error': 'No pude seguir capturando. ' + motivo_fallo(detail) + ' Mira YouTube Live → clips para revisar la captura.',
+                      'error': 'No pude seguir capturando. ' + motivo_fallo(detail) + ' Mira Lives → clips para revisar la captura.',
                       'detenido': 'Paré la captura. Lo que ya entró en la cola sigue ahí.',
                       'finalizado': 'El live terminó. Voy a dejar en la cola los segmentos que ya se cerraron.'}
             if state in textos:
                 total = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=?', (jid,))['n']
                 enviados = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=? AND trabajo_id IS NOT NULL', (jid,))['n']
                 self.motor.avisar('lives', f'live:{jid}:{state}',
-                                  f"Live: {breve(anterior['titulo']) or 'YouTube Live'}\n{textos[state]}\n"
+                                  f"Live: {breve(anterior['titulo']) or 'Live'}\n{textos[state]}\n"
                                   f"Tengo {cantidad(total, 'segmento cerrado', 'segmentos cerrados')} en el registro. Enviados a la cola de edición: {enviados}.", state == 'error')
 
     def start(self, data):
         if not isinstance(data, dict):
             raise LiveError('Se esperaba la configuración del live.')
-        url = youtube_url(data.get('url'))
+        url = live_url(data.get('url'))
         mode = data.get('mode', 'sequential')
         if mode not in ('sequential', 'ai'):
             raise LiveError('Elige cortes por tiempo o momentos con IA.')
@@ -336,7 +374,7 @@ class LiveManager:
             self.db._q("INSERT INTO live_sesiones(id,url,config,estado,creado,actualizado) VALUES(?,?,?,'conectando',?,?)",
                        (jid, url, json.dumps(cfg), now, now))
             event = self.events[jid] = threading.Event()
-            thread = self.threads[jid] = threading.Thread(target=self._capture, args=(jid,url,cfg,event), daemon=True, name='youtube-live')
+            thread = self.threads[jid] = threading.Thread(target=self._capture, args=(jid,url,cfg,event), daemon=True, name='live-captura')
             thread.start()
         return {'id':jid}
 
@@ -491,7 +529,7 @@ class LiveManager:
                 key = f"live:{segment['sesion']}:{segment['nombre']}"
                 part = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=? AND trabajo_id IS NOT NULL', (segment['sesion'],))['n'] + 1
                 tid = self.db.encolar_archivo_live(segment['url'], key, segment['archivo'], opts,
-                    f"{segment['titulo'] or 'YouTube Live'} · parte {part}",
+                    f"{segment['titulo'] or 'Live'} · parte {part}",
                     cfg['accounts'], cfg['preset'], cfg['text'])
                 from .avisos import duracion
                 self.motor._aviso_trabajo(self.db.trabajo(tid), 'cola',

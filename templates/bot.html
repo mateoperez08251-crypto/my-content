@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bot de subida</title>
+<title>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</title>
+{% if app_clip %}<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">{% endif %}
 <link rel="icon" type="image/svg+xml" href="/static/icons/my-content.svg">
 <link rel="alternate icon" href="/static/icons/my-content.ico">
 <meta name="theme-color" content="#0B1525">
@@ -663,9 +665,75 @@ body:has(#vista-cuentas.activa){grid-template-columns:248px minmax(0,1fr) 332px;
 /* Rendimiento: las animaciones continuas son lo que más frena el desplazamiento en esta GPU. */
 body.desplazando *,body.desplazando *::before,body.desplazando *::after{animation-play-state:paused!important}
 .publicacion{content-visibility:auto;contain-intrinsic-size:auto 110px}
+/* ===== My Content Clip · Editorial oscuro (solo en /clip) ===== */
+body.tema-editorial{
+  --fuente:Archivo,"Segoe UI",system-ui,sans-serif;--titulo:Archivo,"Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",Consolas,monospace;
+  --bg:#0C0C0B;--lateral:#0C0C0B;--panel:#121211;--panel-solid:#121211;--panel-elev:#1A1A18;--relleno:#24231F;
+  --borde:#2B2A27;--borde-luz:#3A3935;--fino:#2B2A27;
+  --texto:#EDEAE2;--suave:#B4B0A6;--tenue:#8F8C84;
+  --acento:#F0643C;--acento-azul:#F0643C;--acento-suave:rgba(240,100,60,.13);--azul:#F28B6A;
+  --ok:#7FC79A;--mal:#F07A66;--aviso:#E6B65C;
+  background:var(--bg);color:var(--texto);font-variant-numeric:tabular-nums
+}
+body.tema-editorial ::selection{background:var(--acento);color:#0C0C0B}
+body.tema-editorial .bot-nav-wrap{border-right:1px solid var(--texto)}
+body.tema-editorial .marca-bot{padding:0 8px 14px;border-bottom:1px solid var(--texto);box-shadow:0 4px 0 -3px var(--bg),0 5px 0 -3px var(--fino)}
+body.tema-editorial .marca-bot img{display:none}
+body.tema-editorial .marca-bot h1{font:800 19px/1.05 var(--titulo);text-transform:uppercase;letter-spacing:-.4px}
+body.tema-editorial .marca-bot h1::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;background:var(--acento);vertical-align:2px}
+body.tema-editorial .marca-bot small{font:500 10.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase;margin-top:4px}
+body.tema-editorial .bot-tab{border-radius:0;text-transform:uppercase;font-size:12.5px;letter-spacing:.7px;border-left:2px solid transparent;color:var(--tenue)}
+body.tema-editorial .bot-tab:hover{background:transparent;color:var(--texto)}
+body.tema-editorial .bot-tab.activa{background:transparent;border-left-color:var(--acento);color:var(--texto)}
+body.tema-editorial .bot-tab .tab-badge{border-radius:0;font-family:var(--mono);background:transparent;border:1px solid var(--borde-luz)}
+body.tema-editorial .bot-tab.activa .tab-badge{background:var(--acento);border-color:var(--acento);color:#0C0C0B}
+body.tema-editorial .salud::before{font:500 10.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase}
+body.tema-editorial .salud-item{border-radius:0}
+body.tema-editorial .bot-encendido{border-top:1px solid var(--texto);display:flex;flex-direction:column;gap:10px}
+body.tema-editorial #titulo-vista{font:800 30px/1.05 var(--titulo);text-transform:uppercase;letter-spacing:-.8px}
+body.tema-editorial header{border-bottom:1px solid var(--fino)}
+body.tema-editorial .card,body.tema-editorial .metricas{background:transparent;border:0;border-top:1px solid var(--texto);border-radius:0;box-shadow:none;padding-left:0;padding-right:0}
+body.tema-editorial .card h2{font:700 13px var(--titulo);text-transform:uppercase;letter-spacing:1.3px}
+body.tema-editorial .card h2::before{content:"§";color:var(--acento);font-family:var(--mono);font-weight:500}
+body.tema-editorial .card h2 i{display:none}
+body.tema-editorial .metrica{border-left:1px solid var(--fino)}
+body.tema-editorial .metrica b{font-family:var(--mono);font-weight:500}
+body.tema-editorial th{font:500 10.5px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--tenue);border-bottom:1px solid var(--texto)}
+body.tema-editorial td{border-bottom-color:var(--fino)}
+body.tema-editorial tr:hover td{background:var(--panel)}
+body.tema-editorial input,body.tema-editorial select,body.tema-editorial textarea{background:transparent;border:0;border-bottom:1px solid var(--borde-luz);border-radius:0;box-shadow:none}
+body.tema-editorial input:focus,body.tema-editorial select:focus,body.tema-editorial textarea:focus{background:transparent;border-bottom-color:var(--acento);box-shadow:0 1px 0 0 var(--acento)}
+body.tema-editorial select option{background:#161614;color:var(--texto)}
+body.tema-editorial .switch input[type=checkbox]{border-radius:0}
+body.tema-editorial .switch input[type=checkbox]::after{border-radius:0}
+body.tema-editorial .switch input[type=checkbox]:checked{background:var(--acento)}
+body.tema-editorial button{border-radius:0;border:1px solid var(--texto);background:transparent;color:var(--texto);text-transform:uppercase;letter-spacing:.7px;font-size:12px;font-weight:600}
+body.tema-editorial button:hover:not(:disabled){background:var(--texto);color:var(--bg)}
+body.tema-editorial button.prim{background:var(--acento);border-color:var(--acento);color:#0C0C0B;box-shadow:none}
+body.tema-editorial button.prim:hover:not(:disabled){background:#FF7A55;border-color:#FF7A55;color:#0C0C0B}
+body.tema-editorial button:focus-visible,body.tema-editorial .bot-tab:focus-visible{outline:1px solid var(--acento);outline-offset:3px}
+body.tema-editorial .chip,body.tema-editorial .est,body.tema-editorial .tab-badge{border-radius:0;font-family:var(--mono);font-size:10.5px;letter-spacing:.5px;text-transform:uppercase}
+body.tema-editorial .chip.on{background:var(--acento-suave);border-color:var(--acento);color:var(--texto)}
+body.tema-editorial .vaso-clip{border-radius:0;border:1px solid var(--borde-luz);box-shadow:none}
+body.tema-editorial .vaso-clip:hover{border-color:var(--texto);transform:none}
+body.tema-editorial .vaso-clip.es-preparado{border-color:var(--acento);box-shadow:none}
+body.tema-editorial .vaso-clip.es-subiendo{border-color:var(--ok);box-shadow:none}
+body.tema-editorial .ahora-bot>img,body.tema-editorial .lado-visor img{border-radius:0;box-shadow:none;border:1px solid var(--borde-luz)}
+body.tema-editorial .ahora-etapas i,body.tema-editorial .ahora-etapas i b,body.tema-editorial .lado-medidor i{border-radius:0}
+body.tema-editorial #lado-bot,body.tema-editorial #lado-regla{border-left:1px solid var(--texto)}
+body.tema-editorial #lado-bot h3,body.tema-editorial #lado-regla h3{font:500 10.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase}
+body.tema-editorial #lado-bot #registro{background:#080807;border-radius:0;border:1px solid var(--fino);color:#CFCABE;font-family:var(--mono)}
+body.tema-editorial .regla-pasos li{border-radius:0;background:transparent;border-top:1px solid var(--fino)}
+body.tema-editorial .regla-pasos i{border-radius:0}
+body.tema-editorial dialog{background:var(--bg);color:var(--texto);border:1px solid var(--texto);border-radius:0;box-shadow:8px 8px 0 var(--fino)}
+body.tema-editorial dialog::backdrop{background:rgba(0,0,0,.72);backdrop-filter:none}
+body.tema-editorial ::-webkit-scrollbar{width:10px;height:10px}
+body.tema-editorial ::-webkit-scrollbar-thumb{background:var(--borde-luz)}
+body.tema-editorial ::-webkit-scrollbar-track{background:var(--bg)}
+body.app-clip .volver-app{display:none}
 </style>
 </head>
-<body>
+<body class="{{ 'app-clip tema-editorial' if app_clip else '' }}">
 <header>
   <h2 id="titulo-vista">Cola y actividad</h2>
   <span id="badge-ram-ligero" class="est e-ok" hidden title="Modo optimizado para 4 GB de RAM: menos uso de GPU, navegador ligero y miniaturas secuenciales">⚡ Modo ligero 4 GB</span>
@@ -678,7 +746,7 @@ body.desplazando *,body.desplazando *::before,body.desplazando *::after{animatio
 </header>
 
 <div class="bot-nav-wrap">
-  <div class="marca-bot"><img src="/static/icons/bot.svg" width="32" height="32" alt=""><div><h1>Bot de subida</h1><small>My Content</small></div></div>
+  <div class="marca-bot"><img src="/static/icons/bot.svg" width="32" height="32" alt=""><div><h1>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</h1><small>{{ 'Clips · Lives · Subida' if app_clip else 'My Content' }}</small></div></div>
   <nav class="bot-tabs" aria-label="Secciones del bot">
     <button type="button" class="bot-tab activa" data-vista="cola" onclick="cambiarPestanaBot('cola')">
       <i class="ph-duotone ph-queue"></i> Cola y actividad <span class="tab-badge" id="badge-cola">0</span>
@@ -697,7 +765,8 @@ body.desplazando *,body.desplazando *::before,body.desplazando *::after{animatio
     </button>
   </nav>
   <div class="salud" id="salud" aria-label="Estado del bot"></div>
-  <div class="bot-encendido"><label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Bot encendido</label></div>
+  <div class="bot-encendido"><label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Bot encendido</label>
+    <label class="switch" title="El bot edita y guarda los clips, pero no publica solo. Cada clip sale cuando pulses ↑ Subir ahora."><input type="checkbox" id="subida_manual" onchange="cambiarSubidaManual(this.checked)"> ✋ Subida manual</label></div>
 </div>
 
 <main>
@@ -785,6 +854,7 @@ body.desplazando *,body.desplazando *::before,body.desplazando *::after{animatio
               <div><label for="ed-calidad">Calidad de exportación</label><select id="ed-calidad"><option value="quality">Calidad máxima · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p (en Colab sube a 1080p)</option></select></div>
               <div><label for="ed-upscale">Nitidez / escalado</label><select id="ed-upscale"><option value="off">Automático limpio</option><option value="sharpen">Nitidez suave</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN IA (GPU)</option></select></div>
               <div><label for="ed-miniatura">Miniatura 9:16 editada con frase</label><select id="ed-miniatura"><option value="off">Sin miniatura extra</option><option value="cover_and_jpg">Portada en video + JPG con frase</option><option value="jpg_only">Solo imagen JPG con frase</option></select></div>
+              <div><label for="ed-miniatura-motor">Cómo crear la portada</label><select id="ed-miniatura-motor"><option value="clasico">Clásica · fotograma del clip con fondo suave</option><option value="qwen">IA nueva · escena con los mismos personajes (Colab GPU)</option></select></div>
               <div><label for="ed-borrar-meta">Limpieza de metadatos</label><select id="ed-borrar-meta"><option value="si">Borrar metadatos del MP4 (activo)</option><option value="no">Conservar metadatos</option></select></div>
               <div><label for="ed-hashtags">Hashtags automáticos</label><select id="ed-hashtags"><option value="si">Añadir hashtags de la IA</option><option value="no">Sin hashtags</option></select></div>
               <div><label for="ed-subs">Subtítulos</label><select id="ed-subs" onchange="vistaSubtitulos()"><option value="si">Activados</option><option value="no">Desactivados</option></select></div>
@@ -840,10 +910,10 @@ body.desplazando *,body.desplazando *::before,body.desplazando *::after{animatio
   <!-- VISTA 2: AÑADIR CONTENIDO (ENLACES, PC Y LIVES) -->
   <div class="vista-panel" id="vista-anadir" data-vista-panel="anadir">
     <section class="card col-12" id="seccion-lives" style="order:3">
-      <h2><i class="ph-duotone ph-broadcast"></i> Capturar YouTube Live en directo <small>Procesamiento continuo por tramos</small></h2>
+      <h2><i class="ph-duotone ph-broadcast"></i> Capturar Live en directo (YouTube · Twitch · Kick · TikTok) <small>Procesamiento continuo por tramos</small></h2>
       <div class="fila">
-        <input id="live-url" type="url" placeholder="https://www.youtube.com/watch?v=... (URL de live activo)" aria-label="URL de YouTube Live" style="flex:3">
-        <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies de YouTube</button>
+        <input id="live-url" type="url" placeholder="https://twitch.tv/canal · https://kick.com/canal · https://tiktok.com/@user/live · YouTube" aria-label="URL del live" style="flex:3">
+        <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies</button>
       </div>
       <div class="ajustes" style="margin-top:6px">
         <div><label for="live-mode">Cómo cortar</label><select id="live-mode" onchange="modoLive()">
@@ -876,7 +946,7 @@ body.desplazando *,body.desplazando *::before,body.desplazando *::after{animatio
 
     <section class="card col-6" style="order:1">
       <h2><i class="ph-duotone ph-link"></i> 2. Añadir videos desde enlaces</h2>
-      <textarea id="urls" placeholder="Pega uno o varios enlaces (YouTube, TikTok, etc., uno por línea)"></textarea>
+      <textarea id="urls" placeholder="Pega enlaces o clips (YouTube, Twitch, Kick, TikTok…), uno por línea"></textarea>
       <div class="fila" style="margin-top:6px">
         <button type="button" onclick="abrirCookiesDescarga()">🍪 Cookies</button>
         <span class="muted">Si YouTube pide sesión, conecta o sube tus cookies aquí.</span>
@@ -1470,6 +1540,7 @@ function pintar() {
       if ($(k)) $(k).value = c[k];
     if ($('ahorro_ram')) $('ahorro_ram').value = c.ahorro_ram || 'auto';
     for (const k of ['radar_auto','firebase_auto','headless','remoto_respaldo_local']) $(k).checked = c[k];
+    if ($('subida_manual')) $('subida_manual').checked = Boolean(c.subida_manual);
     for (const k of ['avisos_activos','avisos_cola','avisos_progreso','avisos_publicados','avisos_errores','avisos_lives','avisos_sistema']) $(k).checked = c[k] !== false;
     $('avisos_intervalo_min').value = c.avisos_intervalo_min ?? 5;
   }
@@ -1477,7 +1548,7 @@ function pintar() {
   $('avisos-estado').textContent = `${avisos.pendiente || 0} pendientes · ${avisos.enviado || 0} enviados · ${avisos.fallido || 0} fallidos`;
   $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
   pintarYoutubeAuto();
-  $('modo-activo').textContent = 'Modo: ' + ({alternar:'subir cada clip apenas esté listo',preparar_primero:'editar cola y publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados'}[c.modo_cola] || c.modo_cola);
+  $('modo-activo').textContent = 'Modo: ' + ({alternar:'subir cada clip apenas esté listo',preparar_primero:'editar cola y publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados'}[c.modo_cola] || c.modo_cola) + (c.subida_manual ? ' · ✋ subida manual' : '');
   pintarPlan();
   const nombres = Object.fromEntries(E.cuentas.map(x => [x.id, x]));
   pintarCuentas();
@@ -2328,7 +2399,7 @@ function seleccionarPreset() {
     'ed-cantidad':['num_clips',1], 'ed-motor':['motor_ia','pro'], 'ed-transcripcion':['transcripcion','groq'],
     'ed-whisper':['whisper_local','large-v3'], 'ed-formato':['video_format','vertical'],
     'ed-calidad':['export_profile','quality'], 'ed-upscale':['upscale','off'],
-    'ed-miniatura':['auto_thumbnail','off'],
+    'ed-miniatura':['auto_thumbnail','off'], 'ed-miniatura-motor':['thumbnail_engine','clasico'],
     'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100],
     'ed-comentario':['commentary_mode','off'], 'ed-comentario-estilo':['commentary_style','gancho'],
     'ed-comentario-voz':['commentary_voice','male'], 'ed-ambiente':['ambient_music','off']};
@@ -2404,6 +2475,7 @@ function ajustesEdicion() {
     commentary_voice:(rawCommVoice === 'male' || rawCommVoice === 'female' || String(rawCommVoice).startsWith('voice:') || String(rawCommVoice).startsWith('eleven:')) ? rawCommVoice : 'male',
     ambient_music:['off','auto','suave','alegre','epico','energica','terror','misterio','noticias'].includes(rawAmbient) ? rawAmbient : 'off',
     auto_thumbnail:['off','cover_and_jpg','jpg_only'].includes(rawThumb) ? rawThumb : 'off',
+    thumbnail_engine:$('ed-miniatura-motor')?.value === 'qwen' ? 'qwen' : 'clasico',
     strip_metadata:($('ed-borrar-meta')?.value || 'si') !== 'no',
     auto_hashtags:($('ed-hashtags')?.value || 'si') !== 'no',
     politicas_tiktok:$('ed-politicas')?.value || 'alto',
@@ -2440,6 +2512,13 @@ async function lanzarSubidasGuardadas() {
   } finally {
     button.disabled = false;
   }
+}
+async function cambiarSubidaManual(on) {
+  try {
+    await api('/api/bot/config', on ? {subida_manual:true, activo:true} : {subida_manual:false});
+    await cargar();
+    toast(on ? 'Subida manual: los clips se guardan y esperan tu botón ↑ Subir ahora.' : 'Subida automática: el bot vuelve a publicar solo.');
+  } catch(e) { toast(e.message,true); if ($('subida_manual')) $('subida_manual').checked = !on; }
 }
 async function guardarModo() {
   try { await api('/api/bot/config',{modo_cola:$('modo_cola').value}); await cargar(); toast('Modo guardado. Se aplica al terminar la tarea en curso.'); }
@@ -2607,6 +2686,31 @@ window.addEventListener('beforeunload', event => {
   event.preventDefault(); event.returnValue = '';
 });
 let vasosActivosCache = [];
+/* Póster estable: guarda la última imagen que sí cargó por clip y por título, precarga la
+   nueva antes de cambiarla y la reutiliza al pasar de «procesando» a «en cola/subiendo». */
+const posterVasoMem = new Map(), posterVasoCargadas = new Set();
+function claveTituloVaso(t) { return 't:' + String(t || '').trim().toLowerCase().slice(0, 120); }
+function posterVaso(id, url, titulo) {
+  const kId = 'i:' + id, kT = claveTituloVaso(titulo);
+  if (url && posterVasoCargadas.has(url)) { posterVasoMem.set(kId, url); if (titulo) posterVasoMem.set(kT, url); return url; }
+  if (url && typeof Image === 'undefined') return url;
+  if (url) {
+    const img = new Image();
+    img.onload = () => {
+      posterVasoCargadas.add(url); posterVasoMem.set(kId, url); if (titulo) posterVasoMem.set(kT, url);
+      document.querySelectorAll('img.vaso-poster[data-pk]').forEach(el => {
+        if (el.dataset.pk === kId || (titulo && el.dataset.pt === kT)) { el.src = url; el.style.display = ''; }
+      });
+    };
+    img.src = url;
+  }
+  return posterVasoMem.get(kId) || (titulo ? posterVasoMem.get(kT) : '') || '';
+}
+function htmlPosterVaso(id, url, titulo) {
+  const actual = posterVaso(id, url, titulo);
+  const respaldo = posterVasoMem.get(claveTituloVaso(titulo)) || '';
+  return `<img class="vaso-poster" data-pk="${esc('i:' + id)}" data-pt="${esc(claveTituloVaso(titulo))}" data-rb="${esc(respaldo)}" src="${esc(actual)}" alt="" ${actual ? '' : 'style="display:none"'} onerror="if(this.dataset.r!=='1'&&this.dataset.rb){this.dataset.r='1';this.src=this.dataset.rb}else{this.style.display='none'}">`;
+}
 function chipNotaVaso(cal) {
   if (!cal || !Number.isFinite(Number(cal.nota))) return '';
   const nivel = ['viral','alta','media','baja'].includes(cal.nivel) ? cal.nivel : 'media';
@@ -2629,7 +2733,7 @@ function pintarVasosActivos(vasos) {
     const listo = v.estado === 'listo', subiendo = v.tipo === 'subida' || v.estado === 'subiendo';
     const pct = Math.max(0, Math.min(100, Number(v.pct) || 0));
     const etiqueta = subiendo ? '↑ Subiendo' : v.tipo === 'live' ? (listo ? 'Live listo' : 'Live → PC') : (listo ? '↑ Preparado' : 'Cortando');
-    const poster = v.thumb_url ? `<img class="vaso-poster" src="${esc(v.thumb_url)}" alt="" loading="lazy" onerror="this.style.display='none'">` : '';
+    const poster = htmlPosterVaso(v.id || idx, v.thumb_url, v.titulo);
     const playBtn = v.video_url ? `<button type="button" class="vaso-play" title="Vista previa del clip" onclick="abrirVistaRapidaVaso(${idx})">▶</button>` : '';
     const closeBtn = v.accion_cancelar ? `<button type="button" class="vaso-cerrar" title="Cancelar o retirar este clip" onclick="event.stopPropagation();cancelarVasoActivo(${idx})">✕</button>` : '';
     const notaHtml = chipNotaVaso(v.calificacion);
@@ -2669,7 +2773,7 @@ function pintarVasosPreparados(subidas) {
     const etapaTxt = subiendo ? 'Publicando en plataforma…' : (pendiente ? (s.espera || 'Preparado · listo para subir') : (s.error || 'Revisa detalles abajo'));
     const btnSubirAhora = pendiente ? `<button type="button" class="mini prim" style="padding:3px 8px;font-size:10.5px;min-height:24px" onclick="event.stopPropagation();if(typeof adelantarClip==='function')adelantarClip(${id})">↑ Subir ahora</button>` : '';
     return `<div class="vaso-clip${subiendo ? ' es-subiendo' : pendiente ? ' es-preparado' : ''}">
-      <img class="vaso-poster" src="/api/bot/miniatura/${id}" alt="" loading="lazy" onerror="this.style.display='none'">
+      ${htmlPosterVaso('subida_' + id, `/api/bot/miniatura/${id}`, titulo)}
       <div class="vaso-flujo-subida"></div>
       <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
       <div class="vaso-brillo"></div>

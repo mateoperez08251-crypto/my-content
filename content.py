@@ -77,7 +77,7 @@ import smtplib
 from email.mime.text import MIMEText
 
 import requests
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, redirect
 
 import paths
 import radar_config
@@ -1184,7 +1184,8 @@ _FILTROS = {
 
 def _dialogo_nativo(carpeta=False, filtro=None):
     with _dialogo_lock:
-        if _window is not None:
+        ventana_d = next((v for v in _ventanas.values() if v is not None), None) or _window
+        if ventana_d is not None:
             import webview  # type: ignore
             fd = getattr(webview, "FileDialog", None)  # pywebview >= 5
             if fd is not None:
@@ -1195,7 +1196,7 @@ def _dialogo_nativo(carpeta=False, filtro=None):
             if filtro:
                 nombre, patrones = filtro
                 kwargs["file_types"] = (f"{nombre} ({';'.join(patrones.split())})", "Todos (*.*)")
-            res = _window.create_file_dialog(tipo, **kwargs)
+            res = ventana_d.create_file_dialog(tipo, **kwargs)
             if not res:
                 return ""
             return res[0] if isinstance(res, (list, tuple)) else str(res)
@@ -1969,6 +1970,7 @@ def run_smart_split_thread(data):
             "ambient_music": str(data.get("ambient_music", "off") or "off"),
             "clean_vocals": bool(data.get("clean_vocals", False)),
             "auto_thumbnail": str(data.get("auto_thumbnail", "off") or "off"),
+            "thumbnail_engine": "qwen" if data.get("thumbnail_engine") == "qwen" else "clasico",
             "auto_hashtags": data.get("auto_hashtags", True) is not False,
             "politicas_tiktok": str(data.get("politicas_tiktok", "alto") or "off"),
             "strip_metadata": bool(data.get("strip_metadata", True)),
@@ -2669,7 +2671,16 @@ def _bot_respuesta(fn):
 
 @app.route("/bot")
 def bot_panel():
-    return render_template("bot.html")
+    # Integrado en Content App (iframe ?embed=1). Fuera de él, la app propia es /clip.
+    if request.args.get("embed") != "1":
+        return redirect("/clip" + (("?" + request.query_string.decode()) if request.query_string else ""))
+    return render_template("bot.html", app_clip=False)
+
+
+@app.route("/clip")
+def my_content_clip():
+    """My Content Clip: app propia (clips de lives + subida). Comparte datos con Content App."""
+    return render_template("bot.html", app_clip=True)
 
 
 @app.route("/api/bot/estado", methods=["GET"])
@@ -3326,18 +3337,74 @@ def _aviso_windows(titulo, texto):
 
 @app.route("/api/_mostrar_ventana", methods=["POST"])
 def mostrar_ventana():
-    """La segunda copia de la app pide a la primera que muestre su ventana."""
+    """La segunda copia (Content App o My Content Clip) pide a la primera que muestre su ventana."""
     if request.remote_addr not in ("127.0.0.1", "::1"):
         return jsonify({"success": False}), 403
-    if _window is not None:
-        try:
-            _window.show()
-            _window.restore()
-            if not _pagina_cargada.is_set():
-                _vigilar_en_hilo(_window, _window.get_current_url() or f"http://127.0.0.1:{PUERTO_PREFERIDO}")
-        except Exception:
-            pass
-    return jsonify({"success": True})
+    vista = "clip" if (request.get_json(silent=True) or {}).get("vista") == "clip" else "main"
+    ok = _mostrar_o_crear_ventana(vista)
+    return jsonify({"success": True, "ventana": ok})
+
+
+@app.route("/api/_abrir_clip", methods=["POST"])
+def abrir_my_content_clip():
+    """Botón de Content App: abre My Content Clip en su propia ventana."""
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"success": False}), 403
+    return jsonify({"success": True, "ventana": _mostrar_o_crear_ventana("clip")})
+
+
+# Una ventana por app; el servidor, el bot y los datos son los mismos.
+VENTANAS_APP = {
+    "main": {"titulo": "Content App Premium", "ruta": "/", "fondo": "#09111e"},
+    "clip": {"titulo": "My Content Clip", "ruta": "/clip", "fondo": "#0C0C0B"},
+}
+_ventanas = {}
+_url_base_app = f"http://127.0.0.1:{PUERTO_PREFERIDO}"
+
+
+def _crear_ventana(vista, oculta=False):
+    import webview  # type: ignore
+    datos = VENTANAS_APP[vista]
+    url = _url_base_app + datos["ruta"]
+    ventana = webview.create_window(datos["titulo"], url, width=1280, height=800, background_color=datos["fondo"],
+                                    min_size=(1000, 600), maximized=not oculta, hidden=oculta)
+    _ventanas[vista] = ventana
+
+    def _cerrando():
+        # Con bandeja: se oculta. La ventana extra (la otra app) sí se cierra de verdad.
+        if len([v for v in _ventanas.values() if v is not None]) > 1:
+            _ventanas[vista] = None
+            return True
+        if not _bandeja.disponible:
+            return True
+        ventana.hide()
+        return False
+
+    ventana.events.closing += _cerrando
+    ventana.events.loaded += lambda: _pagina_cargada.set()
+    if winproc.ES_WINDOWS:
+        from windows_icon import aplicar as aplicar_icono_ventana
+        ventana.events.loaded += lambda: aplicar_icono_ventana(
+            datos["titulo"], paths.res_path('static', 'icons', 'my-content.ico'), log)
+    return ventana
+
+
+def _mostrar_o_crear_ventana(vista):
+    ventana = _ventanas.get(vista)
+    try:
+        if ventana is None:
+            if not _ventanas:  # modo navegador: no hay pywebview
+                import webbrowser
+                webbrowser.open(_url_base_app + VENTANAS_APP[vista]["ruta"])
+                return False
+            _crear_ventana(vista)
+            return True
+        ventana.show()
+        ventana.restore()
+        return True
+    except Exception as e:
+        _arranque(f"No se pudo abrir la ventana {vista}: {e}")
+        return False
 
 
 def _vigilar_carga(ventana, url, espera=15, abrir_navegador=None):
@@ -3421,18 +3488,22 @@ if __name__ == "__main__":
     hidden_mode = "--hidden" in sys.argv
     _arranque(f"Arrancando Content App (datos en {paths.DATA_DIR})")
 
+    VISTA_INICIAL = "clip" if "--clip" in sys.argv else "main"
+    NOMBRE_APP = VENTANAS_APP[VISTA_INICIAL]["titulo"]
+
     if not _instancia_unica():
         _arranque("Ya hay una copia abierta: se le pide que muestre su ventana.")
         if "--navegador" in sys.argv:
             import webbrowser
-            webbrowser.open(f"http://127.0.0.1:{PUERTO_PREFERIDO}")
+            webbrowser.open(f"http://127.0.0.1:{PUERTO_PREFERIDO}{VENTANAS_APP[VISTA_INICIAL]['ruta']}")
             sys.exit(0)
         if not hidden_mode:
             try:
-                requests.post(f"http://127.0.0.1:{PUERTO_PREFERIDO}/api/_mostrar_ventana", timeout=3)
+                requests.post(f"http://127.0.0.1:{PUERTO_PREFERIDO}/api/_mostrar_ventana",
+                              json={"vista": VISTA_INICIAL}, timeout=3)
             except Exception:
-                _aviso_windows("Content App", "Content App ya está abierta en la bandeja del sistema "
-                                              "(junto al reloj). Haz clic en su icono para abrirla.")
+                _aviso_windows(NOMBRE_APP, f"{NOMBRE_APP} ya está abierta en la bandeja del sistema "
+                                           "(junto al reloj). Haz clic en su icono para abrirla.")
         sys.exit(0)
 
     # Los subprocesos pesados (editor, ffmpeg, llama-tts...) se adjuntan a este
@@ -3449,7 +3520,8 @@ if __name__ == "__main__":
         threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
 
     PUERTO = _elegir_puerto()
-    URL_APP = f"http://127.0.0.1:{PUERTO}"
+    _url_base_app = f"http://127.0.0.1:{PUERTO}"
+    URL_APP = _url_base_app + VENTANAS_APP[VISTA_INICIAL]["ruta"]
     _arranque(f"Iniciando servidor web en {URL_APP}...")
 
     _error_servidor = []
@@ -3522,40 +3594,15 @@ if __name__ == "__main__":
             raise ImportError("Modo navegador elegido")
         import webview  # type: ignore
 
-        window = webview.create_window(
-            'Content App Premium',
-            URL_APP,
-            width=1280,
-            height=800,
-            background_color='#09111e',
-            min_size=(1000, 600),
-            maximized=not hidden_mode,
-            hidden=hidden_mode,
-        )
+        window = _crear_ventana(VISTA_INICIAL, oculta=hidden_mode)
         _window = window
-        window.events.loaded += lambda: _pagina_cargada.set()
         # pywebview avisa aquí si WebView2 no inicia; sin esto el fallo no deja rastro.
         import logging
         logging.getLogger("pywebview").addHandler(logging.StreamHandler(_log_arranque))
 
-        def on_closing():
-            if not _bandeja.disponible:
-                return True  # Sin bandeja, cerrar de verdad en vez de dejar la app invisible.
-            window.hide()  # ocultar a la bandeja en lugar de cerrar
-            return False
-
-        window.events.closing += on_closing
-
-        if winproc.ES_WINDOWS:
-            from windows_icon import aplicar as aplicar_icono_ventana
-            window.events.loaded += lambda: aplicar_icono_ventana(
-                'Content App Premium', paths.res_path('static', 'icons', 'my-content.ico'), log)
-
         def show_window():
-            window.show()
-            window.restore()
-            if not _pagina_cargada.is_set():
-                _vigilar_en_hilo(window, URL_APP)
+            if _mostrar_o_crear_ventana(VISTA_INICIAL) and not _pagina_cargada.is_set():
+                _vigilar_en_hilo(_ventanas.get(VISTA_INICIAL) or window, URL_APP)
 
         if winproc.ES_WINDOWS:
             _bandeja.iniciar(show_window, _salir_limpio)

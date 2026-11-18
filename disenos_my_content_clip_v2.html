@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Content Clip · estilos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Inter:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+/* ===== Tokens por estilo ===== */
+body[data-tema="calido"]{
+  --bg:#FAF9F5;--panel:#FFFFFF;--panel2:#F3F1EA;--line:#E6E2D6;--ink:#1F1E1B;--mute:#6B6759;--acc:#C96442;--acc-ink:#FFFFFF;--acc-soft:#F6E7DF;
+  --ok:#3F7A4F;--warn:#9A6B12;--bad:#B3412F;--r:12px;--rs:8px;
+  --f-head:'Source Serif 4',Georgia,serif;--f-body:Inter,system-ui,sans-serif;--f-mono:'IBM Plex Mono',monospace;--fs:14.5px;--h1:30px;--hw:600;
+}
+body[data-tema="calido-oscuro"]{
+  --bg:#111110;--panel:#1A1918;--panel2:#151514;--line:#2A2927;--ink:#EDEBE6;--mute:#9D9A93;--acc:#D97757;--acc-ink:#111110;--acc-soft:#2E211B;
+  --ok:#8CC09A;--warn:#E3B868;--bad:#E8806E;--r:12px;--rs:8px;
+  --f-head:'Source Serif 4',Georgia,serif;--f-body:Inter,system-ui,sans-serif;--f-mono:'IBM Plex Mono',monospace;--fs:14.5px;--h1:30px;--hw:600;
+  color-scheme:dark;
+}
+body[data-tema="calido-oscuro"] .logo{background:var(--acc);color:#111110}
+body[data-tema="calido-oscuro"] .btn.p{font-weight:600}
+body[data-tema="calido-oscuro"] dialog::backdrop{background:rgba(0,0,0,.6)}
+body[data-tema="editorial"]{
+  --bg:#FFFFFF;--panel:#FFFFFF;--panel2:#F4F4F2;--line:#111111;--ink:#111111;--mute:#55554F;--acc:#1D4ED8;--acc-ink:#FFFFFF;--acc-soft:#E8EEFC;
+  --ok:#166534;--warn:#854D0E;--bad:#B91C1C;--r:0px;--rs:0px;
+  --f-head:Archivo,'Helvetica Neue',Arial,sans-serif;--f-body:Archivo,'Helvetica Neue',Arial,sans-serif;--f-mono:'IBM Plex Mono',monospace;--fs:14px;--h1:44px;--hw:800;
+}
+body[data-tema="editorial-oscuro"]{
+  --bg:#0C0C0B;--panel:#0C0C0B;--panel2:#161614;--line:#EDEAE2;--ink:#EDEAE2;--mute:#8F8C84;--acc:#F0643C;--acc-ink:#0C0C0B;--acc-soft:#2A1610;
+  --ok:#7FC79A;--warn:#E6B65C;--bad:#F07A66;--r:0px;--rs:0px;
+  --f-head:Archivo,'Helvetica Neue',Arial,sans-serif;--f-body:Archivo,'Helvetica Neue',Arial,sans-serif;--f-mono:'IBM Plex Mono',monospace;--fs:14px;--h1:44px;--hw:800;
+  --fina:#2B2A27;--campo:#3A3935;
+  color-scheme:dark;
+}
+body[data-tema="pro"]{
+  --bg:#1B1C1F;--panel:#232428;--panel2:#2B2D32;--line:#34363C;--ink:#E3E4E8;--mute:#9A9DA6;--acc:#4C8DF6;--acc-ink:#FFFFFF;--acc-soft:#22324D;
+  --ok:#5BB98B;--warn:#E0B44C;--bad:#E86A5F;--r:4px;--rs:3px;
+  --f-head:'IBM Plex Sans',system-ui,sans-serif;--f-body:'IBM Plex Sans',system-ui,sans-serif;--f-mono:'IBM Plex Mono',monospace;--fs:13px;--h1:18px;--hw:600;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:var(--fs);line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--acc)}
+
+/* ===== Selector de estilos (fuera del diseño) ===== */
+.selector{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;background:#111;color:#eee;font:13px Inter,sans-serif}
+.selector b{margin-right:6px}
+.selector button{min-height:36px;padding:0 14px;border:1px solid #444;background:#1c1c1c;color:#eee;border-radius:6px;cursor:pointer}
+.selector button[aria-pressed="true"]{background:#eee;color:#111;border-color:#eee}
+.selector span{opacity:.7;margin-left:auto}
+
+/* ===== Estructura ===== */
+.app{display:flex;flex-wrap:wrap;min-height:calc(100vh - 56px)}
+.lado{flex:1 1 230px;max-width:250px;padding:20px 14px;border-right:1px solid var(--line);background:var(--panel2);display:flex;flex-direction:column;gap:4px}
+.marca{display:flex;align-items:center;gap:10px;padding:0 8px 18px}
+.logo{width:30px;height:30px;border-radius:var(--rs);background:var(--ink);color:var(--bg);display:grid;place-items:center;font-weight:700;font-size:13px}
+.marca h1{margin:0;font-family:var(--f-head);font-size:17px;font-weight:var(--hw);letter-spacing:-.2px}
+.marca small{display:block;color:var(--mute);font-size:12px}
+.tab{display:flex;align-items:center;gap:8px;width:100%;min-height:42px;padding:0 12px;border:0;background:none;border-radius:var(--rs);text-align:left;cursor:pointer;color:var(--mute)}
+.tab:hover{color:var(--ink);background:var(--panel)}
+.tab[aria-selected="true"]{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line)}
+.badge{margin-left:auto;font-family:var(--f-mono);font-size:11.5px;padding:1px 7px;border-radius:99px;background:var(--acc-soft);color:var(--acc)}
+.lado .pie{margin-top:auto;padding:12px;border-radius:var(--r);background:var(--panel);border:1px solid var(--line);font-size:12.5px;color:var(--mute)}
+.lado .pie b{color:var(--ink)}
+
+.cuerpo{flex:999 1 600px;min-width:0;display:flex;flex-direction:column}
+.barra{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:14px 28px;border-bottom:1px solid var(--line);background:var(--bg)}
+.barra h2{margin:0;font-family:var(--f-head);font-size:var(--h1);font-weight:var(--hw);letter-spacing:-.5px;flex:1 1 220px}
+.actividad{color:var(--mute);font-size:13px}
+.contenido{display:flex;flex-wrap:wrap;gap:20px;padding:24px 28px}
+.principal{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:20px}
+.aside{flex:1 1 280px;max-width:340px;display:flex;flex-direction:column;gap:20px}
+
+/* ===== Componentes ===== */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px}
+.card h3{margin:0 0 4px;font-family:var(--f-head);font-size:19px;font-weight:var(--hw);letter-spacing:-.2px}
+.card .sub{margin:0 0 14px;color:var(--mute);font-size:13px}
+.fila{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+label.l{display:block;font-size:12.5px;font-weight:500;color:var(--mute);margin:0 0 5px}
+input[type=text],input[type=url],input[type=number],input[type=time],select,textarea{width:100%;min-height:42px;padding:0 12px;border:1px solid var(--line);border-radius:var(--rs);background:var(--bg)}
+textarea{min-height:88px;padding:10px 12px;resize:vertical}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.btn{min-height:42px;padding:0 16px;border:1px solid var(--line);border-radius:var(--rs);background:var(--panel);cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--mute)}
+.btn.p{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.btn.s{min-height:34px;padding:0 11px;font-size:12.5px}
+.btn.peligro{color:var(--bad)}
+.btn.grande{min-height:46px;padding:0 20px;font-weight:600}
+.sw{display:inline-flex;align-items:center;gap:8px;min-height:36px;cursor:pointer}
+.sw input{width:34px;height:20px;appearance:none;border-radius:99px;background:var(--line);position:relative;cursor:pointer;margin:0;flex:0 0 auto}
+.sw input::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--panel);transition:left .15s}
+.sw input:checked{background:var(--acc)}
+.sw input:checked::after{left:17px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{min-height:32px;padding:0 11px;border:1px solid var(--line);border-radius:99px;background:var(--panel);cursor:pointer;font-size:12.5px}
+.chip[aria-pressed="true"]{background:var(--acc-soft);border-color:var(--acc);color:var(--acc);font-weight:600}
+.est{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--panel2);color:var(--mute);white-space:nowrap}
+.est.ok{color:var(--ok)}.est.warn{color:var(--warn)}.est.bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:500;color:var(--mute);font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tabla{overflow-x:auto}
+details.pl{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+details.pl summary{cursor:pointer;color:var(--mute);font-size:13px}
+details.grupo{border:1px solid var(--line);border-radius:var(--rs);margin-top:10px;background:var(--bg)}
+details.grupo summary{cursor:pointer;padding:12px 14px;font-weight:600;display:flex;flex-wrap:wrap;gap:4px 10px}
+details.grupo summary span{font-weight:400;color:var(--mute);font-size:12.5px}
+details.grupo .in{padding:4px 14px 14px}
+.mono{font-family:var(--f-mono);font-size:12px}
+.mute{color:var(--mute)}
+.thumb{width:46px;height:66px;border-radius:var(--rs);background:var(--panel2);border:1px solid var(--line);flex:0 0 auto}
+.item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item .t{flex:1 1 200px;min-width:0}
+.item .t b{display:block;font-weight:600}
+.item .t small{color:var(--mute)}
+.barra-prog{height:6px;border-radius:99px;background:var(--panel2);overflow:hidden;margin-top:6px}
+.barra-prog i{display:block;height:100%;background:var(--acc)}
+.etapas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px;font-size:12px}
+.etapas div{padding:6px 8px;border-radius:var(--rs);background:var(--panel2);color:var(--mute)}
+.etapas div.h{background:var(--acc-soft);color:var(--acc);font-weight:600}
+.etapas div.ok{color:var(--ok)}
+.alerta{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 14px;border-radius:var(--rs);border:1px solid var(--line);background:var(--bg)}
+.alerta b{color:var(--bad)}
+.log{font-family:var(--f-mono);font-size:11.5px;line-height:1.7;color:var(--mute);max-height:220px;overflow:auto}
+.vista{display:none}.vista.on{display:flex}
+dialog{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);color:var(--ink);padding:0;width:min(560px,calc(100% - 32px))}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog header{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}
+dialog header h3{margin:0;flex:1;font-family:var(--f-head);font-size:19px;font-weight:var(--hw)}
+dialog .db{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+dialog footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--line)}
+.drop{border:1.5px dashed var(--line);border-radius:var(--r);padding:26px;text-align:center;color:var(--mute);background:var(--bg)}
+.drop b{color:var(--ink)}
+
+/* ===== Variaciones de estructura ===== */
+/* Editorial: navegación arriba, reglas negras, etiquetas en mayúsculas */
+body[data-tema^="editorial"] .app{flex-direction:column}
+body[data-tema^="editorial"] .lado{max-width:none;flex:0 0 auto;flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:3px solid var(--ink);background:var(--bg);padding:14px 28px;gap:0}
+body[data-tema^="editorial"] .marca{padding:0 28px 0 0}
+body[data-tema^="editorial"] .logo{display:none}
+body[data-tema^="editorial"] .marca h1{font-size:22px;font-weight:800;letter-spacing:-.6px;text-transform:uppercase}
+body[data-tema^="editorial"] .marca small{display:none}
+body[data-tema^="editorial"] .tab{width:auto;border-radius:0;font-weight:500;text-transform:uppercase;font-size:12.5px;letter-spacing:.6px;border-bottom:3px solid transparent;margin-bottom:-17px;padding-bottom:3px}
+body[data-tema^="editorial"] .tab[aria-selected="true"]{background:none;box-shadow:none;border-bottom-color:var(--acc);color:var(--ink)}
+body[data-tema^="editorial"] .tab:hover{background:none}
+body[data-tema^="editorial"] .lado .pie{display:none}
+body[data-tema^="editorial"] .card{border:0;border-top:1px solid var(--ink);padding:16px 0 0;background:none}
+body[data-tema^="editorial"] .card h3{text-transform:uppercase;font-size:15px;letter-spacing:.4px}
+body[data-tema^="editorial"] .barra{border-bottom:0;padding:28px 28px 4px}
+body[data-tema^="editorial"] th{text-transform:uppercase;letter-spacing:.5px;font-size:11px;color:var(--ink);border-bottom:1px solid var(--ink)}
+body[data-tema^="editorial"] td,body[data-tema^="editorial"] .item{border-bottom-color:#D6D6D2}
+body[data-tema^="editorial"] input,body[data-tema^="editorial"] select,body[data-tema^="editorial"] textarea{border-color:#9C9C96}
+body[data-tema^="editorial"] .btn{border-color:var(--ink)}
+body[data-tema^="editorial"] .btn.p{background:var(--ink);border-color:var(--ink)}
+body[data-tema^="editorial"] .chip,body[data-tema^="editorial"] .est,body[data-tema^="editorial"] .badge{border-radius:0}
+body[data-tema^="editorial"] .numeros{display:grid}
+/* Editorial oscuro: periódico de noche, filetes finos, acento bermellón */
+body[data-tema="editorial-oscuro"]{background:var(--bg);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+body[data-tema="editorial-oscuro"] ::selection{background:var(--acc);color:var(--acc-ink)}
+body[data-tema="editorial-oscuro"] .lado{border-bottom:1px solid var(--ink);box-shadow:0 4px 0 -1px var(--bg),0 5px 0 -1px var(--fina)}
+body[data-tema="editorial-oscuro"] .marca h1{letter-spacing:-.4px}
+body[data-tema="editorial-oscuro"] .marca h1::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;background:var(--acc);vertical-align:2px}
+body[data-tema="editorial-oscuro"] .tab{color:var(--mute);transition:color .15s ease,border-color .15s ease}
+body[data-tema="editorial-oscuro"] .tab:hover{color:var(--ink)}
+body[data-tema="editorial-oscuro"] .tab[aria-selected="true"]{color:var(--ink)}
+body[data-tema="editorial-oscuro"] .card{border-top:1px solid var(--ink)}
+body[data-tema="editorial-oscuro"] .card h3{font-size:13px;letter-spacing:1.4px;font-weight:700}
+body[data-tema="editorial-oscuro"] .card h3::before{content:"§ ";color:var(--acc);font-family:var(--f-mono);font-weight:500}
+body[data-tema="editorial-oscuro"] th{color:var(--mute);font-family:var(--f-mono);font-weight:500;font-size:10.5px;letter-spacing:1px;border-bottom:1px solid var(--ink)}
+body[data-tema="editorial-oscuro"] td,body[data-tema="editorial-oscuro"] .item{border-bottom-color:var(--fina)}
+body[data-tema="editorial-oscuro"] tr:hover td{background:var(--panel2)}
+body[data-tema="editorial-oscuro"] input,body[data-tema="editorial-oscuro"] select,body[data-tema="editorial-oscuro"] textarea{background:transparent;border:0;border-bottom:1px solid var(--campo);color:var(--ink);padding-left:0;padding-right:0}
+body[data-tema="editorial-oscuro"] input:focus,body[data-tema="editorial-oscuro"] select:focus,body[data-tema="editorial-oscuro"] textarea:focus{outline:0;border-bottom-color:var(--acc);box-shadow:0 1px 0 0 var(--acc)}
+body[data-tema="editorial-oscuro"] select option{background:#161614;color:var(--ink)}
+body[data-tema="editorial-oscuro"] .btn{background:transparent;color:var(--ink);border:1px solid var(--ink);text-transform:uppercase;letter-spacing:.8px;font-size:12px;font-weight:600;transition:background .15s ease,color .15s ease}
+body[data-tema="editorial-oscuro"] .btn:hover{background:var(--ink);color:var(--bg)}
+body[data-tema="editorial-oscuro"] .btn.p{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+body[data-tema="editorial-oscuro"] .btn.p:hover{background:#FF7A55;border-color:#FF7A55}
+body[data-tema="editorial-oscuro"] .btn:focus-visible,body[data-tema="editorial-oscuro"] .tab:focus-visible{outline:1px solid var(--acc);outline-offset:3px}
+body[data-tema="editorial-oscuro"] .chip,body[data-tema="editorial-oscuro"] .est,body[data-tema="editorial-oscuro"] .badge{background:transparent;border:1px solid var(--campo);color:var(--ink);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.6px;text-transform:uppercase}
+body[data-tema="editorial-oscuro"] .numeros>*{border-left:1px solid var(--fina)}
+body[data-tema="editorial-oscuro"] .numeros>*:first-child{border-left:0}
+body[data-tema="editorial-oscuro"] dialog{background:var(--bg);color:var(--ink);border:1px solid var(--ink);box-shadow:8px 8px 0 var(--fina)}
+body[data-tema="editorial-oscuro"] dialog::backdrop{background:rgba(0,0,0,.72)}
+body[data-tema="editorial-oscuro"] ::-webkit-scrollbar{width:10px;height:10px}
+body[data-tema="editorial-oscuro"] ::-webkit-scrollbar-thumb{background:var(--campo)}
+body[data-tema="editorial-oscuro"] ::-webkit-scrollbar-track{background:var(--bg)}
+/* Pro: denso, paneles con cabecera */
+body[data-tema="pro"] .lado{max-width:210px;padding:10px 8px}
+body[data-tema="pro"] .marca{padding:4px 6px 12px}
+body[data-tema="pro"] .logo{background:var(--acc);color:#fff;width:24px;height:24px;font-size:11px}
+body[data-tema="pro"] .marca h1{font-size:14px}
+body[data-tema="pro"] .tab{min-height:32px;font-size:12.5px}
+body[data-tema="pro"] .tab[aria-selected="true"]{background:var(--acc-soft);box-shadow:inset 2px 0 0 var(--acc)}
+body[data-tema="pro"] .barra{padding:8px 16px;background:var(--panel)}
+body[data-tema="pro"] .contenido{padding:12px;gap:12px}
+body[data-tema="pro"] .principal,body[data-tema="pro"] .aside{gap:12px}
+body[data-tema="pro"] .card{padding:0}
+body[data-tema="pro"] .card h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);padding:8px 12px;margin:0;border-bottom:1px solid var(--line);background:var(--panel2)}
+body[data-tema="pro"] .card .sub{padding:8px 12px 0;margin:0}
+body[data-tema="pro"] .card>.in{padding:12px}
+body[data-tema="pro"] input,body[data-tema="pro"] select,body[data-tema="pro"] .btn{min-height:32px}
+body[data-tema="pro"] .btn.grande{min-height:36px}
+body[data-tema="pro"] .item{padding:8px 0}
+.numeros{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink)}
+.numeros div{padding:14px 16px;border-right:1px solid #D6D6D2}
+.numeros div:last-child{border-right:0}
+.numeros b{display:block;font-size:34px;font-weight:800;letter-spacing:-1px;line-height:1.1}
+.numeros span{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)}
+@media (max-width:700px){.numeros{grid-template-columns:repeat(2,1fr)}.barra,.contenido{padding-left:16px;padding-right:16px}.etapas{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body data-tema="editorial-oscuro">
+
+<div class="selector" role="group" aria-label="Elegir estilo">
+  <b>Estilo:</b>
+  <button type="button" data-t="calido" aria-pressed="false">D · Cálido claro</button>
+  <button type="button" data-t="calido-oscuro" aria-pressed="false">D · Cálido oscuro</button>
+  <button type="button" data-t="editorial" aria-pressed="false">E · Editorial</button>
+  <button type="button" data-t="editorial-oscuro" aria-pressed="true">E · Editorial oscuro</button>
+  <button type="button" data-t="pro" aria-pressed="false">F · Herramienta pro</button>
+  <span>Prueba las pestañas y botones: todo es clicable.</span>
+</div>
+
+<div class="app">
+  <nav class="lado" aria-label="Secciones">
+    <div class="marca"><div class="logo">MC</div><div><h1>My Content Clip</h1><small>Clips y subida automática</small></div></div>
+    <button type="button" class="tab" role="tab" data-v="cola" aria-selected="true">Cola y actividad <span class="badge">12</span></button>
+    <button type="button" class="tab" role="tab" data-v="anadir" aria-selected="false">Añadir videos</button>
+    <button type="button" class="tab" role="tab" data-v="cuentas" aria-selected="false">Cuentas y reglas <span class="badge">4</span></button>
+    <button type="button" class="tab" role="tab" data-v="edicion" aria-selected="false">Edición IA</button>
+    <button type="button" class="tab" role="tab" data-v="sistema" aria-selected="false">Ritmo, Colab y avisos</button>
+    <div class="pie"><b>Salud</b><br>Navegador listo · Colab conectado<br>yt-dlp · FFmpeg · curl-cffi al día</div>
+  </nav>
+
+  <div class="cuerpo">
+    <div class="barra">
+      <h2 id="titulo">Cola y actividad</h2>
+      <span class="est ok" title="Modo optimizado para 4 GB de RAM">Modo ligero 4 GB</span>
+      <span class="actividad">Subiendo «Jugada del minuto 34» a TikTok · 64%</span>
+      <label class="sw"><input type="checkbox" checked> Bot encendido</label>
+      <button type="button" class="btn grande p" data-abrir="dlg-manual">↑ Subir manual</button>
+    </div>
+
+    <!-- ================= COLA ================= -->
+    <section class="vista on contenido" data-vista="cola">
+      <div class="principal">
+        <div class="numeros"><div><b>12</b><span>En cola</span></div><div><b>3</b><span>Procesando</span></div><div><b>9</b><span>Publicadas hoy</span></div><div><b>2</b><span>Necesitan atención</span></div></div>
+
+        <div class="card"><h3>Necesita atención <span class="mute">· 2</span></h3><div class="in" style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <div class="alerta"><b>Sesión vencida</b><span style="flex:1">TikTok Clips pide iniciar sesión otra vez.</span><button class="btn s">Iniciar sesión</button></div>
+          <div class="alerta"><b>Revisar</b><span style="flex:1">Subida interrumpida de «Parte 3 del live». Comprueba si se publicó.</span><button class="btn s">Ya se publicó</button><button class="btn s">Reintentar</button></div>
+        </div></div>
+
+        <div class="card"><h3>Procesando ahora · llenando clips</h3><div class="in">
+          <div class="item"><div class="thumb"></div><div class="t"><b>Live Twitch · canal</b><small>Smart Split · parte 4 de 6 · Colab GPU</small>
+            <div class="barra-prog"><i style="width:58%"></i></div>
+            <div class="etapas"><div class="ok">Descarga ✓</div><div class="ok">Transcripción ✓</div><div class="h">Edición 58%</div><div>Subida</div></div></div></div>
+          <div class="item"><div class="thumb"></div><div class="t"><b>Kick · Momento épico</b><small>Esperando turno · cuenta Kick Clips</small><div class="barra-prog"><i style="width:12%"></i></div></div><button class="btn s peligro">Cancelar</button></div>
+        </div></div>
+
+        <div class="card"><h3>Clips listos y en cola <span class="mute">· 12</span></h3><div class="in">
+          <div class="fila" style="margin:8px 0"><button class="btn s">Expandir todo</button><button class="btn s">Contraer todo</button><span class="mute" style="margin-left:auto">Próximo turno 14:20</span></div>
+          <div class="item"><div class="thumb"></div><div class="t"><b>Reacción final del torneo</b><small>TikTok Clips · Twitch · 0:58 · Portada IA</small></div><span class="est">Pendiente</span><button class="btn s" data-abrir="dlg-revisar">Revisar texto y video</button><button class="btn s">▶</button><button class="btn s p">Subir ahora</button><button class="btn s" aria-label="Subir en la cola">↑</button><button class="btn s" aria-label="Bajar en la cola">↓</button></div>
+          <div class="item"><div class="thumb"></div><div class="t"><b>Jugada del minuto 34</b><small>TikTok Clips · Twitch · 0:55</small><div class="barra-prog"><i style="width:64%"></i></div></div><span class="est warn">Subiendo 64%</span></div>
+          <div class="item"><div class="thumb"></div><div class="t"><b>Respuesta al chat</b><small>YouTube Shorts · TikTok · 0:42</small></div><span class="est">No antes de 16:00</span><button class="btn s" data-abrir="dlg-revisar">Revisar</button><button class="btn s p">Subir ahora</button></div>
+        </div></div>
+
+        <div class="card"><h3>Videos preparándose</h3><div class="in"><div class="tabla"><table>
+          <thead><tr><th style="width:28px"><input type="checkbox" aria-label="Seleccionar todo"></th><th>Video</th><th>Origen</th><th>Estado</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><input type="checkbox" aria-label="Seleccionar"></td><td>El famoso Miguelón parte 3</td><td>Enlace YouTube</td><td><span class="est warn">Editando 2/5</span></td><td><button class="btn s">Detalles</button></td></tr>
+            <tr><td><input type="checkbox" aria-label="Seleccionar"></td><td>Clip kick.com/canal?clip=…</td><td>Enlace Kick</td><td><span class="est">En espera</span></td><td><button class="btn s peligro">Quitar</button></td></tr>
+            <tr><td><input type="checkbox" aria-label="Seleccionar"></td><td>mi_video_final.mp4</td><td>Subida manual</td><td><span class="est ok">Listo</span></td><td><button class="btn s">Detalles</button></td></tr>
+          </tbody></table></div>
+          <details class="pl"><summary>Publicadas recientemente · 9 · mostrar / ocultar</summary><p class="mute">Reacción final · TikTok · 13:02 — Parte 2 · YouTube · 12:40 — …</p></details>
+        </div></div>
+      </div>
+
+      <aside class="aside">
+        <div class="card"><h3>Próximo clip</h3><div class="in"><div class="thumb" style="width:100%;height:auto;aspect-ratio:9/14;margin:8px 0"></div><b>Reacción final del torneo</b><p class="mute" style="margin:4px 0 10px">TikTok Clips · a las 14:20</p><button class="btn p" style="width:100%">Subir siguiente ahora</button></div></div>
+        <div class="card"><h3>Publicadas hoy</h3><div class="in"><div class="item"><div class="t"><b>TikTok Clips</b><small>4 de 6</small></div></div><div class="item"><div class="t"><b>YouTube Shorts</b><small>3 de 5</small></div></div><div class="item"><div class="t"><b>Facebook Reels</b><small>2 de 4</small></div></div></div></div>
+        <div class="card"><h3>Registro en vivo</h3><div class="in"><div class="log">14:02 Twitch live: segmento 4 cerrado<br>14:02 Smart Split: parte 4 enviada a Colab<br>13:58 TikTok: publicado «Reacción final»<br>13:55 Kick: clip descargado (1080p)<br>13:50 Radar: 2 videos nuevos en cola</div></div></div>
+      </aside>
+    </section>
+
+    <!-- ================= AÑADIR ================= -->
+    <section class="vista contenido" data-vista="anadir">
+      <div class="principal">
+        <div class="card"><h3>Capturar live en directo</h3><p class="sub">YouTube · Twitch · Kick · TikTok. Corta por tramos mientras transmite.</p><div class="in">
+          <div class="fila"><input type="url" aria-label="URL del live" placeholder="https://twitch.tv/canal · kick.com/canal · tiktok.com/@user/live" style="flex:1 1 320px"><button class="btn" data-abrir="dlg-cookies">Cookies</button></div>
+          <div class="grid" style="margin-top:12px">
+            <div><label class="l">Cómo cortar</label><select><option>Partes consecutivas</option><option>Mejores momentos con IA</option></select></div>
+            <div><label class="l">Duración del clip (s)</label><input type="number" value="60"></div>
+            <div><label class="l">Analizar cada (s)</label><input type="number" value="180"></div>
+            <div><label class="l">Preset de Smart Split</label><select><option>Modo ligero (sin preset)</option><option>bot_calidad</option></select></div>
+            <div><label class="l">Búfer máx. (MiB)</label><input type="number" value="1024"></div>
+          </div>
+          <label class="l" style="margin-top:12px">Cuentas de destino</label>
+          <div class="chips"><button class="chip" aria-pressed="true">TikTok Clips</button><button class="chip" aria-pressed="false">YouTube Shorts</button><button class="chip" aria-pressed="true">Kick Clips TT</button><button class="chip" aria-pressed="false">Facebook Reels</button></div>
+          <div class="fila" style="margin-top:12px"><input type="text" aria-label="Texto adicional" placeholder="Texto o hashtags adicionales (opcional)" style="flex:1 1 260px"><button class="btn p">● Capturar y encolar</button></div>
+          <details class="pl"><summary>Detalles de captura y cookies</summary><p class="mute">Guarda las cookies en «Esta PC». Cortes aproximados según los fotogramas clave.</p></details>
+          <div class="fila" style="margin-top:14px"><button class="btn s">Seleccionar todo</button><button class="btn s">Quitar selección</button><button class="btn s peligro">Eliminar seleccionados</button><button class="btn s">Limpiar ya subidos / terminados</button><span class="mute" style="margin-left:auto">0 seleccionados</span></div>
+          <div class="tabla" style="margin-top:8px"><table><thead><tr><th></th><th>Transmisión</th><th>Captura</th><th>Segmentos y clips</th><th></th></tr></thead>
+            <tbody><tr><td><input type="checkbox" aria-label="Seleccionar"></td><td>Twitch · canal</td><td><span class="est warn">Capturando</span></td><td>4 cerrados · 3 en cola · 1 subido</td><td><button class="btn s">Detener captura</button></td></tr></tbody></table></div>
+        </div></div>
+
+        <div class="fila" style="align-items:stretch">
+          <div class="card" style="flex:1 1 340px"><h3>Añadir desde enlaces</h3><p class="sub">Videos o clips de YouTube, Twitch, Kick, TikTok…</p><div class="in">
+            <textarea aria-label="Enlaces" placeholder="Uno por línea"></textarea>
+            <div class="fila" style="margin-top:8px"><button class="btn s" data-abrir="dlg-cookies">Cookies</button><span class="mute">Si piden sesión, conecta o sube cookies.</span></div>
+            <label class="l" style="margin-top:12px">Cuentas destino (vacío = usar reglas)</label>
+            <div class="chips"><button class="chip" aria-pressed="false">TikTok Clips</button><button class="chip" aria-pressed="false">YouTube Shorts</button></div>
+            <label class="l" style="margin-top:12px">Edición para estos enlaces</label>
+            <select><option>Usar edición de cada cuenta (o regla/general)</option></select>
+            <div class="fila" style="margin-top:12px"><label class="sw"><input type="checkbox" checked> Cortar con Smart Split</label></div>
+            <input type="text" aria-label="Hashtags" placeholder="Hashtags o texto fijo (opcional)" style="margin-top:8px">
+            <button class="btn p" style="margin-top:12px">+ Añadir a la cola</button>
+          </div></div>
+
+          <div class="card" style="flex:1 1 340px"><h3>Subir archivos de mi PC</h3><p class="sub">MP4 o MOV listos · hasta 4 GiB · sin recorte</p><div class="in">
+            <div class="drop"><b>Arrastra videos aquí</b><br>o <button class="btn s" style="margin-top:8px">Elegir archivos</button></div>
+            <div class="grid" style="margin-top:12px">
+              <div><label class="l">Plataforma</label><select><option>TikTok</option><option>YouTube</option><option>Facebook</option></select></div>
+              <div><label class="l">Cuentas destino</label><div class="chips"><button class="chip" aria-pressed="true">TikTok Clips</button></div></div>
+            </div>
+            <label class="l" style="margin-top:12px">Descripción y hashtags (opcional)</label>
+            <textarea placeholder="Vacío = usa el nombre limpio del archivo."></textarea>
+            <button class="btn p" style="margin-top:12px">↑ Guardar y añadir a la cola</button>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CUENTAS ================= -->
+    <section class="vista contenido" data-vista="cuentas">
+      <div class="principal">
+        <div class="card"><h3>Cuentas</h3><p class="sub">Sesión independiente por perfil</p><div class="in">
+          <div class="grid">
+            <div class="card" style="padding:14px"><b>TikTok Clips</b><div class="mute" style="font-size:12.5px;margin:2px 0 8px">TikTok · 4/6 hoy · cada 45–90 min</div><span class="est bad">Sesión vencida</span><div class="fila" style="margin-top:10px"><button class="btn s p">Iniciar sesión</button><button class="btn s">Comprobar</button><button class="btn s">Cookies</button></div>
+              <details class="pl"><summary>Horario, sesión y opciones avanzadas</summary><div class="grid" style="margin-top:8px"><div><label class="l">Subir desde</label><input type="time" value="08:00"></div><div><label class="l">Hasta</label><input type="time" value="23:00"></div></div></details></div>
+            <div class="card" style="padding:14px"><b>YouTube Shorts</b><div class="mute" style="font-size:12.5px;margin:2px 0 8px">YouTube · 3/5 hoy</div><span class="est ok">Conectada</span><div class="fila" style="margin-top:10px"><button class="btn s">Comprobar</button><button class="btn s">Pausar</button></div></div>
+            <div class="card" style="padding:14px"><b>Facebook Reels</b><div class="mute" style="font-size:12.5px;margin:2px 0 8px">Facebook · 2/4 hoy</div><span class="est ok">Conectada</span><div class="fila" style="margin-top:10px"><button class="btn s">Comprobar</button><button class="btn s peligro">Eliminar</button></div></div>
+          </div>
+          <div class="fila" style="margin-top:14px">
+            <select aria-label="Plataforma" style="max-width:130px"><option>TikTok</option><option>YouTube</option><option>Facebook</option></select>
+            <input type="text" aria-label="Nombre" placeholder="Nombre (ej. TikTok Clips)" style="flex:1 1 200px">
+            <input type="number" aria-label="Límite diario" value="6" style="max-width:80px">
+            <button class="btn p">Añadir</button>
+          </div>
+          <input type="url" aria-label="Enlace Facebook" placeholder="Facebook: enlace para crear Reels de tu página (opcional)" style="margin-top:8px">
+          <details class="pl"><summary>Cómo funcionan las sesiones y cookies</summary><p class="mute">«Iniciar sesión» abre una ventana propia sin mover tu cursor.</p></details>
+        </div></div>
+
+        <div class="card"><h3>Buzón</h3><p class="sub">Videos que llegan solos desde la nube</p><div class="in"><div class="fila"><span class="est ok">Activo</span><span class="mute">3 videos recibidos hoy</span><button class="btn s">Copiar enlace</button><button class="btn s">Apagar</button></div></div></div>
+
+        <div class="fila" style="align-items:stretch">
+          <div class="card" style="flex:1 1 300px"><h3>Reglas por canal</h3><p class="sub">Elige una para editarla</p><div class="in">
+            <div class="item"><div class="t"><b>@canal_gamer</b><small>→ TikTok Clips · preset bot_calidad</small></div><span class="est ok">Publica</span></div>
+            <div class="item"><div class="t"><b>Cualquier otro canal</b><small>→ YouTube Shorts</small></div><span class="est">Solo editar</span></div>
+          </div></div>
+          <div class="card" style="flex:1 1 300px"><h3>Crear o editar regla</h3><div class="in" style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            <div><label class="l">Canal de origen</label><input type="text" placeholder="@canal o * para cualquiera"></div>
+            <div><label class="l">Cuentas destino</label><div class="chips"><button class="chip" aria-pressed="true">TikTok Clips</button><button class="chip" aria-pressed="false">YouTube Shorts</button></div></div>
+            <div><label class="l">Preset</label><select><option>bot_calidad</option></select></div>
+            <div class="fila"><button class="btn p">Guardar regla</button><button class="btn peligro">Eliminar</button></div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= EDICIÓN IA ================= -->
+    <section class="vista contenido" data-vista="edicion">
+      <div class="principal">
+        <div class="card"><h3>Editar con Smart Split y guardar en esta PC</h3><p class="sub">Modo: subir cada clip apenas esté listo</p><div class="in">
+          <div class="grid">
+            <div><label class="l">Modo de trabajo del bot</label><select><option>Subir cada clip apenas esté listo</option><option>Editar toda la cola y después publicar</option><option>Solo editar y guardar</option><option>Solo publicar guardados</option></select></div>
+            <div><label class="l">Configuración de cuenta</label><select><option>General · cuentas sin preset propio</option></select></div>
+            <div><label class="l">Preset activo</label><select><option>bot_calidad</option></select></div>
+            <div><label class="l">Guardar preset como</label><input type="text" value="bot_calidad"></div>
+          </div>
+          <div class="fila" style="margin-top:12px"><button class="btn">Aplicar modo</button><button class="btn p">Guardar edición ahora</button><button class="btn">Actualizar presets</button><span class="mute">Guardado hace 2 min</span></div>
+
+          <details class="grupo" open><summary>A · Selección de momentos y transcripción <span>Inicio, modo IA, duración y motor</span></summary><div class="in"><div class="grid">
+            <div><label class="l">Selección</label><select><option>Mejores momentos IA</option><option>Partes consecutivas</option></select></div>
+            <div><label class="l">Duración del clip (s)</label><input type="number" value="60"></div>
+            <div><label class="l">Número de clips</label><input type="number" value="5"></div>
+            <div><label class="l">Saltar intro (s)</label><input type="number" value="0"></div>
+            <div><label class="l">Motor de transcripción</label><select><option>faster-whisper local</option><option>Groq</option></select></div>
+          </div></div></details>
+          <details class="grupo"><summary>B · Encuadre, calidad, subtítulos y miniatura <span>1080p, seguimiento labial, portada con frase</span></summary><div class="in"><div class="grid">
+            <div><label class="l">Formato</label><select><option>Vertical difuminado</option><option>Vertical recortado al hablante</option></select></div>
+            <div><label class="l">Calidad</label><select><option>1080p</option><option>720p rápido</option></select></div>
+            <div><label class="sw"><input type="checkbox" checked> Subtítulos</label></div>
+            <div><label class="sw"><input type="checkbox"> Emojis</label></div>
+            <div><label class="sw"><input type="checkbox" checked> Portada IA con frase</label></div>
+          </div></div></details>
+          <details class="grupo"><summary>C · Originalidad para TikTok <span>Narrador IA, remezcla y audio</span></summary><div class="in"><div class="grid">
+            <div><label class="sw"><input type="checkbox"> Narrador IA</label></div>
+            <div><label class="sw"><input type="checkbox"> Remezcla visual</label></div>
+            <div><label class="l">Doblaje</label><select><option>Idioma original</option><option>Inglés</option></select></div>
+          </div></div></details>
+          <details class="pl"><summary>Narrador realista con emociones (ElevenLabs, opcional)</summary><div class="fila" style="margin-top:8px"><input type="text" placeholder="Clave de ElevenLabs" style="flex:1 1 240px"><button class="btn">Guardar clave</button></div></details>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- ================= SISTEMA ================= -->
+    <section class="vista contenido" data-vista="sistema">
+      <div class="principal">
+        <div class="card"><h3>Horario, ritmo y automatización</h3><div class="in">
+          <div class="grid" style="margin-top:8px">
+            <div><label class="l">Pausa entre subidas (min)</label><div class="fila"><input type="number" value="20" aria-label="Mínimo" style="flex:1"><input type="number" value="45" aria-label="Máximo" style="flex:1"></div></div>
+            <div><label class="l">Intentos máx.</label><input type="number" value="3"></div>
+            <div><label class="l">Radar reciente máx. (min)</label><input type="number" value="60"></div>
+            <div><label class="l">Tiempo subida est. (min)</label><input type="number" value="2.5"></div>
+            <div><label class="l">Navegador</label><select><option>Automático (Brave › Chrome › Edge)</option></select></div>
+            <div><label class="l">Optimización RAM</label><select><option>Automática</option><option>Forzar ahorro máximo</option><option>Desactivada</option></select></div>
+          </div>
+          <div class="fila" style="margin-top:12px"><label class="sw"><input type="checkbox" checked> Radar PC → cola</label><label class="sw"><input type="checkbox"> Radar nube → cola</label><label class="sw"><input type="checkbox" checked> Navegador oculto</label></div>
+          <div class="tabla" style="margin-top:14px"><table><thead><tr><th>Cuenta</th><th>Intervalo</th><th>Horario</th><th>Límite</th><th>Hoy / cola</th><th>Fin estimado</th></tr></thead>
+            <tbody><tr><td>TikTok Clips</td><td class="mono">45–90 min</td><td class="mono">08:00–23:00</td><td>6</td><td>4 / 5</td><td class="mono">mañana 10:30</td></tr>
+            <tr><td>YouTube Shorts</td><td class="mono">60 min</td><td class="mono">09:00–22:00</td><td>5</td><td>3 / 4</td><td class="mono">hoy 21:40</td></tr></tbody></table></div>
+        </div></div>
+        <div class="fila" style="align-items:stretch">
+          <div class="card" style="flex:1 1 320px"><h3>Servidor GPU remoto (Colab)</h3><div class="in" style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            <div><label class="l">URL del túnel Cloudflare</label><input type="url" placeholder="https://…trycloudflare.com"></div>
+            <div><label class="l">Contraseña (celda 4)</label><input type="text"></div>
+            <label class="sw"><input type="checkbox" checked> Editar en esta PC si Colab se desconecta</label>
+            <div class="fila"><button class="btn p">Guardar y probar</button><span class="est ok">Conectado · T4</span></div>
+          </div></div>
+          <div class="card" style="flex:1 1 320px"><h3>Avisos WhatsApp y correo</h3><div class="in" style="margin-top:8px">
+            <label class="sw"><input type="checkbox" checked> Activar avisos</label>
+            <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));margin-top:6px">
+              <label class="sw"><input type="checkbox" checked> Cola y retiros</label><label class="sw"><input type="checkbox"> Inicio de subida</label><label class="sw"><input type="checkbox" checked> Publicadas</label><label class="sw"><input type="checkbox" checked> Errores y sesión</label><label class="sw"><input type="checkbox" checked> Estado de Lives</label><label class="sw"><input type="checkbox"> Sistema y Colab</label>
+            </div>
+            <div class="fila" style="margin-top:10px"><label class="l" style="margin:0">Agrupar cada (min)</label><input type="number" value="15" style="max-width:90px"><button class="btn p">Guardar avisos</button></div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ================= MODALES ================= -->
+<dialog id="dlg-manual" aria-labelledby="t-manual">
+  <header><h3 id="t-manual">Subir manual</h3><button class="btn s" data-cerrar aria-label="Cerrar">✕</button></header>
+  <div class="db">
+    <div class="drop"><b>Arrastra tus videos aquí</b><br>MP4 o MOV · hasta 4 GiB<br><button class="btn s" style="margin-top:8px">Elegir archivos</button></div>
+    <div><label class="l">Publicar en</label><div class="chips"><button class="chip" aria-pressed="true">TikTok Clips</button><button class="chip" aria-pressed="false">YouTube Shorts</button><button class="chip" aria-pressed="false">Facebook Reels</button></div></div>
+    <div><label class="l">Descripción y hashtags</label><textarea placeholder="Vacío = nombre del archivo"></textarea></div>
+    <div class="fila"><label class="sw"><input type="radio" name="cuando" checked> Ahora</label><label class="sw"><input type="radio" name="cuando"> Al siguiente turno de la cola</label></div>
+  </div>
+  <footer><button class="btn" data-cerrar>Cancelar</button><button class="btn p">↑ Subir</button></footer>
+</dialog>
+
+<dialog id="dlg-cookies" aria-labelledby="t-cookies">
+  <header><h3 id="t-cookies">Cookies de descarga</h3><button class="btn s" data-cerrar aria-label="Cerrar">✕</button></header>
+  <div class="db">
+    <b>YouTube automático (recomendado)</b>
+    <span class="mute">Sin conectar. Pulsa «Conectar» e inicia sesión una vez.</span>
+    <div class="fila"><button class="btn p">Conectar YouTube</button><button class="btn">Renovar ahora</button></div>
+    <span class="mute">O carga un archivo de cookies (.txt Netscape o .json) para YouTube, Twitch, Kick o TikTok:</span>
+    <div class="fila"><select style="max-width:160px"><option>Esta PC</option><option>Colab</option></select><button class="btn">Elegir archivo</button><button class="btn peligro">Borrar</button></div>
+  </div>
+  <footer><button class="btn" data-cerrar>Cerrar</button></footer>
+</dialog>
+
+<dialog id="dlg-revisar" aria-labelledby="t-revisar">
+  <header><h3 id="t-revisar">Revisar antes de publicar</h3><button class="btn s" data-cerrar aria-label="Cerrar">✕</button></header>
+  <div class="db">
+    <div class="fila" style="align-items:flex-start"><div class="thumb" style="width:120px;height:200px"></div>
+      <div style="flex:1 1 220px;display:flex;flex-direction:column;gap:8px"><label class="l">Texto de publicación</label><textarea>Reacción final del torneo #twitch #clips</textarea><span class="mute">TikTok Clips · 0:58 · 1080×1920</span><button class="btn s">Comprobar archivo</button></div></div>
+  </div>
+  <footer><button class="btn peligro">Quitar de la cola</button><button class="btn" data-cerrar>Cancelar</button><button class="btn p">Guardar</button></footer>
+</dialog>
+
+<script>
+const titulos={cola:'Cola y actividad',anadir:'Añadir videos',cuentas:'Cuentas y reglas',edicion:'Edición IA',sistema:'Ritmo, Colab y avisos'};
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',x===b));
+  document.querySelectorAll('.vista').forEach(v=>v.classList.toggle('on',v.dataset.vista===b.dataset.v));
+  document.getElementById('titulo').textContent=titulos[b.dataset.v];
+}));
+document.querySelectorAll('.selector button').forEach(b=>b.addEventListener('click',()=>{
+  document.body.dataset.tema=b.dataset.t;
+  document.querySelectorAll('.selector button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+}));
+document.querySelectorAll('[data-abrir]').forEach(b=>b.addEventListener('click',()=>document.getElementById(b.dataset.abrir).showModal()));
+document.querySelectorAll('[data-cerrar]').forEach(b=>b.addEventListener('click',()=>b.closest('dialog').close()));
+document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>c.setAttribute('aria-pressed',c.getAttribute('aria-pressed')!=='true')));
+</script>
+</body>
+</html>

@@ -46,6 +46,7 @@ CONFIG_DEFECTO = {
     "max_intentos": 3,
     "preset": NOMBRE_CALIDAD,  # preset de Smart Split si la regla no dice otro
     "modo_cola": "alternar",
+    "subida_manual": False,  # True = el bot edita y guarda; cada clip se publica solo al pulsar "Subir ahora"
     "flujo_continuo_v1": True,
     "estimacion_subida_min": 3.0,  # estimación del tiempo de transferencia/publicación
     "proxima_global": 0.0,    # conserva la pausa general si se reinicia la app
@@ -271,6 +272,8 @@ class Motor:
             return 'El bot está en pausa; no empezará otra tarea. La que está en curso puede terminar.'
         if self.cfg['modo_cola'] == 'solo_preparar':
             return 'Solo editar y guardar: no voy a publicar hasta que cambies el modo.'
+        if self.cfg.get('subida_manual'):
+            return 'Subida manual: edito y guardo los clips; cada uno se publica cuando pulses "Subir ahora".'
         prefijo = ('Primero termino los videos pendientes de edición. '
                    if self.cfg['modo_cola'] == 'preparar_primero' else '')
         return prefijo + 'Las subidas esperan el intervalo y el horario elegidos en cada cuenta.'
@@ -496,7 +499,9 @@ class Motor:
                     return True
             else:
                 self._despertar_prep.set()
-            if modo == 'solo_preparar' or self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares']):
+            manual_listo = bool(self.cfg.get('subida_manual')) and any(
+                s.get('adelantada') for s in self.db.subidas_pendientes())
+            if not manual_listo and (modo == 'solo_preparar' or self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])):
                 if not self._edicion_actual:
                     self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
                                       else 'Preparando primero: esperando el reintento de un video.')
@@ -1301,6 +1306,8 @@ class Motor:
             return 'Bot en pausa. Pulsa Lanzar subidas guardadas para activarlo.'
         if self.cfg['modo_cola'] == 'solo_preparar':
             return 'Solo editar y guardar. Pulsa Lanzar subidas guardadas para publicar.'
+        if self.cfg.get('subida_manual') and not s.get('adelantada'):
+            return 'Subida manual: pulsa "Subir ahora" en este clip para publicarlo.'
         if self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True, excluir_populares=not self.cfg['radar_populares']):
             return 'Esperando a terminar toda la edición. Lanzar subidas guardadas permite publicar lo que ya está listo.'
         c = cuenta or self.db.cuenta(s['cuenta_id'])
@@ -1336,7 +1343,10 @@ class Motor:
         if ahora < self._libre_global:
             return None
         cuentas = {c["id"]: c for c in self.db.cuentas()}
+        manual = bool(self.cfg.get('subida_manual'))
         for s in self.db.subidas_listas():
+            if manual and not s.get('adelantada'):
+                continue  # Subida manual: solo sale lo que el usuario mandó con "Subir ahora".
             c = cuentas.get(s["cuenta_id"])
             if not c or (c["proxima_libre"] > ahora and not s.get('adelantada')) or navegador.ocupado(self.perfil(c)):
                 continue

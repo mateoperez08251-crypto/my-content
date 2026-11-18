@@ -473,7 +473,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         upscale_python="", upscale_model="", moment_focus="general", context_before_seconds=0, moment_query="",
                         commentary_mode="off", commentary_style="gancho", commentary_voice="male", voice_config=None,
                         cold_open=False, jump_cuts=False, auto_split=False, ambient_music="off", clean_vocals=False,
-                        auto_thumbnail="off", strip_metadata=True, auto_hashtags=True, politicas_tiktok="off"):
+                        auto_thumbnail="off", strip_metadata=True, auto_hashtags=True, politicas_tiktok="off",
+                        thumbnail_engine="clasico"):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import bisect
@@ -523,6 +524,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     cold_open, jump_cuts, auto_split, ambient_music, clean_vocals = validate_remix_options(
         cold_open, jump_cuts, auto_split, ambient_music, clean_vocals)
     auto_thumbnail = validate_thumbnail_options(auto_thumbnail)
+    from portada_generativa import validate_engine as _validar_motor_portada
+    thumbnail_engine = _validar_motor_portada(thumbnail_engine)
     if not isinstance(strip_metadata, bool):
         raise ValueError("El borrado de metadatos debe ser verdadero o falso.")
     if commentary_mode != "off" and commentary_voice.startswith("voice:"):
@@ -682,6 +685,28 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             _fn_activar_clip = globals().get("_activar_clip_runtime")
             if callable(_fn_activar_clip):
                 _fn_activar_clip(idx, p0, tramo, "Siguiendo caras y hablantes")
+            # Miniatura inmediata (fotograma centrado) para que el vaso "Procesando" no salga vacío;
+            # luego se reemplaza por el fotograma ya encuadrado.
+            try:
+                _live_dir0 = globals().get("LIVE_PREVIEW_DIR")
+                _fn_thumb0 = globals().get("_actualizar_thumb_clip_runtime")
+                if _live_dir0 and callable(_fn_thumb0) and hasattr(clip, "get_frame"):
+                    fr0 = clip.get_frame(max(0.0, min(float(st) + raw_dur * 0.25, float(et) - 0.05)))
+                    if getattr(fr0, "ndim", 0) == 3:
+                        h0, w0 = fr0.shape[:2]
+                        if final_h >= final_w and w0 > h0 * 9 / 16:
+                            cw0 = max(2, int(h0 * 9 / 16))
+                            x0 = (w0 - cw0) // 2
+                            fr0 = fr0[:, x0:x0 + cw0]
+                        tw0 = 360 if final_h >= final_w else 640
+                        th0 = max(2, int(fr0.shape[0] * tw0 / max(fr0.shape[1], 1)))
+                        fr0 = cv2.resize(np.ascontiguousarray(fr0[:, :, :3]), (tw0, th0), interpolation=cv2.INTER_AREA)
+                        os.makedirs(_live_dir0, exist_ok=True)
+                        p_snap0 = os.path.join(_live_dir0, f"preview_clip_{parte_num}_ini.jpg")
+                        if cv2.imwrite(p_snap0, cv2.cvtColor(fr0, cv2.COLOR_RGB2BGR), [int(cv2.IMWRITE_JPEG_QUALITY), 82]):
+                            _fn_thumb0(idx, p_snap0)
+            except Exception:
+                pass
 
             # 3. Reencuadre: caras + hablante activo (+ pantalla dividida automática opcional)
             usar_split_auto = bool(auto_split and video_format == "vertical" and encuadre in ("caras", "zoom_dinamico"))
@@ -1124,8 +1149,22 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     )
                     if getattr(best_thumb_frame, "ndim", 0) == 3:
                         thumb_candidate_path = os.path.splitext(out_name)[0] + "_miniatura.jpg"
+                        portada_base = None
+                        if thumbnail_engine == "qwen":
+                            # Escena nueva con los mismos personajes (Qwen-Image-Edit en GPU); si no, la clásica.
+                            import portada_generativa
+                            if portada_generativa.disponible():
+                                write_progress(f"Creando portada IA con los personajes · clip {parte_num}...", p0 + int(tramo * 0.36))
+                                _get_ref = lambda tc: subclip.get_frame(max(0.0, min(raw_dur - 1e-3, float(tc))))
+                                refs_portada = portada_generativa.elegir_referencias(_get_ref, raw_dur, principal=best_thumb_frame)
+                                portada_base = portada_generativa.generar(
+                                    refs_portada, info.get("titulo", ""), str(quote_meta.get("quote") or ""),
+                                    texto_thumb, motor_ia, semilla=1000 + int(parte_num),
+                                )
+                            else:
+                                print("Portada IA: sin GPU de 14 GB o más; se usa la portada clásica.")
                         thumb_rgb, saved_jpg = render_viral_thumbnail(
-                            editar_portada_9_16(best_thumb_frame), quote_meta,
+                            portada_base if portada_base is not None else editar_portada_9_16(best_thumb_frame), quote_meta,
                             out_w=PORTADA_W, out_h=PORTADA_H, jpg_path=thumb_candidate_path
                         )
                         thumb_jpg_path = saved_jpg or ""
@@ -1383,7 +1422,8 @@ def main(argv):
                 auto_thumbnail=cfg.get("auto_thumbnail", "off"),
                 strip_metadata=cfg.get("strip_metadata", True),
                 auto_hashtags=cfg.get("auto_hashtags", True),
-                politicas_tiktok=cfg.get("politicas_tiktok", "alto"))
+                politicas_tiktok=cfg.get("politicas_tiktok", "alto"),
+                thumbnail_engine=cfg.get("thumbnail_engine", "clasico"))
         except InicioFueraDeVideo as e:
             print("RESULT_ERROR:" + json.dumps({"code": "inicio_fuera_video"}))
             write_progress(f"Error: {e}", -1)

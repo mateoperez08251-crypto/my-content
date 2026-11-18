@@ -84,6 +84,18 @@ class Validation(unittest.TestCase):
         self.assertEqual(live.youtube_url(' ' + URL + ' '), URL)
         self.assertEqual(live.youtube_url('https://youtu.be/example'), 'https://youtu.be/example')
 
+    def test_live_url_accepts_twitch_kick_tiktok(self):
+        for url, clave in [('https://www.twitch.tv/canal', 'twitch'), ('https://kick.com/canal', 'kick'),
+                           ('https://www.tiktok.com/@user/live', 'tiktok'), ('https://youtu.be/x', 'youtube')]:
+            with self.subTest(url=url):
+                self.assertEqual(live.live_url(url), url)
+                self.assertEqual(live.plataforma(url), clave)
+        for url in ['http://twitch.tv/x', 'https://kick.com.evil.example/x', 'https://evil.com/twitch.tv']:
+            with self.subTest(url=url), self.assertRaises(live.LiveError):
+                live.live_url(url)
+        with self.assertRaises(live.LiveError):
+            live.youtube_url('https://www.twitch.tv/canal')
+
     def test_integer_limits_reject_nonfinite_and_bool(self):
         for value in [True, 1.5, float('nan'), float('inf'), None, 9, 301]:
             with self.subTest(value=value), self.assertRaises(live.LiveError):

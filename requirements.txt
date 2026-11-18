@@ -1,6 +1,7 @@
 # moviepy 2.x obligatorio: editor.py y smart_editor.py usan la API nueva (subclipped/with_*).
 moviepy>=2.0,<3
-yt-dlp[default,deno]
+# curl-cffi: Kick y TikTok exigen suplantar navegador (impersonate).
+yt-dlp[default,deno,curl-cffi]
 playwright
 psutil>=5.9
 requests
