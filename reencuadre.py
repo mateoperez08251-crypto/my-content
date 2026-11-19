@@ -770,3 +770,263 @@ def estado_en(tiempos, centros, modos, pares, t):
     modo = modos[k] if modos and k < len(modos) else "simple"
     par = pares[k] if pares and k < len(pares) else None
     return centros[k], modo, par
+
+
+STREAMER_CORNERS = ("auto", "top_left", "top_right", "bottom_left", "bottom_right")
+STREAMER_GAME_MODES = ("zoom", "completo")
+
+
+def validate_streamer_options(corner="auto", game_mode="zoom", cam_ratio=0.38):
+    """Valida `(streamer_corner, streamer_game_mode, streamer_cam_ratio)`."""
+    c = str(corner or "auto").strip().lower()
+    if c not in STREAMER_CORNERS:
+        raise ValueError("Esquina de cámara no válida. Usa auto, top_left, top_right, bottom_left o bottom_right.")
+    gm = str(game_mode or "zoom").strip().lower()
+    if gm not in STREAMER_GAME_MODES:
+        raise ValueError("Modo de juego no válido. Elige zoom o completo.")
+    if isinstance(cam_ratio, bool):
+        raise ValueError("La altura de cámara debe ser un número entre 0.28 y 0.48.")
+    try:
+        r = float(cam_ratio)
+    except (ValueError, TypeError):
+        raise ValueError("La altura de cámara debe ser un número entre 0.28 y 0.48.") from None
+    if not math.isfinite(r):
+        raise ValueError("La altura de cámara debe ser un número finito.")
+    if r > 1.0:
+        r = r / 100.0
+    r = max(0.28, min(0.48, round(r, 3)))
+    return c, gm, r
+
+
+def _esquina_por_punto(cx_norm, cy_norm):
+    horiz = "left" if cx_norm < 0.5 else "right"
+    vert = "top" if cy_norm < 0.5 else "bottom"
+    return f"{vert}_{horiz}"
+
+
+def _caja_esquina_por_defecto(orig_w, orig_h, esquina):
+    """Caja limpia de respaldo (28% ancho x 30% alto) en la esquina indicada."""
+    bw = max(64, int(round(orig_w * 0.28)))
+    bh = max(64, int(round(orig_h * 0.30)))
+    x = 0 if esquina.endswith("left") else max(0, orig_w - bw)
+    y = 0 if esquina.startswith("top") else max(0, orig_h - bh)
+    return (x, y, bw, bh)
+
+
+def _refinar_bordes_webcam(frames_bgr, orig_w, orig_h, esquina, face_box=None):
+    """Ajusta el rectángulo de la facecam buscando bordes rectos estáticos en la esquina.
+
+    En OBS/Twitch/Kick la cámara del streamer permanece fija en un rectángulo de
+    esquina mientras el gameplay se mueve; la mediana temporal conserva los bordes
+    del marco de la webcam y atenúa el movimiento del juego.
+    """
+    if cv2 is None or not frames_bgr:
+        return _caja_esquina_por_defecto(orig_w, orig_h, esquina)
+
+    ih, iw = frames_bgr[0].shape[:2]
+    sx, sy = orig_w / max(iw, 1), orig_h / max(ih, 1)
+    # Mediana temporal en escala de grises -> resalta el marco fijo de la webcam
+    grises = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) if f.ndim == 3 else f for f in frames_bgr]
+    med = np.median(np.stack(grises, axis=0), axis=0).astype(np.uint8)
+    gx = np.abs(cv2.Sobel(med, cv2.CV_32F, 1, 0, ksize=3))
+    gy = np.abs(cv2.Sobel(med, cv2.CV_32F, 0, 1, ksize=3))
+
+    # Límites plausibles para una webcam en esquina: 14%..46% del ancho y 16%..50% del alto
+    min_w, max_w = int(iw * 0.14), int(iw * 0.46)
+    min_h, max_h = int(ih * 0.16), int(ih * 0.50)
+
+    if face_box is not None:
+        fx, fy, fw, fh = face_box  # en píxeles de `iw, ih`
+        fcx, fcy = fx + fw * 0.5, fy + fh * 0.5
+        # Caja mínima que rodea cabeza y hombros sin recortar al streamer
+        pad_x = max(fw * 1.15, iw * 0.08)
+        pad_top = max(fh * 0.65, ih * 0.05)
+        pad_bot = max(fh * 1.15, ih * 0.08)
+        rx1 = max(0, int(round(fcx - pad_x)))
+        rx2 = min(iw, int(round(fcx + pad_x)))
+        ry1 = max(0, int(round(fcy - pad_top)))
+        ry2 = min(ih, int(round(fcy + pad_bot)))
+        # Si está muy pegado al borde del frame, anclar al borde de la esquina
+        if esquina.endswith("left") and rx1 < iw * 0.07:
+            rx1 = 0
+        if esquina.endswith("right") and (iw - rx2) < iw * 0.07:
+            rx2 = iw
+        if esquina.startswith("top") and ry1 < ih * 0.07:
+            ry1 = 0
+        if esquina.startswith("bottom") and (ih - ry2) < ih * 0.07:
+            ry2 = ih
+    else:
+        rx1 = 0 if esquina.endswith("left") else iw - int(iw * 0.28)
+        rx2 = int(iw * 0.28) if esquina.endswith("left") else iw
+        ry1 = 0 if esquina.startswith("top") else ih - int(ih * 0.30)
+        ry2 = int(ih * 0.30) if esquina.startswith("top") else ih
+
+    # Refinar el borde interior vertical y horizontal buscando el pico fuerte de gradiente recto
+    try:
+        y_lo, y_hi = max(0, ry1), min(ih, max(ry1 + 8, ry2))
+        x_lo, x_hi = max(0, rx1), min(iw, max(rx1 + 8, rx2))
+        if esquina.endswith("left"):
+            s_a = max(min_w, int(x_hi * 0.72))
+            s_b = min(max_w, max(s_a + 4, int(x_hi * 1.35)))
+            if s_b > s_a + 2:
+                perfil_x = gx[y_lo:y_hi, s_a:s_b].mean(axis=0)
+                if perfil_x.size and float(perfil_x.max()) > max(28.0, float(np.median(perfil_x)) * 2.4):
+                    rx2 = s_a + int(np.argmax(perfil_x))
+        else:
+            s_b = min(iw - min_w, int(x_lo + (iw - x_lo) * 0.28))
+            s_a = max(iw - max_w, int(x_lo - (iw - x_lo) * 0.35))
+            if s_b > s_a + 2:
+                perfil_x = gx[y_lo:y_hi, s_a:s_b].mean(axis=0)
+                if perfil_x.size and float(perfil_x.max()) > max(28.0, float(np.median(perfil_x)) * 2.4):
+                    rx1 = s_a + int(np.argmax(perfil_x))
+
+        x_lo, x_hi = max(0, rx1), min(iw, max(rx1 + 8, rx2))
+        if esquina.startswith("top"):
+            s_a = max(min_h, int(y_hi * 0.72))
+            s_b = min(max_h, max(s_a + 4, int(y_hi * 1.35)))
+            if s_b > s_a + 2:
+                perfil_y = gy[s_a:s_b, x_lo:x_hi].mean(axis=1)
+                if perfil_y.size and float(perfil_y.max()) > max(28.0, float(np.median(perfil_y)) * 2.4):
+                    ry2 = s_a + int(np.argmax(perfil_y))
+        else:
+            s_b = min(ih - min_h, int(y_lo + (ih - y_lo) * 0.28))
+            s_a = max(ih - max_h, int(y_lo - (ih - y_lo) * 0.35))
+            if s_b > s_a + 2:
+                perfil_y = gy[s_a:s_b, x_lo:x_hi].mean(axis=1)
+                if perfil_y.size and float(perfil_y.max()) > max(28.0, float(np.median(perfil_y)) * 2.4):
+                    ry1 = s_a + int(np.argmax(perfil_y))
+    except Exception:
+        pass
+
+    bw = max(min_w, min(max_w, rx2 - rx1))
+    bh = max(min_h, min(max_h, ry2 - ry1))
+    rx1 = max(0, min(rx1, iw - bw))
+    ry1 = max(0, min(ry1, ih - bh))
+    x_out = max(0, int(round(rx1 * sx)))
+    y_out = max(0, int(round(ry1 * sy)))
+    w_out = max(64, min(orig_w - x_out, int(round(bw * sx))))
+    h_out = max(64, min(orig_h - y_out, int(round(bh * sy))))
+    return (x_out, y_out, w_out, h_out)
+
+
+def detectar_facecam_en_frames(frames_bgr, orig_w, orig_h, esquina="auto", detector=None, haar=None):
+    """Detecta la cámara del streamer en esquina a partir de fotogramas BGR muestreados.
+
+    Devuelve `{"esquina", "box": (x, y, w, h), "face_cx", "face_cy", "confianza"}` o `None`
+    si `esquina == "auto"` y no se detecta una webcam persistente en las esquinas.
+    """
+    esquina_norm, _, _ = validate_streamer_options(esquina, "zoom", 0.38)
+    if not frames_bgr:
+        if esquina_norm == "auto":
+            return None
+        box = _caja_esquina_por_defecto(orig_w, orig_h, esquina_norm)
+        return {
+            "esquina": esquina_norm,
+            "box": box,
+            "face_cx": box[0] + box[2] * 0.5,
+            "face_cy": box[1] + box[3] * 0.42,
+            "confianza": 0.5,
+        }
+
+    ih, iw = frames_bgr[0].shape[:2]
+    sx, sy = orig_w / max(iw, 1), orig_h / max(ih, 1)
+    if detector is None and haar is None and cv2 is not None:
+        detector = _crear_detector(iw, ih)
+        haar = _haar()
+
+    # Recolectar rostros situados en alguna de las 4 zonas de esquina
+    por_esquina = {k: [] for k in ("top_left", "top_right", "bottom_left", "bottom_right")}
+    for frame in frames_bgr:
+        caras = _detectar(detector, haar, frame) if (detector is not None or haar is not None) else []
+        for cx, cy, fw, fh, *_ in caras:
+            nx, ny = cx / max(iw, 1), cy / max(ih, 1)
+            # Una webcam de esquina vive en el tercio/margen exterior (no en el puro centro)
+            en_borde_x = nx <= 0.36 or nx >= 0.64
+            en_borde_y = ny <= 0.42 or ny >= 0.58
+            if not (en_borde_x and en_borde_y):
+                continue
+            # Descartar caras gigantes que llenan media pantalla (no son facecam de esquina)
+            if fw > iw * 0.32 or fh > ih * 0.46:
+                continue
+            q = _esquina_por_punto(nx, ny)
+            if esquina_norm != "auto" and q != esquina_norm:
+                continue
+            por_esquina[q].append((cx - fw * 0.5, cy - fh * 0.5, fw, fh, cx, cy))
+
+    mejor_q, mejor_lista = None, []
+    for q, lista in por_esquina.items():
+        if len(lista) > len(mejor_lista):
+            mejor_q, mejor_lista = q, lista
+
+    min_hits = max(2, int(math.ceil(len(frames_bgr) * 0.25)))
+    if mejor_q and len(mejor_lista) >= min_hits:
+        arr = np.array(mejor_lista, dtype=np.float32)
+        # Verificar que el rostro permanezca relativamente fijo en esa esquina (no es un personaje del juego corriendo)
+        std_x = float(np.std(arr[:, 4])) / max(iw, 1)
+        std_y = float(np.std(arr[:, 5])) / max(ih, 1)
+        if std_x <= 0.085 and std_y <= 0.085 or esquina_norm != "auto":
+            fx = float(np.median(arr[:, 0]))
+            fy = float(np.median(arr[:, 1]))
+            fw = float(np.median(arr[:, 2]))
+            fh = float(np.median(arr[:, 3]))
+            fcx = float(np.median(arr[:, 4])) * sx
+            fcy = float(np.median(arr[:, 5])) * sy
+            box = _refinar_bordes_webcam(frames_bgr, orig_w, orig_h, mejor_q, face_box=(fx, fy, fw, fh))
+            return {
+                "esquina": mejor_q,
+                "box": box,
+                "face_cx": fcx,
+                "face_cy": fcy,
+                "confianza": round(min(1.0, len(mejor_lista) / max(len(frames_bgr), 1)), 3),
+            }
+
+    if esquina_norm != "auto":
+        box = _refinar_bordes_webcam(frames_bgr, orig_w, orig_h, esquina_norm, face_box=None)
+        return {
+            "esquina": esquina_norm,
+            "box": box,
+            "face_cx": box[0] + box[2] * 0.5,
+            "face_cy": box[1] + box[3] * 0.42,
+            "confianza": 0.5,
+        }
+    return None
+
+
+def detectar_facecam_esquina(video_path, t_ini=0.0, t_fin=None, esquina="auto", max_muestras=12):
+    """Muestrea el video en `[t_ini, t_fin]` y ubica la cámara de esquina del streamer."""
+    esquina_norm, _, _ = validate_streamer_options(esquina, "zoom", 0.38)
+    if cv2 is None:
+        return None
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None
+    try:
+        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        dur_total = total_frames / max(fps, 1.0) if total_frames > 0 else 0.0
+        if orig_w <= 0 or orig_h <= 0:
+            return None
+        # Solo tiene sentido recortar facecam de esquina en videos horizontales/cuadrados
+        if orig_w < orig_h * 1.15 and esquina_norm == "auto":
+            return None
+        a = max(0.0, float(t_ini or 0.0))
+        b = float(t_fin) if t_fin is not None else max(a + 1.0, dur_total)
+        if b <= a:
+            b = a + 1.0
+        n = max(4, min(int(max_muestras), 18))
+        tiempos = np.linspace(a + (b - a) * 0.05, b - (b - a) * 0.05, n)
+        aw = min(orig_w, ANCHO_ANALISIS_CARAS)
+        ah = max(2, int(round(orig_h * aw / orig_w)))
+        frames = []
+        for ts in tiempos:
+            cap.set(cv2.CAP_PROP_POS_MSEC, float(ts) * 1000.0)
+            ok, fr = cap.read()
+            if ok and fr is not None:
+                if fr.shape[1] != aw or fr.shape[0] != ah:
+                    fr = cv2.resize(fr, (aw, ah), interpolation=cv2.INTER_AREA)
+                frames.append(fr)
+        return detectar_facecam_en_frames(frames, orig_w, orig_h, esquina=esquina_norm)
+    finally:
+        cap.release()

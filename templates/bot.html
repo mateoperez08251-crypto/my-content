@@ -1242,6 +1242,60 @@ body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-pista{background:var(--rell
 body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-x:hover:not(:disabled){background:var(--tinta);color:#0E0F11}
 body.tema-kinetik.tema-kinetik-oscuro ::-webkit-scrollbar-thumb{background:rgba(234,229,217,.28)}
 
+
+/* === Selector visual con vistas previas 9:16 (Streamer y Reacciones IA) === */
+.visual-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-top:10px}
+.visual-card{
+  display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:8px;padding:12px;border-radius:12px;
+  text-align:left;white-space:normal;text-transform:none;letter-spacing:0;overflow:hidden;cursor:pointer;
+  background:var(--panel-solid);border:1.5px solid var(--borde-luz);color:var(--texto);transition:transform .15s ease,border-color .15s ease
+}
+.visual-card:hover:not(:disabled){border-color:var(--acento);transform:translateY(-2px)}
+.visual-card.activo{border-color:var(--acento);box-shadow:0 0 0 2px var(--acento-suave)}
+.visual-card img{display:block;width:auto;max-width:100%;height:224px;aspect-ratio:9/16;margin:0 auto;object-fit:cover;border-radius:8px;background:#0b0d12;border:1.5px solid var(--borde)}
+.visual-card b{display:block;font:800 13px/1.25 var(--titulo);white-space:normal;text-transform:uppercase;letter-spacing:.02em}
+.visual-card small{display:block;font:500 12px/1.4 var(--cuerpo);color:var(--suave);white-space:normal;text-transform:none}
+body.tema-kinetik .visual-card{border-radius:6px;border:1.5px solid var(--tinta);background:var(--bg);color:var(--tinta)}
+body.tema-kinetik .visual-card:hover:not(:disabled){background:var(--panel-solid);color:var(--tinta);box-shadow:4px 4px 0 rgba(17,18,20,.85)}
+body.tema-kinetik .visual-card.activo{border:2px solid var(--acento);background:var(--panel-solid);color:var(--tinta);box-shadow:5px 5px 0 var(--acento)}
+body.tema-kinetik .visual-card img{border-radius:4px;border:2px solid var(--tinta);box-shadow:3px 3px 0 rgba(17,18,20,.82)}
+body.tema-kinetik.tema-kinetik-oscuro .visual-card{background:var(--panel);color:var(--texto);border-color:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .visual-card:hover:not(:disabled){background:var(--panel-elev);color:var(--texto);border-color:var(--acento);box-shadow:4px 4px 0 rgba(0,0,0,.78)}
+body.tema-kinetik.tema-kinetik-oscuro .visual-card.activo{background:var(--panel-elev);color:var(--texto);border-color:var(--acento);box-shadow:5px 5px 0 var(--acento)}
+body.tema-kinetik.tema-kinetik-oscuro .visual-card small{color:var(--suave)}
+
+
+/* === Módulo 06 · Reacciones IA con Personajes === */
+.reacc-personajes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:10px}
+.reacc-p-card{
+  display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;
+  border:1.5px solid var(--borde-luz);background:var(--panel-solid)
+}
+.reacc-p-card.sel{border-color:var(--acento);box-shadow:0 0 0 2px var(--acento-suave)}
+.reacc-p-card img{width:52px;height:52px;border-radius:10px;object-fit:cover;background:#111214;border:1.5px solid var(--borde-luz);flex-shrink:0}
+.reacc-exp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:10px;margin-top:10px}
+.reacc-exp-slot{
+  display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;border-radius:8px;
+  border:1.5px dashed var(--borde-luz);background:var(--panel-solid);text-align:center
+}
+.reacc-exp-slot img{width:76px;height:76px;border-radius:8px;object-fit:contain;background:#0e0f11;border:1px solid var(--borde)}
+.reacc-exp-slot label{margin:0;font-size:11px;font-weight:700;text-transform:uppercase}
+.reacc-timeline{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.reacc-row{
+  display:grid;grid-template-columns:76px 132px 124px minmax(0,1fr) auto;gap:8px;align-items:center;
+  padding:8px;border-radius:8px;border:1.5px solid var(--borde);background:var(--panel-solid)
+}
+@media (max-width:860px){.reacc-row{grid-template-columns:1fr 1fr}}
+body.tema-kinetik .reacc-p-card,body.tema-kinetik .reacc-exp-slot,body.tema-kinetik .reacc-row{
+  border-radius:6px;border-color:var(--tinta);background:var(--bg);color:var(--tinta)
+}
+body.tema-kinetik .reacc-p-card.sel{border:2px solid var(--acento);box-shadow:4px 4px 0 var(--acento)}
+body.tema-kinetik.tema-kinetik-oscuro .reacc-p-card,
+body.tema-kinetik.tema-kinetik-oscuro .reacc-exp-slot,
+body.tema-kinetik.tema-kinetik-oscuro .reacc-row{
+  background:var(--panel);color:var(--texto);border-color:var(--tinta)
+}
+
 body.app-clip .volver-app{display:none}
 
 /* ===== Animación de Entrada Stop-Motion · My Content Clip ===== */
@@ -1428,6 +1482,9 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
     <button type="button" class="bot-tab" data-num="05" data-vista="sistema" onclick="cambiarPestanaBot('sistema')">
       <i class="ph-duotone ph-cpu"></i> Ritmo, Colab y avisos
     </button>
+    <button type="button" class="bot-tab" data-num="06" data-vista="reacciones" onclick="cambiarPestanaBot('reacciones')">
+      <i class="ph-duotone ph-sparkle"></i> Reacciones IA
+    </button>
   </nav>
   <div class="salud" id="salud" aria-label="Estado del bot"></div>
   <div class="bot-encendido"><label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Bot encendido</label>
@@ -1516,7 +1573,7 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
           <summary><span>B · Encuadre al hablante, calidad, subtítulos y miniatura</span><span class="sub">1080p, seguimiento labial, portada con frase y metadatos</span></summary>
           <div class="grupo-edicion-cuerpo">
             <div class="ajustes">
-              <div><label for="ed-formato">Formato y encuadre</label><select id="ed-formato"><option value="vertical_blur">9:16 · completo + fondo difuminado</option><option value="vertical">9:16 · seguir a quien habla</option><option value="horizontal">16:9 · horizontal</option></select></div>
+              <div><label for="ed-formato">Formato y encuadre</label><select id="ed-formato" onchange="vistaFormatoEdicion()"><option value="vertical_blur">9:16 · completo + fondo difuminado</option><option value="vertical">9:16 · seguir a quien habla</option><option value="vertical_streamer">9:16 · Streamer (cámara arriba + juego abajo)</option><option value="horizontal">16:9 · horizontal</option></select></div>
               <div><label for="ed-calidad">Calidad de exportación</label><select id="ed-calidad"><option value="quality">Calidad máxima · 1080p</option><option value="balanced">Equilibrada · 1080p</option><option value="fast">Rápida · 720p (en Colab sube a 1080p)</option></select></div>
               <div><label for="ed-upscale">Nitidez / escalado</label><select id="ed-upscale"><option value="off">Automático limpio</option><option value="sharpen">Nitidez suave</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN IA (GPU)</option></select></div>
               <div><label for="ed-miniatura">Miniatura 9:16 editada con frase</label><select id="ed-miniatura"><option value="off">Sin miniatura extra</option><option value="cover_and_jpg">Portada en video + JPG con frase</option><option value="jpg_only">Solo imagen JPG con frase</option></select></div>
@@ -1530,6 +1587,25 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
               </select></div>
               <div><label for="ed-fuente">Fuente</label><select id="ed-fuente"><option value="">La del estilo</option><option value="barlow_cond">Barlow Condensed (Kinetik)</option><option value="archivo_black">Archivo Black (editorial)</option><option value="montserrat">Montserrat</option><option value="anton">Anton</option><option value="bebas">Bebas Neue</option><option value="poppins">Poppins</option><option value="bangers">Bangers</option><option value="playfair">Playfair Display</option><option value="nunito">Nunito</option></select></div>
               <div><label for="ed-escala">Tamaño subtítulos (%)</label><input id="ed-escala" type="number" min="50" max="150" value="100"></div>
+            </div>
+            <div id="ed-streamer-opciones" hidden style="margin-top:12px;padding-top:12px;border-top:1px solid var(--borde)">
+              <div class="ajustes">
+                <div><label for="ed-streamer-esquina">Dónde está la cámara del streamer</label><select id="ed-streamer-esquina"><option value="auto">Automático (detectar esquina)</option><option value="top_left">Arriba · Izquierda</option><option value="top_right">Arriba · Derecha</option><option value="bottom_left">Abajo · Izquierda</option><option value="bottom_right">Abajo · Derecha</option></select></div>
+                <div><label for="ed-streamer-modo">Vista del juego / pantalla abajo</label><select id="ed-streamer-modo" onchange="actualizarTarjetasStreamer()"><option value="zoom">Zoom acción (llena todo el ancho)</option><option value="completo">Juego completo (todo el HUD visible)</option></select></div>
+                <div><label for="ed-streamer-altura">Altura de la cámara arriba</label><select id="ed-streamer-altura"><option value="0.34">34% · Más espacio al juego</option><option value="0.38">38% · Equilibrado (recomendado)</option><option value="0.44">44% · Cámara protagonista</option></select></div>
+              </div>
+              <div class="visual-picker" aria-label="Ejemplos visuales del encuadre Streamer">
+                <button type="button" class="visual-card activo" data-streamer-prev="zoom" onclick="elegirModoStreamer('zoom')">
+                  <img src="/static/presets/encuadre_streamer_zoom.webp" loading="lazy" alt="Vista previa Streamer Zoom acción">
+                  <b>Zoom acción · Sin bordes</b>
+                  <small>Cámara del streamer enfocada arriba y centro de acción del juego abajo sin duplicar la cámara.</small>
+                </button>
+                <button type="button" class="visual-card" data-streamer-prev="completo" onclick="elegirModoStreamer('completo')">
+                  <img src="/static/presets/encuadre_streamer_completo.webp" loading="lazy" alt="Vista previa Streamer Juego completo HUD">
+                  <b>Juego completo · HUD 100%</b>
+                  <small>Cámara del streamer arriba y toda la pantalla 16:9 abajo con fondo suave para ver minimapa y marcadores.</small>
+                </button>
+              </div>
             </div>
             <div class="fila" style="margin-top:10px">
               <img id="sub-preview" src="/static/presets/sub_karaoke.webp" width="84" height="126" loading="lazy" alt="Ejemplo del estilo de subtítulos">
@@ -1768,6 +1844,122 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
       </details>
     </section>
   </div>
+
+  <!-- VISTA 6: REACCIONES IA CON PERSONAJES -->
+  <div class="vista-panel" id="vista-reacciones" data-vista-panel="reacciones">
+    <section class="card col-12" id="reacc-personajes-sec">
+      <h2><i class="ph-duotone ph-smiley"></i> Biblioteca de Personajes IA <small>Crea personajes con su voz, personalidad y expresiones</small></h2>
+      <div id="reacc-personajes-lista" class="reacc-personajes-grid"><p class="muted">Cargando personajes…</p></div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--borde)">
+        <div class="fila" style="justify-content:space-between;margin-bottom:8px">
+          <b id="reacc-form-titulo">Crear nuevo personaje</b>
+          <button type="button" class="mini" onclick="nuevoPersonajeReaccion()">+ Nuevo personaje</button>
+        </div>
+        <div class="ajustes">
+          <div><label for="rp-nombre">Nombre del personaje</label><input id="rp-nombre" maxlength="60" placeholder="Ej.: El Crítico / Pana Hype"></div>
+          <div><label for="rp-personalidad">Personalidad</label><select id="rp-personalidad"><option value="hype">Pana Hype / Gamer</option><option value="sarcastico">Crítico sarcástico</option><option value="analitico">Analista experto</option><option value="comediante">Comediante espontáneo</option><option value="misterioso">Narrador intrigante</option></select></div>
+          <div><label for="rp-voz">Voz del personaje</label><select id="rp-voz"><option value="male">Voz neuronal masculina</option><option value="female">Voz neuronal femenina</option></select></div>
+          <div><label for="rp-motor">Motor de animación</label><select id="rp-motor"><option value="expresivo">Expresivo Pro (rápido PC / Colab)</option><option value="lipsync">Lip-Sync IA realista (Colab GPU)</option></select></div>
+          <div><label for="rp-color">Color acento</label><input id="rp-color" type="color" value="#FF4D00" style="min-height:38px;padding:3px"></div>
+          <div><label for="rp-intensidad">Intensidad (1-5)</label><input id="rp-intensidad" type="number" min="1" max="5" value="4"></div>
+        </div>
+        <div class="ajustes" style="margin-top:8px">
+          <div><label for="rp-muletillas">Muletillas o estilo de habla (opcional)</label><input id="rp-muletillas" maxlength="220" placeholder="Ej.: ¡Brutal!, espera un segundo, qué locura"></div>
+          <div><label for="rp-prompt">Instrucciones extra de personalidad (opcional)</label><input id="rp-prompt" maxlength="600" placeholder="Ej.: Reacciona como comentarista deportivo latino"></div>
+        </div>
+        <div class="fila" style="margin-top:10px">
+          <button type="button" class="prim" onclick="guardarPersonajeReaccion()">Guardar personaje</button>
+          <button type="button" id="rp-btn-probar-voz" onclick="probarVozPersonaje()">🔊 Probar voz</button>
+          <button type="button" id="rp-btn-gen-exp" onclick="generarExpresionesPersonaje()">✨ Generar 5 expresiones (Colab GPU)</button>
+          <span id="rp-estado" class="muted" aria-live="polite" style="flex:2"></span>
+        </div>
+        <div id="rp-expresiones-wrap" hidden style="margin-top:12px">
+          <p class="muted" style="margin:0 0 6px">Imágenes del personaje (sube al menos <b>Neutral</b>; las demás expresiones son opcionales o generables con IA en Colab GPU):</p>
+          <div id="rp-expresiones-grid" class="reacc-exp-grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card col-12" id="reacc-estudio-sec">
+      <h2><i class="ph-duotone ph-film-strip"></i> Crear Video-Reacción IA <small>Audio + Visión · Guion editable · Envío directo a tus cuentas</small></h2>
+      <div class="ajustes">
+        <div><label for="rr-personaje">1. Personaje que reacciona</label><select id="rr-personaje"></select></div>
+        <div><label for="rr-clip-cola">2A. Elegir clip ya en cola</label><select id="rr-clip-cola"><option value="">— O sube archivo / pega URL —</option></select></div>
+        <div><label for="rr-archivo">2B. Subir video local</label><input id="rr-archivo" type="file" accept="video/*"></div>
+        <div><label for="rr-url">2C. O pegar URL (YouTube, TikTok, Twitch, Kick)</label><input id="rr-url" placeholder="https://..."></div>
+      </div>
+
+      <div class="ajustes" style="margin-top:10px">
+        <div><label for="rr-modo">Cómo interactúa</label><select id="rr-modo"><option value="mixto">Mixto (comenta encima + pausa en el clímax)</option><option value="continuo">Continuo (habla encima bajando el audio original)</option><option value="pausar">Pausar y comentar (congela el video en cada reacción)</option></select></div>
+        <div><label for="rr-frecuencia">Cantidad de reacciones</label><select id="rr-frecuencia"><option value="baja">Baja (2–3 intervenciones)</option><option value="media" selected>Media (3–5 intervenciones)</option><option value="alta">Alta (5–7 intervenciones)</option></select></div>
+        <div><label for="rr-motor">Motor de animación</label><select id="rr-motor"><option value="expresivo">Expresivo Pro (rápido PC y Colab)</option><option value="lipsync">Lip-Sync IA realista (Colab GPU · celda 5D)</option></select></div>
+        <div><label for="rr-calidad">Resolución 9:16</label><select id="rr-calidad"><option value="720p">720×1280 · Rápido (ideal PC 4 GB)</option><option value="1080p">1080×1920 · Full HD (ideal Colab)</option></select></div>
+      </div>
+
+      <div class="fila" style="margin-top:10px">
+        <label class="switch"><input type="checkbox" id="rr-vision" checked> Analizar imagen con Visión IA (entiende memes, juegos y jugadas)</label>
+        <label class="switch"><input type="checkbox" id="rr-subs" checked> Subtítulos Kinetik del personaje</label>
+        <label class="switch"><input type="checkbox" id="rr-colab"> Renderizar en Colab remoto (si está conectado)</label>
+      </div>
+
+      <input type="hidden" id="rr-layout" value="split">
+      <div class="visual-picker" aria-label="Ejemplos visuales de cómo se verá el video-reacción">
+        <button type="button" class="visual-card activo" data-r-layout="split" onclick="elegirLayoutReaccion('split')">
+          <img src="/static/presets/reaccion_split.webp" loading="lazy" alt="Vista previa Reacción Split 50/50">
+          <b>Split 50/50 · Arriba/Abajo</b>
+          <small>Video original arriba y tu personaje IA animado abajo con onda de voz y subtítulos en el centro.</small>
+        </button>
+        <button type="button" class="visual-card" data-r-layout="pip" onclick="elegirLayoutReaccion('pip')">
+          <img src="/static/presets/reaccion_pip.webp" loading="lazy" alt="Vista previa Reacción PiP Esquina">
+          <b>Esquina PiP · Streamer IA</b>
+          <small>Video vertical completo con tu personaje reaccionando desde la esquina inferior en marco Kinetik.</small>
+        </button>
+        <button type="button" class="visual-card" data-r-layout="pausar" onclick="elegirLayoutReaccion('pausar')">
+          <img src="/static/presets/reaccion_pausa.webp" loading="lazy" alt="Vista previa Reacción Pausar y Comentar">
+          <b>Pausar y Comentar · Primer plano</b>
+          <small>Pausa el video en los mejores segundos, entra el personaje en grande a opinar y luego sigue el clip.</small>
+        </button>
+      </div>
+
+      <div class="fila" style="margin-top:12px">
+        <button type="button" class="prim" id="rr-btn-analizar" onclick="analizarVideoReaccion()">🧠 1. Analizar video y crear guion IA</button>
+        <span id="rr-analisis-estado" class="muted" aria-live="polite" style="flex:2"></span>
+      </div>
+
+      <div id="rr-guion-wrap" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--borde)">
+        <div class="fila" style="justify-content:space-between">
+          <div><b>Guion editable de reacciones</b> <small id="rr-resumen" class="muted"></small></div>
+          <button type="button" class="mini" onclick="anadirIntervencionReaccion()">+ Añadir reacción</button>
+        </div>
+        <div style="margin-top:8px"><label for="rr-titulo">Título / texto para publicar</label><input id="rr-titulo" maxlength="120" placeholder="Título del video-reacción"></div>
+        <div id="rr-timeline" class="reacc-timeline"></div>
+        <div class="fila" style="margin-top:12px">
+          <button type="button" class="prim" id="rr-btn-render" onclick="renderizarVideoReaccion()">🎬 2. Generar Video-Reacción</button>
+          <span id="rr-render-estado" class="muted" aria-live="polite" style="flex:2"></span>
+        </div>
+      </div>
+
+      <div id="rr-resultado-wrap" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--borde)">
+        <div class="fila" style="align-items:flex-start;gap:16px">
+          <video id="rr-video-preview" controls playsinline style="width:220px;max-width:100%;aspect-ratio:9/16;border-radius:8px;background:#000;border:2px solid var(--tinta)"></video>
+          <div style="flex:1;min-width:220px">
+            <h3 style="margin:0 0 8px">Video-reacción listo</h3>
+            <p id="rr-resultado-meta" class="muted"></p>
+            <div class="fila" style="margin-top:10px">
+              <a id="rr-descargar-link" href="#" download><button type="button">⬇ Descargar MP4</button></a>
+            </div>
+            <div style="margin-top:12px">
+              <label>Enviar directo a la cola de estas cuentas:</label>
+              <div id="rr-cuentas-chips" class="chips" style="margin-top:6px"></div>
+              <div class="fila" style="margin-top:10px">
+                <button type="button" class="prim" onclick="enviarReaccionACola()">📤 Enviar a cola de subida</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
 </main>
 
 <aside id="lado-regla" aria-label="Regla seleccionada">
@@ -1883,18 +2075,19 @@ const plat = p => `<span class="plat"><i class="ph ${ICON[p] || 'ph-globe'}"></i
 const base = r => esc(String(r || '').split(/[\\/]/).pop());
 
 function cambiarPestanaBot(nombre) {
-  const vistas = ['cola','anadir','cuentas','edicion','sistema'];
+  const vistas = ['cola','anadir','cuentas','edicion','sistema','reacciones'];
   const destino = vistas.includes(nombre) ? nombre : 'cola';
   document.querySelectorAll('[data-vista]').forEach(b => b.classList.toggle('activa', b.dataset.vista === destino));
   document.querySelectorAll('[data-vista-panel]').forEach(p => p.classList.toggle('activa', p.dataset.vistaPanel === destino));
   const titulo = document.getElementById?.('titulo-vista');
-  if (titulo) titulo.textContent = {cola:'Cola y actividad',anadir:'Añadir videos',cuentas:'Cuentas y reglas',edicion:'Edición IA',sistema:'Ritmo, Colab y avisos'}[destino];
+  if (titulo) titulo.textContent = {cola:'Cola y actividad',anadir:'Añadir videos',cuentas:'Cuentas y reglas',edicion:'Edición IA',sistema:'Ritmo, Colab y avisos',reacciones:'Reacciones IA con personajes'}[destino];
+  if (destino === 'reacciones' && typeof cargarReaccionesIA === 'function') cargarReaccionesIA();
 }
 if (typeof window !== 'undefined' && typeof URLSearchParams !== 'undefined') {
   const params = new URLSearchParams(window.location?.search || '');
   if (params.get('embed') === '1') document.body?.classList.add('modo-embed');
   const hashVista = String(window.location?.hash || '').replace(/^#/, '');
-  if (['cola','anadir','cuentas','edicion','sistema'].includes(hashVista)) cambiarPestanaBot(hashVista);
+  if (['cola','anadir','cuentas','edicion','sistema','reacciones'].includes(hashVista)) cambiarPestanaBot(hashVista);
   window.addEventListener?.('message', ev => {
     if (ev?.data?.type === 'bot-switch-tab' && ev.data.tab) cambiarPestanaBot(ev.data.tab);
     if (ev?.data?.type === 'bot-immersive-state' && $('lbl-bot-inmersivo')) {
@@ -3264,7 +3457,9 @@ function seleccionarPreset() {
     'ed-miniatura':['auto_thumbnail','off'], 'ed-miniatura-motor':['thumbnail_engine','clasico'], 'ed-miniatura-estilo':['thumbnail_style','kinetik'],
     'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100],
     'ed-comentario':['commentary_mode','off'], 'ed-comentario-estilo':['commentary_style','gancho'],
-    'ed-comentario-voz':['commentary_voice','male'], 'ed-ambiente':['ambient_music','off']};
+    'ed-comentario-voz':['commentary_voice','male'], 'ed-ambiente':['ambient_music','off'],
+    'ed-streamer-esquina':['streamer_corner','auto'], 'ed-streamer-modo':['streamer_game_mode','zoom'],
+    'ed-streamer-altura':['streamer_cam_ratio','0.38']};
   for (const [id,[key,def]] of Object.entries(mapping)) {
     const value = String(presetBase[key] ?? def), element = $(id);
     if (!element) continue;
@@ -3280,7 +3475,7 @@ function seleccionarPreset() {
   $('ed-auto-split').value = presetBase.auto_split ? 'si' : 'no';
   $('ed-limpiar-voz').value = presetBase.clean_vocals ? 'si' : 'no';
   $('ed-inicio').value = formatoInicio(presetBase.skip_intro_seconds ?? 0);
-  modoEdicion(); vistaSubtitulos(); vistaComentario();
+  modoEdicion(); vistaSubtitulos(); vistaComentario(); vistaFormatoEdicion();
   $('preset-estado').textContent = 'Los cambios se aplican a los videos que añadas después de guardar. La cola existente conserva su edición.';
 }
 function modoEdicion() {
@@ -3314,6 +3509,20 @@ function formatoInicio(value) {
 function vistaComentario() {
   if ($('ed-comentario-opciones')) $('ed-comentario-opciones').hidden = ($('ed-comentario')?.value || 'off') === 'off';
 }
+function actualizarTarjetasStreamer() {
+  const modo = $('ed-streamer-modo')?.value || 'zoom';
+  if (typeof document !== 'undefined') document.querySelectorAll?.('[data-streamer-prev]')?.forEach(el => {
+    el?.classList?.toggle('activo', el?.dataset?.streamerPrev === modo);
+  });
+}
+function elegirModoStreamer(modo) {
+  if ($('ed-streamer-modo')) $('ed-streamer-modo').value = modo === 'completo' ? 'completo' : 'zoom';
+  actualizarTarjetasStreamer();
+}
+function vistaFormatoEdicion() {
+  if ($('ed-streamer-opciones')) $('ed-streamer-opciones').hidden = ($('ed-formato')?.value || '') !== 'vertical_streamer';
+  actualizarTarjetasStreamer();
+}
 function vistaSubtitulos() {
   $('sub-preview').hidden = $('ed-subs').value === 'no';
   const estilo = $('ed-estilo').value;
@@ -3345,8 +3554,12 @@ function ajustesEdicion() {
     cold_open:$('ed-cold-open')?.value === 'si',
     jump_cuts:$('ed-jump-cuts')?.value === 'si',
     auto_split:$('ed-auto-split')?.value === 'si',
-    clean_vocals:$('ed-limpiar-voz')?.value === 'si'};
-  if (c.video_format !== presetBase.video_format) c.encuadre = c.video_format === 'vertical' ? 'caras' : 'difuminado';
+    clean_vocals:$('ed-limpiar-voz')?.value === 'si',
+    streamer_corner:$('ed-streamer-esquina')?.value || 'auto',
+    streamer_game_mode:$('ed-streamer-modo')?.value === 'completo' ? 'completo' : 'zoom',
+    streamer_cam_ratio:Number($('ed-streamer-altura')?.value || 0.38)};
+  if (c.video_format === 'vertical_streamer') c.encuadre = 'streamer';
+  else if (c.video_format !== presetBase.video_format) c.encuadre = c.video_format === 'vertical' ? 'caras' : 'difuminado';
   for (const key of ['source','start_time','end_time','cast_id','voice_cast','voice_config','custom_output_dir','output_path',
     'python_motor','script_local','subir_tiktok','subir_youtube','subir_facebook']) delete c[key];
   return c;
@@ -4102,6 +4315,316 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
     }
   });
 }
+
+/* === Módulo 06 · Reacciones IA con Personajes === */
+let _reaccPersonajes = [], _reaccEditandoId = null, _reaccVideoToken = '', _reaccGuion = [], _reaccJobId = '', _reaccPoll = null;
+const _reaccSelCuentas = new Set();
+const _REACC_EXP_LABELS = {neutral:'Neutral (base)', hablando:'Hablando', sorprendido:'Sorprendido', riendo:'Riendo', serio:'Serio', pensando:'Pensando'};
+
+function sincronizarVocesPersonaje() {
+  const src = $('ed-comentario-voz'), dst = $('rp-voz');
+  if (!src || !dst) return;
+  const prev = dst.value;
+  dst.innerHTML = src.innerHTML;
+  if ([...dst.options].some(o => o.value === prev)) dst.value = prev;
+}
+function elegirLayoutReaccion(layout) {
+  const val = ['split','pip','pausar'].includes(layout) ? layout : 'split';
+  if ($('rr-layout')) $('rr-layout').value = val;
+  if (typeof document !== 'undefined') document.querySelectorAll?.('[data-r-layout]')?.forEach(el => {
+    el?.classList?.toggle('activo', el?.dataset?.rLayout === val);
+  });
+}
+async function cargarReaccionesIA() {
+  sincronizarVocesPersonaje();
+  try {
+    const j = await api('/api/reacciones/personajes');
+    _reaccPersonajes = j.personajes || [];
+    pintarPersonajesReaccion();
+    if ($('rr-colab') && !j.remoto_activo) $('rr-colab').checked = false;
+    if ($('rp-estado') && j.lipsync && !j.lipsync.disponible && !$('rp-estado').textContent) {
+      $('rp-estado').textContent = j.lipsync.motivo || '';
+    }
+  } catch (e) {}
+  // Actualizar selector de clips de la cola y chips de cuentas
+  const selClip = $('rr-clip-cola');
+  if (selClip && E?.subidas) {
+    const prev = selClip.value;
+    const vistos = new Set();
+    const opts = ['<option value="">— O sube archivo / pega URL —</option>'];
+    for (const s of E.subidas) {
+      if (!s || vistos.has(s.archivo)) continue;
+      vistos.add(s.archivo);
+      const nom = (s.video_titulo || String(s.texto || '').split('\n')[0] || `Clip #${s.id}`).slice(0, 62);
+      opts.push(`<option value="${Number(s.id)}">#${Number(s.id)} · ${esc(nom)}</option>`);
+    }
+    selClip.innerHTML = opts.join('');
+    if ([...selClip.options].some(o => o.value === prev)) selClip.value = prev;
+  }
+  if ($('rr-cuentas-chips') && E?.cuentas) chips('rr-cuentas-chips', _reaccSelCuentas, E.cuentas);
+}
+function pintarPersonajesReaccion() {
+  const lista = $('reacc-personajes-lista'), sel = $('rr-personaje');
+  if (lista) {
+    lista.innerHTML = _reaccPersonajes.map(p => `
+      <div class="reacc-p-card ${_reaccEditandoId === p.id ? 'sel' : ''}">
+        <img src="${esc(p.avatar_url || '/static/icons/my-content-clip.svg')}" alt="">
+        <div style="flex:1;min-width:0">
+          <b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.nombre)}</b>
+          <small class="muted">${esc(p.personalidad)} · ${esc(p.motor_animacion || 'expresivo')}</small>
+          <div class="fila" style="margin-top:6px;gap:5px">
+            <button type="button" class="mini" onclick="editarPersonajeReaccion('${esc(p.id)}')">Editar</button>
+            <button type="button" class="mini peligro" onclick="borrarPersonajeReaccion('${esc(p.id)}')">Borrar</button>
+          </div>
+        </div>
+      </div>`).join('') || '<p class="muted">Todavía no has creado ningún personaje. Crea el primero abajo.</p>';
+  }
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = _reaccPersonajes.map(p => `<option value="${esc(p.id)}">${esc(p.nombre)} (${esc(p.personalidad)})</option>`).join('') || '<option value="">Crea un personaje arriba primero</option>';
+    if (prev && _reaccPersonajes.some(p => p.id === prev)) sel.value = prev;
+  }
+}
+function nuevoPersonajeReaccion() {
+  _reaccEditandoId = null;
+  if ($('reacc-form-titulo')) $('reacc-form-titulo').textContent = 'Crear nuevo personaje';
+  if ($('rp-nombre')) $('rp-nombre').value = '';
+  if ($('rp-muletillas')) $('rp-muletillas').value = '';
+  if ($('rp-prompt')) $('rp-prompt').value = '';
+  if ($('rp-expresiones-wrap')) $('rp-expresiones-wrap').hidden = true;
+  pintarPersonajesReaccion();
+}
+function editarPersonajeReaccion(cid) {
+  const p = _reaccPersonajes.find(x => x.id === cid);
+  if (!p) return;
+  _reaccEditandoId = p.id;
+  sincronizarVocesPersonaje();
+  if ($('reacc-form-titulo')) $('reacc-form-titulo').textContent = `Editando: ${p.nombre}`;
+  $('rp-nombre').value = p.nombre || '';
+  $('rp-personalidad').value = p.personalidad || 'hype';
+  if ([...$('rp-voz').options].some(o => o.value === p.voz)) $('rp-voz').value = p.voz;
+  $('rp-motor').value = p.motor_animacion || 'expresivo';
+  $('rp-color').value = p.color_acento || '#FF4D00';
+  $('rp-intensidad').value = p.intensidad || 4;
+  $('rp-muletillas').value = p.muletillas || '';
+  $('rp-prompt').value = p.prompt_extra || '';
+  pintarExpresionesPersonaje(p);
+  pintarPersonajesReaccion();
+}
+function pintarExpresionesPersonaje(p) {
+  const wrap = $('rp-expresiones-wrap'), grid = $('rp-expresiones-grid');
+  if (!wrap || !grid || !p) return;
+  wrap.hidden = false;
+  grid.innerHTML = Object.entries(_REACC_EXP_LABELS).map(([exp, lbl]) => {
+    const imgUrl = p.expresiones?.[exp] || '';
+    return `<div class="reacc-exp-slot">
+      <label>${esc(lbl)}</label>
+      <img src="${esc(imgUrl || p.avatar_url || '/static/icons/my-content-clip.svg')}" alt="${esc(lbl)}" style="opacity:${imgUrl ? 1 : .35}">
+      <input type="file" accept="image/*" style="width:100%;font-size:10.5px" onchange="subirExpresionPersonaje('${esc(p.id)}','${exp}',this)">
+    </div>`;
+  }).join('');
+}
+async function guardarPersonajeReaccion() {
+  try {
+    const cuerpo = {
+      id: _reaccEditandoId || undefined,
+      nombre: $('rp-nombre').value.trim(),
+      personalidad: $('rp-personalidad').value,
+      voz: $('rp-voz').value,
+      motor_animacion: $('rp-motor').value,
+      color_acento: $('rp-color').value,
+      intensidad: Number($('rp-intensidad').value || 4),
+      muletillas: $('rp-muletillas').value.trim(),
+      prompt_extra: $('rp-prompt').value.trim(),
+    };
+    const r = await api('/api/reacciones/personajes', cuerpo);
+    _reaccEditandoId = r.personaje.id;
+    await cargarReaccionesIA();
+    editarPersonajeReaccion(r.personaje.id);
+    if ($('rr-personaje')) $('rr-personaje').value = r.personaje.id;
+    toast(`Personaje «${r.personaje.nombre}» guardado.`, false, 'Reacciones IA');
+  } catch (e) {}
+}
+async function borrarPersonajeReaccion(cid) {
+  if (typeof confirm === 'function' && !confirm('¿Eliminar este personaje y sus imágenes?')) return;
+  try {
+    await api(`/api/reacciones/personajes/${encodeURIComponent(cid)}`, {}, 'DELETE');
+    if (_reaccEditandoId === cid) nuevoPersonajeReaccion();
+    await cargarReaccionesIA();
+    toast('Personaje eliminado.');
+  } catch (e) {}
+}
+async function subirExpresionPersonaje(cid, exp, input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('imagen', file);
+  try {
+    const r = await fetch(`/api/reacciones/personajes/${encodeURIComponent(cid)}/imagen/${encodeURIComponent(exp)}`, {method:'POST', body:fd});
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || 'No se pudo subir la imagen.');
+    await cargarReaccionesIA();
+    editarPersonajeReaccion(cid);
+    toast(`Expresión «${_REACC_EXP_LABELS[exp] || exp}» actualizada.`);
+  } catch (e) { toast(e.message, true); }
+}
+async function probarVozPersonaje() {
+  if (!_reaccEditandoId) { toast('Guarda o selecciona un personaje primero.', true); return; }
+  const btn = $('rp-btn-probar-voz');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch(`/api/reacciones/personajes/${encodeURIComponent(_reaccEditandoId)}/probar_voz`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}),
+    });
+    if (!r.ok) { const j = await r.json().catch(()=>({})); throw new Error(j.error || 'No se pudo sintetizar la voz.'); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    audioMuestra?.pause();
+    audioMuestra = new Audio(url);
+    audioMuestra.play().catch(() => {});
+    toast('Reproduciendo muestra de voz del personaje.');
+  } catch (e) { toast(e.message, true); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function generarExpresionesPersonaje() {
+  if (!_reaccEditandoId) { toast('Guarda o selecciona un personaje primero.', true); return; }
+  const btn = $('rp-btn-gen-exp');
+  if (btn) btn.disabled = true;
+  if ($('rp-estado')) $('rp-estado').textContent = 'Generando 5 expresiones consistentes en Colab GPU…';
+  try {
+    const j = await api(`/api/reacciones/personajes/${encodeURIComponent(_reaccEditandoId)}/generar_expresiones`, {});
+    await cargarReaccionesIA();
+    editarPersonajeReaccion(_reaccEditandoId);
+    toast(`Expresiones generadas: ${(j.generadas || []).join(', ')}.`, false, 'Colab GPU');
+    if ($('rp-estado')) $('rp-estado').textContent = 'Pack de expresiones IA listo.';
+  } catch (e) {
+    if ($('rp-estado')) $('rp-estado').textContent = e.message;
+  } finally { if (btn) btn.disabled = false; }
+}
+function pintarTimelineReaccion() {
+  const cont = $('rr-timeline');
+  if (!cont) return;
+  cont.innerHTML = _reaccGuion.map((it, idx) => `
+    <div class="reacc-row" data-r-idx="${idx}">
+      <input type="number" step="0.5" min="0" value="${Number(it.segundo || 0)}" title="Segundo del video" onchange="_reaccGuion[${idx}].segundo=Number(this.value)">
+      <select onchange="_reaccGuion[${idx}].modo=this.value">
+        <option value="pausar" ${it.modo === 'pausar' ? 'selected' : ''}>⏸ Pausar</option>
+        <option value="comentar_encima" ${it.modo !== 'pausar' ? 'selected' : ''}>🎙 Encima</option>
+      </select>
+      <select onchange="_reaccGuion[${idx}].emocion=this.value">
+        ${['excited','surprised','laughs','sarcastic','serious','curious','neutral'].map(e => `<option value="${e}" ${it.emocion === e ? 'selected' : ''}>${e}</option>`).join('')}
+      </select>
+      <input type="text" maxlength="240" value="${esc(it.texto || '')}" onchange="_reaccGuion[${idx}].texto=this.value">
+      <button type="button" class="mini peligro" onclick="_reaccGuion.splice(${idx},1);pintarTimelineReaccion()" aria-label="Eliminar">✕</button>
+    </div>`).join('') || '<p class="muted">Sin reacciones. Pulsa «+ Añadir reacción».</p>';
+}
+function anadirIntervencionReaccion() {
+  const ultimo = _reaccGuion.length ? Number(_reaccGuion[_reaccGuion.length - 1].segundo || 0) + 4 : 2;
+  _reaccGuion.push({id: _reaccGuion.length + 1, segundo: ultimo, modo: $('rr-modo')?.value === 'continuo' ? 'comentar_encima' : 'pausar', emocion: 'excited', texto: '¡Espera, mira esto!'});
+  pintarTimelineReaccion();
+}
+async function analizarVideoReaccion() {
+  const pid = $('rr-personaje')?.value;
+  if (!pid) { toast('Crea o elige un personaje primero.', true); return; }
+  const btn = $('rr-btn-analizar');
+  if (btn) btn.disabled = true;
+  if ($('rr-analisis-estado')) $('rr-analisis-estado').textContent = 'Analizando audio y fotogramas con IA…';
+  try {
+    const file = $('rr-archivo')?.files?.[0];
+    let j;
+    if (file) {
+      const fd = new FormData();
+      fd.append('video', file);
+      fd.append('personaje_id', pid);
+      fd.append('modo_interaccion', $('rr-modo').value);
+      fd.append('frecuencia', $('rr-frecuencia').value);
+      fd.append('usar_vision', $('rr-vision').checked ? 'true' : 'false');
+      const r = await fetch('/api/reacciones/analizar', {method:'POST', body:fd});
+      j = await r.json();
+      if (!j.success) throw new Error(j.error || 'Error al analizar el video.');
+    } else {
+      j = await api('/api/reacciones/analizar', {
+        personaje_id: pid,
+        subida_id: $('rr-clip-cola')?.value || '',
+        url: $('rr-url')?.value.trim() || '',
+        modo_interaccion: $('rr-modo').value,
+        frecuencia: $('rr-frecuencia').value,
+        usar_vision: Boolean($('rr-vision')?.checked),
+      });
+    }
+    _reaccVideoToken = j.video_token;
+    _reaccGuion = j.intervenciones || [];
+    $('rr-guion-wrap').hidden = false;
+    $('rr-titulo').value = j.titulo_sugerido || '';
+    $('rr-resumen').textContent = (j.vision_usada ? '👁 Visión + Audio · ' : '🎙 Audio · ') + (j.resumen_video || '');
+    pintarTimelineReaccion();
+    $('rr-analisis-estado').textContent = `Guion listo (${_reaccGuion.length} reacciones). Edita lo que quieras y pulsa Generar.`;
+    toast('Guion de reacción generado.', false, 'Audio + Visión IA');
+  } catch (e) {
+    if ($('rr-analisis-estado')) $('rr-analisis-estado').textContent = e.message;
+    toast(e.message, true);
+  } finally { if (btn) btn.disabled = false; }
+}
+async function renderizarVideoReaccion() {
+  const pid = $('rr-personaje')?.value;
+  if (!pid || !_reaccVideoToken) { toast('Analiza un video primero.', true); return; }
+  const btn = $('rr-btn-render');
+  if (btn) btn.disabled = true;
+  $('rr-resultado-wrap').hidden = true;
+  $('rr-render-estado').textContent = 'Iniciando render…';
+  try {
+    const j = await api('/api/reacciones/render', {
+      personaje_id: pid,
+      video_token: _reaccVideoToken,
+      intervenciones: _reaccGuion,
+      layout: $('rr-layout')?.value || 'split',
+      motor_animacion: $('rr-motor')?.value || 'expresivo',
+      calidad: $('rr-calidad')?.value || '720p',
+      subtitulos: Boolean($('rr-subs')?.checked),
+      usar_colab: Boolean($('rr-colab')?.checked),
+      titulo: $('rr-titulo')?.value.trim() || '',
+    });
+    _reaccJobId = j.job_id;
+    clearInterval(_reaccPoll);
+    _reaccPoll = setInterval(async () => {
+      try {
+        const st = await api(`/api/reacciones/trabajos/${encodeURIComponent(_reaccJobId)}`);
+        $('rr-render-estado').textContent = `${st.progreso || 0}% · ${st.mensaje || ''}`;
+        if (st.estado === 'listo') {
+          clearInterval(_reaccPoll);
+          if (btn) btn.disabled = false;
+          $('rr-resultado-wrap').hidden = false;
+          $('rr-video-preview').src = st.video_url + '?t=' + Date.now();
+          $('rr-descargar-link').href = st.video_url + '?download=1';
+          $('rr-resultado-meta').textContent = `Duración: ${st.duracion || 0}s · Motor: ${st.motor_usado || 'expresivo'}`;
+          if ($('rr-cuentas-chips') && E?.cuentas) chips('rr-cuentas-chips', _reaccSelCuentas, E.cuentas);
+          toast('Video-reacción listo para previsualizar o enviar a cola.', false, 'Reacciones IA');
+        } else if (st.estado === 'error') {
+          clearInterval(_reaccPoll);
+          if (btn) btn.disabled = false;
+          toast(st.error || 'Error al renderizar la reacción.', true);
+        }
+      } catch (e) { clearInterval(_reaccPoll); if (btn) btn.disabled = false; }
+    }, 1500);
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    $('rr-render-estado').textContent = e.message;
+  }
+}
+async function enviarReaccionACola() {
+  if (!_reaccJobId) { toast('Genera el video-reacción primero.', true); return; }
+  if (!_reaccSelCuentas.size) { toast('Elige al menos una cuenta de destino.', true); return; }
+  try {
+    const r = await api('/api/reacciones/enviar_cola', {
+      job_id: _reaccJobId,
+      cuentas: [..._reaccSelCuentas],
+      texto: $('rr-titulo')?.value.trim() || '',
+    });
+    toast(`Enviado a la cola (${r.encoladas} cuenta${r.encoladas === 1 ? '' : 's'}).`, false, 'Cola de subida');
+    await cargar();
+  } catch (e) {}
+}
+
 programarRefrescoBot();
 </script>
 </body>

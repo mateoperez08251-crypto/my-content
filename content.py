@@ -3257,6 +3257,443 @@ def remoto_probar():
     return _bot_respuesta(lambda: {"mensaje": _bot().probar_remoto()})
 
 
+# ---- Módulo 06 · Reacciones IA con Personajes ---------------------------
+_reacciones_lock = threading.Lock()
+_reacciones_fuentes = {}
+_reacciones_trabajos = {}
+
+
+def _carpeta_reacciones():
+    carpeta = paths.data_path("reacciones_ia")
+    os.makedirs(carpeta, exist_ok=True)
+    return carpeta
+
+
+def _resolver_video_reaccion(data=None, archivo_subido=None):
+    """Resuelve el archivo de video desde subida multipart, token previo, clip en cola o URL."""
+    data = data or {}
+    if archivo_subido is not None and getattr(archivo_subido, "filename", ""):
+        token = uuid.uuid4().hex[:14]
+        ext = os.path.splitext(archivo_subido.filename)[1].lower()
+        if ext not in (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi"):
+            ext = ".mp4"
+        destino = os.path.join(_carpeta_reacciones(), f"fuente_{token}{ext}")
+        archivo_subido.save(destino)
+        with _reacciones_lock:
+            _reacciones_fuentes[token] = destino
+        return token, destino
+
+    token = str(data.get("video_token") or "").strip()
+    if token:
+        with _reacciones_lock:
+            ruta = _reacciones_fuentes.get(token)
+        if ruta and os.path.isfile(ruta):
+            return token, ruta
+
+    subida_id = data.get("subida_id")
+    if subida_id not in (None, "", 0, "0"):
+        s = _bot().db.subida(int(subida_id))
+        if not s or not os.path.isfile(s["archivo"]):
+            raise ValueError("El clip seleccionado ya no está disponible en esta PC.")
+        tok = f"clip_{int(subida_id)}"
+        with _reacciones_lock:
+            _reacciones_fuentes[tok] = s["archivo"]
+        return tok, s["archivo"]
+
+    url = str(data.get("url") or "").strip()
+    if url:
+        _asegurar_yt_dlp()
+        import yt_downloader
+        tok = uuid.uuid4().hex[:14]
+        carpeta_dl = os.path.join(_carpeta_reacciones(), f"dl_{tok}")
+        os.makedirs(carpeta_dl, exist_ok=True)
+        res = yt_downloader.download_video(url, carpeta_dl, quality="720p")
+        ruta = res if isinstance(res, str) else (res.get("path") if isinstance(res, dict) else "")
+        if not ruta or not os.path.isfile(ruta):
+            candidatos = [os.path.join(carpeta_dl, f) for f in os.listdir(carpeta_dl)
+                          if f.lower().endswith((".mp4", ".mkv", ".webm", ".mov"))]
+            ruta = candidatos[0] if candidatos else ""
+        if not ruta or not os.path.isfile(ruta):
+            raise RuntimeError("No se pudo descargar el video desde esa URL.")
+        with _reacciones_lock:
+            _reacciones_fuentes[tok] = ruta
+        return tok, ruta
+
+    raise ValueError("Elige un clip de la cola, sube un archivo de video o pega una URL.")
+
+
+@app.route("/api/reacciones/personajes", methods=["GET", "POST"])
+def reacciones_personajes():
+    import reaction_characters as rc
+    import reaction_lipsync as rl
+    import portada_generativa as pg
+    if request.method == "GET":
+        return jsonify({
+            "success": True,
+            "personajes": rc.listar_personajes(),
+            "personalidades": rc.PERSONALIDADES,
+            "expresiones": list(rc.EXPRESIONES),
+            "lipsync": rl.estado(),
+            "qwen_gpu": bool(pg.disponible()),
+            "remoto_activo": bool((_bot().cfg or {}).get("remoto_url")),
+        })
+    try:
+        d = request.get_json(silent=True) or {}
+        cid = str(d.get("id") or "").strip() or None
+        personaje = rc.guardar_personaje(d, cid=cid)
+        return jsonify({"success": True, "personaje": personaje})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>", methods=["DELETE"])
+def reacciones_personaje_borrar(cid):
+    import reaction_characters as rc
+    try:
+        ok = rc.borrar_personaje(cid)
+        return jsonify({"success": True, "borrado": ok})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>/imagen/<expresion>", methods=["GET", "POST"])
+def reacciones_personaje_imagen(cid, expresion):
+    import reaction_characters as rc
+    if request.method == "GET":
+        ruta = rc.ruta_imagen_expresion(cid, expresion)
+        if not ruta or not ruta.is_file():
+            return jsonify({"success": False, "error": "Imagen no encontrada."}), 404
+        return send_from_directory(str(ruta.parent), ruta.name, mimetype="image/png")
+    try:
+        f = request.files.get("imagen")
+        raw = f.read() if f is not None else request.get_data()
+        personaje = rc.guardar_imagen_expresion(cid, expresion, raw)
+        return jsonify({"success": True, "personaje": personaje})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>/probar_voz", methods=["POST"])
+def reacciones_personaje_probar_voz(cid):
+    import reaction_characters as rc
+    import smart_commentary as sc
+    p = rc.obtener_personaje(cid)
+    if not p:
+        return jsonify({"success": False, "error": "Personaje no encontrado."}), 404
+    d = request.get_json(silent=True) or {}
+    frase = str(d.get("texto") or f"[excited] ¡Hola! Soy {p['nombre']} y ya estoy listo para reaccionar a tus videos.").strip()[:220]
+    tmp_wav = os.path.join(_carpeta_reacciones(), f"prueba_{cid}_{uuid.uuid4().hex[:8]}.wav")
+    try:
+        sc.synthesize_commentary_line(
+            frase, tmp_wav, language=p.get("idioma", "es"), voice=p.get("voz", "male"),
+            ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
+        )
+        with open(tmp_wav, "rb") as fh:
+            audio_bytes = fh.read()
+        try:
+            os.remove(tmp_wav)
+        except OSError:
+            pass
+        return Response(audio_bytes, mimetype="audio/wav")
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>/generar_expresiones", methods=["POST"])
+def reacciones_personaje_generar_expresiones(cid):
+    import reaction_characters as rc
+    try:
+        res = rc.generar_expresiones_ia(cid, log=log)
+        return jsonify({"success": True, **res})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/analizar", methods=["POST"])
+def reacciones_analizar():
+    import reaction_characters as rc
+    import smart_reaction as sr
+    try:
+        if request.content_type and "multipart/form-data" in request.content_type:
+            data = request.form.to_dict()
+            archivo = request.files.get("video")
+        else:
+            data = request.get_json(silent=True) or {}
+            archivo = None
+        pid = str(data.get("personaje_id") or "").strip()
+        personaje = rc.obtener_personaje(pid)
+        if not personaje:
+            return jsonify({"success": False, "error": "Crea o elige un personaje primero."}), 400
+        token, ruta = _resolver_video_reaccion(data, archivo)
+        usar_vision = str(data.get("usar_vision", "true")).lower() not in ("false", "0", "no")
+        resultado = sr.analizar_video_para_reaccion(
+            ruta,
+            personaje,
+            modo_interaccion=str(data.get("modo_interaccion") or "mixto"),
+            frecuencia=str(data.get("frecuencia") or "media"),
+            usar_vision=usar_vision,
+            ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
+            ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
+            log=log,
+        )
+        return jsonify({"success": True, "video_token": token, **resultado})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/render", methods=["POST"])
+def reacciones_render():
+    import reaction_characters as rc
+    import reaction_animator as ra
+    try:
+        d = request.get_json(silent=True) or {}
+        pid = str(d.get("personaje_id") or "").strip()
+        personaje = rc.obtener_personaje(pid)
+        if not personaje:
+            return jsonify({"success": False, "error": "Elige un personaje válido."}), 400
+        _, video_path = _resolver_video_reaccion(d, None)
+        intervenciones = d.get("intervenciones") or []
+        layout = str(d.get("layout") or personaje.get("layout_defecto") or "split")
+        motor_anim = str(d.get("motor_animacion") or personaje.get("motor_animacion") or "expresivo")
+        subtitulos_activos = bool(d.get("subtitulos", True))
+        calidad = str(d.get("calidad") or "720p")
+        res_wh = (1080, 1920) if calidad == "1080p" else (720, 1280)
+        usar_colab = bool(d.get("usar_colab", False))
+
+        jid = uuid.uuid4().hex[:12]
+        salida_mp4 = os.path.join(_carpeta_reacciones(), f"reaccion_{jid}.mp4")
+        with _reacciones_lock:
+            _reacciones_trabajos[jid] = {
+                "estado": "en_curso", "progreso": 4, "mensaje": "Preparando reacción…",
+                "video": "", "miniatura": "", "error": "", "motor_usado": motor_anim,
+                "titulo": str(d.get("titulo") or f"{personaje['nombre']} reacciona")[:100],
+            }
+
+        def _worker():
+            def _upd(msg, pct):
+                with _reacciones_lock:
+                    if jid in _reacciones_trabajos:
+                        _reacciones_trabajos[jid]["mensaje"] = str(msg)
+                        _reacciones_trabajos[jid]["progreso"] = int(pct)
+            try:
+                cfg_bot = _bot().cfg or {}
+                remoto_url = (cfg_bot.get("remoto_url") or "").strip()
+                remoto_clave = (cfg_bot.get("remoto_clave") or "").strip()
+                if usar_colab and remoto_url and not MODO_SERVIDOR:
+                    from bot.remoto import ClienteRemoto
+                    _upd("Enviando video y personaje a Colab GPU…", 10)
+                    cli = ClienteRemoto(remoto_url, remoto_clave)
+                    sprites = rc.rutas_expresiones_personaje(personaje["id"])
+                    payload = {
+                        "personaje": personaje, "intervenciones": intervenciones,
+                        "layout": layout, "motor_animacion": motor_anim,
+                        "subtitulos": subtitulos_activos, "calidad": calidad,
+                    }
+                    res = cli.reaccionar(video_path, payload, sprites, salida_mp4, progreso=_upd)
+                else:
+                    res = ra.renderizar_video_reaccion(
+                        video_path, salida_mp4, personaje, intervenciones,
+                        layout=layout, motor_animacion=motor_anim,
+                        subtitulos_activos=subtitulos_activos, resolucion=res_wh,
+                        ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
+                        ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
+                        progreso=_upd, log=log,
+                    )
+                with _reacciones_lock:
+                    _reacciones_trabajos[jid].update({
+                        "estado": "listo", "progreso": 100, "mensaje": "Video-reacción listo.",
+                        "video": res["video"], "miniatura": res.get("miniatura", ""),
+                        "motor_usado": res.get("motor_usado", motor_anim),
+                        "duracion": res.get("duracion", 0),
+                    })
+                show_notification("Reacción IA lista", f"{personaje['nombre']} terminó su video-reacción.")
+            except Exception as exc:
+                with _reacciones_lock:
+                    _reacciones_trabajos[jid].update({
+                        "estado": "error", "error": str(exc)[:600], "mensaje": f"Error: {exc}",
+                    })
+
+        threading.Thread(target=_worker, daemon=True, name=f"reaccion-{jid}").start()
+        return jsonify({"success": True, "job_id": jid})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/trabajos/<jid>", methods=["GET"])
+def reacciones_trabajo_estado(jid):
+    with _reacciones_lock:
+        t = dict(_reacciones_trabajos.get(jid) or {})
+    if not t:
+        return jsonify({"success": False, "error": "Trabajo no encontrado."}), 404
+    return jsonify({
+        "success": True,
+        "estado": t["estado"],
+        "progreso": t.get("progreso", 0),
+        "mensaje": t.get("mensaje", ""),
+        "error": t.get("error", ""),
+        "motor_usado": t.get("motor_usado", "expresivo"),
+        "duracion": t.get("duracion", 0),
+        "titulo": t.get("titulo", ""),
+        "video_url": f"/api/reacciones/video/{jid}" if t.get("video") and os.path.isfile(t["video"]) else "",
+        "miniatura_url": f"/api/reacciones/miniatura/{jid}" if t.get("miniatura") and os.path.isfile(t["miniatura"]) else "",
+    })
+
+
+@app.route("/api/reacciones/video/<jid>", methods=["GET"])
+def reacciones_video(jid):
+    with _reacciones_lock:
+        ruta = (_reacciones_trabajos.get(jid) or {}).get("video") or ""
+    if not ruta or not os.path.isfile(ruta):
+        return jsonify({"success": False, "error": "Video no encontrado."}), 404
+    as_dl = request.args.get("download") == "1"
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta), as_attachment=as_dl)
+
+
+@app.route("/api/reacciones/miniatura/<jid>", methods=["GET"])
+def reacciones_miniatura(jid):
+    with _reacciones_lock:
+        ruta = (_reacciones_trabajos.get(jid) or {}).get("miniatura") or ""
+    if not ruta or not os.path.isfile(ruta):
+        return jsonify({"success": False, "error": "Miniatura no encontrada."}), 404
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta))
+
+
+@app.route("/api/reacciones/enviar_cola", methods=["POST"])
+def reacciones_enviar_cola():
+    try:
+        d = request.get_json(silent=True) or {}
+        jid = str(d.get("job_id") or "").strip()
+        with _reacciones_lock:
+            t = dict(_reacciones_trabajos.get(jid) or {})
+        ruta = t.get("video") or ""
+        if not ruta or not os.path.isfile(ruta):
+            return jsonify({"success": False, "error": "Primero genera el video-reacción."}), 400
+        cuentas_ids = [int(x) for x in (d.get("cuentas") or []) if str(x).isdigit()]
+        if not cuentas_ids:
+            return jsonify({"success": False, "error": "Selecciona al menos una cuenta de destino."}), 400
+        texto = str(d.get("texto") or t.get("titulo") or "Reacción IA").strip()[:2200]
+        m = _bot()
+        por_id = {c["id"]: c for c in m.db.cuentas()}
+        por_plat = {}
+        for cid in cuentas_ids:
+            c = por_id.get(cid)
+            if not c:
+                continue
+            por_plat.setdefault(c["plataforma"], []).append(cid)
+        if not por_plat:
+            return jsonify({"success": False, "error": "Las cuentas elegidas no existen."}), 400
+        encoladas = 0
+        thumb_src = t.get("miniatura") or ""
+        for plat_k, cids in por_plat.items():
+            for cid in cids:
+                dest_dir = m.carpeta_clips
+                os.makedirs(dest_dir, exist_ok=True)
+                dest_mp4 = os.path.join(dest_dir, f"reaccion_{jid}_c{cid}.mp4")
+                shutil.copy2(ruta, dest_mp4)
+                if thumb_src and os.path.isfile(thumb_src):
+                    shutil.copy2(thumb_src, os.path.splitext(dest_mp4)[0] + "_miniatura.jpg")
+                clave = f"reaccion:{jid}:c{cid}"
+                m.db.encolar_local(clave, t.get("titulo") or "Reacción IA", dest_mp4, [cid], plat_k, texto)
+                encoladas += 1
+        m.despertar()
+        return jsonify({"success": True, "encoladas": encoladas})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/bot/remoto/reaccionar", methods=["POST"])
+def remoto_reaccionar():
+    """Endpoint ejecutado en el servidor Colab GPU para renderizar reacciones remotamente."""
+    import reaction_animator as ra
+    import reaction_characters as rc
+    try:
+        payload = json.loads(request.form.get("payload") or "{}")
+        vid = request.files.get("video")
+        if vid is None:
+            return jsonify({"success": False, "error": "Falta el archivo de video."}), 400
+        jid = uuid.uuid4().hex[:12]
+        carpeta = os.path.join(_carpeta_reacciones(), f"rem_{jid}")
+        os.makedirs(carpeta, exist_ok=True)
+        in_mp4 = os.path.join(carpeta, "entrada.mp4")
+        vid.save(in_mp4)
+        out_mp4 = os.path.join(carpeta, "salida.mp4")
+        personaje = dict(payload.get("personaje") or {})
+        p_guardado = rc.guardar_personaje({**personaje, "nombre": personaje.get("nombre") or f"Remoto {jid}"})
+        for exp in rc.EXPRESIONES:
+            f_sp = request.files.get(f"sprite_{exp}")
+            if f_sp is not None:
+                rc.guardar_imagen_expresion(p_guardado["id"], exp, f_sp.read())
+
+        with _reacciones_lock:
+            _reacciones_trabajos[jid] = {
+                "estado": "en_curso", "progreso": 5, "mensaje": "Iniciando en Colab GPU…",
+                "video": "", "miniatura": "", "error": "",
+            }
+
+        def _run_remote():
+            def _upd(msg, pct):
+                with _reacciones_lock:
+                    _reacciones_trabajos[jid]["mensaje"] = str(msg)
+                    _reacciones_trabajos[jid]["progreso"] = int(pct)
+            try:
+                cal = str(payload.get("calidad") or "1080p")
+                res_wh = (1080, 1920) if cal == "1080p" else (720, 1280)
+                res = ra.renderizar_video_reaccion(
+                    in_mp4, out_mp4, p_guardado, payload.get("intervenciones") or [],
+                    layout=str(payload.get("layout") or "split"),
+                    motor_animacion=str(payload.get("motor_animacion") or "expresivo"),
+                    subtitulos_activos=bool(payload.get("subtitulos", True)),
+                    resolucion=res_wh,
+                    ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
+                    ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
+                    progreso=_upd, log=log,
+                )
+                with _reacciones_lock:
+                    _reacciones_trabajos[jid].update({
+                        "estado": "listo", "progreso": 100, "mensaje": "Listo en Colab.",
+                        "video": res["video"], "miniatura": res.get("miniatura", ""),
+                        "motor_usado": res.get("motor_usado", "expresivo"),
+                        "duracion": res.get("duracion", 0),
+                    })
+            except Exception as exc:
+                with _reacciones_lock:
+                    _reacciones_trabajos[jid].update({"estado": "error", "error": str(exc)[:600]})
+            finally:
+                try:
+                    rc.borrar_personaje(p_guardado["id"])
+                except Exception:
+                    pass
+
+        threading.Thread(target=_run_remote, daemon=True, name=f"rem-reacc-{jid}").start()
+        return jsonify({"success": True, "job_id": jid})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/bot/remoto/reaccion/<jid>", methods=["GET"])
+def remoto_reaccion_estado(jid):
+    with _reacciones_lock:
+        t = dict(_reacciones_trabajos.get(jid) or {})
+    if not t:
+        return jsonify({"success": False, "error": "Trabajo no encontrado."}), 404
+    return jsonify({
+        "success": True, "estado": t["estado"], "progreso": t.get("progreso", 0),
+        "mensaje": t.get("mensaje", ""), "error": t.get("error", ""),
+        "motor_usado": t.get("motor_usado", "expresivo"), "duracion": t.get("duracion", 0),
+        "tiene_miniatura": bool(t.get("miniatura") and os.path.isfile(t["miniatura"])),
+    })
+
+
+@app.route("/api/bot/remoto/reaccion/<jid>/video", methods=["GET"])
+def remoto_reaccion_video(jid):
+    return reacciones_video(jid)
+
+
+@app.route("/api/bot/remoto/reaccion/<jid>/miniatura", methods=["GET"])
+def remoto_reaccion_miniatura(jid):
+    return reacciones_miniatura(jid)
+
+
 @app.route("/api/bot/captura/<int:sid>", methods=["GET"])
 def bot_captura(sid):
     s = _bot().db.subida(sid)

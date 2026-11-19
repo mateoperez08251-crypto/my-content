@@ -26,6 +26,10 @@ def origen(ancho, alto, destino_w, destino_h, modo='caras'):
     elif modo == 'dividido':
         cw, ch = min(ancho, alto * destino_w / (destino_h / 2)), alto
         factor = max(destino_w / cw, (destino_h / 2) / ch)
+    elif modo == 'streamer':
+        game_h = destino_h * 0.62
+        cw, ch = min(ancho, alto * destino_w / max(game_h, 1)), alto
+        factor = max(destino_w / max(cw, 1), game_h / max(ch, 1))
     else:
         cw, ch = alto * destino_w / destino_h, alto
         ajuste = min(1, ancho / cw)

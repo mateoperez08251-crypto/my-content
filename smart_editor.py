@@ -68,7 +68,7 @@ ESTILOS_ANTIGUOS = {
     "style6": ("resaltador", {"caja_activa": "#DC2626"}), "style7": ("una_palabra", {"activo": "#FF2D2D"}),
     "style8": ("pop_art", {"alternos": ["#FF2D2D", "#FFFFFF"]}),
 }
-ENCUADRES = ("caras", "difuminado", "dividido", "zoom_dinamico")
+ENCUADRES = ("caras", "difuminado", "dividido", "zoom_dinamico", "streamer")
 
 
 def _crear_subs(palabras, w, h, estilo, escala, opciones, emojis, motor_ia):
@@ -110,9 +110,101 @@ def _zoom_en(pulsos, t, fuerza=0.12):
     return 1 + fuerza * z
 
 
-def _encuadrar(frame, modo, cx, fixed_crop_w, final_w, final_h, zoom=1.0, par_cx=None):
+def _componer_streamer(frame, final_w, final_h, cam_info, game_mode="zoom", cam_ratio=0.38):
+    """Compone 9:16 estilo Streamer: cámara del creador arriba + juego/pantalla abajo."""
+    orig_h, orig_w = frame.shape[:2]
+    ratio = max(0.28, min(0.48, float(cam_ratio or 0.38)))
+    cam_h = max(64, int(round(final_h * ratio / 2.0)) * 2)
+    game_h = max(64, final_h - cam_h)
+
+    if isinstance(cam_info, dict) and cam_info.get("box"):
+        bx, by, bw, bh = [int(v) for v in cam_info["box"]]
+        fcx = float(cam_info.get("face_cx", bx + bw * 0.5))
+        fcy = float(cam_info.get("face_cy", by + bh * 0.42))
+        esquina = str(cam_info.get("esquina") or "top_left")
+    else:
+        bw, bh = max(64, int(orig_w * 0.28)), max(64, int(orig_h * 0.30))
+        bx, by, fcx, fcy, esquina = 0, 0, bw * 0.5, bh * 0.42, "top_left"
+
+    bx = max(0, min(bx, max(0, orig_w - 2)))
+    by = max(0, min(by, max(0, orig_h - 2)))
+    bw = max(2, min(bw, orig_w - bx))
+    bh = max(2, min(bh, orig_h - by))
+
+    # 1. Panel superior: encuadre `cover` centrado en la cara dentro de la caja de la cámara
+    target_cam_ar = final_w / max(cam_h, 1)
+    src_cam_ar = bw / max(bh, 1)
+    if src_cam_ar > target_cam_ar:
+        crop_ch = bh
+        crop_cw = max(2, min(bw, int(round(bh * target_cam_ar))))
+    else:
+        crop_cw = bw
+        crop_ch = max(2, min(bh, int(round(bw / target_cam_ar))))
+    cx0 = int(round(fcx - crop_cw * 0.5))
+    cx0 = max(bx, min(cx0, bx + bw - crop_cw))
+    # Margen superior ligero para no cortar la cabeza del streamer
+    cy0 = int(round(fcy - crop_ch * 0.44))
+    cy0 = max(by, min(cy0, by + bh - crop_ch))
+    cam_crop = frame[cy0:cy0 + crop_ch, cx0:cx0 + crop_cw]
+    interp_cam = cv2.INTER_LANCZOS4 if (final_w > crop_cw or cam_h > crop_ch) else cv2.INTER_AREA
+    top_panel = cv2.resize(cam_crop, (final_w, cam_h), interpolation=interp_cam)
+
+    # 2. Panel inferior: juego / pantalla que está viendo el streamer
+    if str(game_mode or "zoom").strip().lower() == "completo":
+        # Juego completo 16:9 visible (HUD, minimapa, marcador) sobre fondo difuminado suave
+        esc = max(final_w / orig_w, game_h / orig_h)
+        pw, ph = max(2, int(orig_w * esc / 8)), max(2, int(orig_h * esc / 8))
+        peq = cv2.resize(frame, (pw, ph), interpolation=cv2.INTER_AREA)
+        x0, y0 = (pw - max(2, final_w // 8)) // 2, (ph - max(2, game_h // 8)) // 2
+        peq = peq[max(0, y0):max(0, y0) + max(2, game_h // 8), max(0, x0):max(0, x0) + max(2, final_w // 8)]
+        fondo = cv2.GaussianBlur(peq, (0, 0), 6)
+        bottom_panel = cv2.resize(fondo, (final_w, game_h), interpolation=cv2.INTER_LINEAR)
+        bottom_panel = (bottom_panel.astype(np.float32) * 0.48).astype(np.uint8)
+        fw = final_w
+        fh = int(round(orig_h * final_w / orig_w))
+        if fh > game_h:
+            fh, fw = game_h, int(round(orig_w * game_h / orig_h))
+        interp_g = cv2.INTER_LANCZOS4 if (fw > orig_w or fh > orig_h) else cv2.INTER_AREA
+        frente = cv2.resize(frame, (fw, fh), interpolation=interp_g)
+        gy = (game_h - fh) // 2
+        gx = (final_w - fw) // 2
+        bottom_panel[gy:gy + fh, gx:gx + fw] = frente
+    else:
+        # Zoom inteligente al centro de acción evitando duplicar la cámara de esquina
+        target_g_ar = final_w / max(game_h, 1)
+        if orig_w / max(orig_h, 1) > target_g_ar:
+            gch = orig_h
+            gcw = max(2, min(orig_w, int(round(orig_h * target_g_ar))))
+        else:
+            gcw = orig_w
+            gch = max(2, min(orig_h, int(round(orig_w / target_g_ar))))
+        gx0 = (orig_w - gcw) // 2
+        gy0 = (orig_h - gch) // 2
+        # Desplazar horizontalmente lo justo para sacar la facecam de la esquina si entra en el recorte
+        if esquina.endswith("left") and gx0 < bx + bw and (orig_w - gcw) >= min(bx + bw, orig_w - gcw):
+            gx0 = min(orig_w - gcw, max(gx0, min(bx + bw, int(orig_w * 0.34))))
+        elif esquina.endswith("right") and (gx0 + gcw) > bx:
+            gx0 = max(0, min(gx0, max(bx - gcw, int(orig_w * 0.66) - gcw)))
+        game_crop = frame[gy0:gy0 + gch, gx0:gx0 + gcw]
+        interp_g = cv2.INTER_LANCZOS4 if (final_w > gcw or game_h > gch) else cv2.INTER_AREA
+        bottom_panel = cv2.resize(game_crop, (final_w, game_h), interpolation=interp_g)
+
+    salida = np.vstack([top_panel, bottom_panel])
+    # Línea divisoria editorial limpia entre cámara y juego
+    salida[max(0, cam_h - 3):min(final_h, cam_h + 3)] = (17, 18, 20)
+    return salida
+
+
+def _encuadrar(frame, modo, cx, fixed_crop_w, final_w, final_h, zoom=1.0, par_cx=None, streamer_cfg=None):
     """Cuadro vertical 1080x1920 según el encuadre elegido."""
     orig_h, orig_w = frame.shape[:2]
+    if modo == "streamer" and streamer_cfg is not None:
+        return _componer_streamer(
+            frame, final_w, final_h,
+            streamer_cfg.get("cam_info"),
+            game_mode=streamer_cfg.get("game_mode", "zoom"),
+            cam_ratio=streamer_cfg.get("cam_ratio", 0.38),
+        )
     if modo == "difuminado":  # video completo al centro y el mismo video difuminado de fondo
         esc = max(final_w / orig_w, final_h / orig_h)
         pw, ph = max(2, int(orig_w * esc / 8)), max(2, int(orig_h * esc / 8))
@@ -474,7 +566,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         commentary_mode="off", commentary_style="gancho", commentary_voice="male", voice_config=None,
                         cold_open=False, jump_cuts=False, auto_split=False, ambient_music="off", clean_vocals=False,
                         auto_thumbnail="off", strip_metadata=True, auto_hashtags=True, politicas_tiktok="off",
-                        thumbnail_engine="clasico", thumbnail_style="kinetik"):
+                        thumbnail_engine="clasico", thumbnail_style="kinetik",
+                        streamer_corner="auto", streamer_game_mode="zoom", streamer_cam_ratio=0.38):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import bisect
@@ -656,7 +749,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         final_w, final_h = (720, 1280) if export_profile == "fast" else (1080, 1920)
         if video_format == "horizontal":
             final_w, final_h = final_h, final_w
-        if video_format in ("horizontal", "vertical_blur"):
+        if video_format == "vertical_streamer":
+            encuadre = "streamer"
+        elif video_format in ("horizontal", "vertical_blur"):
             encuadre = "difuminado"
         if speaker_dubbing:
             from smart_speakers import prepare_speakers
@@ -668,6 +763,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
         generated_files = []
         encuadre = encuadre if encuadre in ENCUADRES else "caras"
+        streamer_corner, streamer_game_mode, streamer_cam_ratio = reencuadre.validate_streamer_options(
+            streamer_corner, streamer_game_mode, streamer_cam_ratio
+        )
 
         from calidad_video import origen as calidad_del_origen
         calidad_origen = calidad_del_origen(orig_w, orig_h, final_w, final_h, encuadre)
@@ -710,9 +808,25 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             except Exception:
                 pass
 
-            # 3. Reencuadre: caras + hablante activo (+ pantalla dividida automática opcional)
-            usar_split_auto = bool(auto_split and video_format == "vertical" and encuadre in ("caras", "zoom_dinamico"))
-            if fixed_crop_w < orig_w and encuadre in ("caras", "zoom_dinamico"):
+            # 3. Reencuadre: modo Streamer (cámara arriba + juego abajo) o seguimiento de hablantes
+            encuadre_clip = encuadre
+            streamer_cfg_clip = None
+            if encuadre_clip == "streamer":
+                write_progress(f"Detectando cámara de esquina · clip {parte_num} de {len(seleccion)}...", p0)
+                cam_info = reencuadre.detectar_facecam_esquina(
+                    video_path, base + st, base + et, esquina=streamer_corner
+                )
+                if cam_info is not None:
+                    streamer_cfg_clip = {
+                        "cam_info": cam_info,
+                        "game_mode": streamer_game_mode,
+                        "cam_ratio": streamer_cam_ratio,
+                    }
+                else:
+                    write_progress(f"Sin cámara en esquina detectada en clip {parte_num}: uso seguimiento de caras.", p0)
+                    encuadre_clip = "caras"
+            usar_split_auto = bool(auto_split and video_format == "vertical" and encuadre_clip in ("caras", "zoom_dinamico"))
+            if fixed_crop_w < orig_w and encuadre_clip in ("caras", "zoom_dinamico"):
                 write_progress(f"Siguiendo caras y hablantes · clip {parte_num} de {len(seleccion)}...", p0)
                 if usar_split_auto:
                     tiempos, centros, modos_cam, pares_cam, cortes_cam = reencuadre.calcular_trayectoria_con_modos(
@@ -817,13 +931,16 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         cx, modo_inst, par_cx = reencuadre.estado_en(tiempos, centros, modos_cam, pares_cam, t_clamped)
                     else:
                         cx, modo_inst, par_cx = reencuadre.centro_en(tiempos, centros, t_clamped), "simple", None
-                    modo_ef = "dividido" if modo_inst == "dividido" else encuadre
+                    modo_ef = "dividido" if modo_inst == "dividido" else encuadre_clip
                     z = (_zoom_en(pulsos_ref, t_pulso if t_pulso is not None else t_clamped) if pulsos_ref else 1.0) * zoom_extra
-                    recorte = (
-                        _encuadrar(frame, modo_ef, cx, fixed_crop_w, rw, rh, z, par_cx)
-                        if par_cx is not None
-                        else _encuadrar(frame, modo_ef, cx, fixed_crop_w, rw, rh, z)
-                    )
+                    if modo_ef == "streamer" and streamer_cfg_clip is not None:
+                        recorte = _encuadrar(frame, "streamer", cx, fixed_crop_w, rw, rh, 1.0, None, streamer_cfg_clip)
+                    else:
+                        recorte = (
+                            _encuadrar(frame, modo_ef, cx, fixed_crop_w, rw, rh, z, par_cx)
+                            if par_cx is not None
+                            else _encuadrar(frame, modo_ef, cx, fixed_crop_w, rw, rh, z)
+                        )
                     if anti_copyright_filter:
                         recorte = cv2.convertScaleAbs(recorte, alpha=1 + 0.01 * float(filter_strength), beta=float(filter_strength))
                         f32 = recorte.astype(np.float32)
@@ -851,12 +968,15 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                 if hasattr(reencuadre, "estado_en")
                                 else (reencuadre.centro_en(tiempos, centros, t_snap), "simple", None)
                             )
-                            modo_ef_s = "dividido" if modo_s == "dividido" else encuadre
-                            snap_rgb = (
-                                _encuadrar(raw_snap, modo_ef_s, cx_s, fixed_crop_w, pw, ph, 1.0, par_s)
-                                if par_s is not None
-                                else _encuadrar(raw_snap, modo_ef_s, cx_s, fixed_crop_w, pw, ph, 1.0)
-                            )
+                            modo_ef_s = "dividido" if modo_s == "dividido" else encuadre_clip
+                            if modo_ef_s == "streamer" and streamer_cfg_clip is not None:
+                                snap_rgb = _encuadrar(raw_snap, "streamer", cx_s, fixed_crop_w, pw, ph, 1.0, None, streamer_cfg_clip)
+                            else:
+                                snap_rgb = (
+                                    _encuadrar(raw_snap, modo_ef_s, cx_s, fixed_crop_w, pw, ph, 1.0, par_s)
+                                    if par_s is not None
+                                    else _encuadrar(raw_snap, modo_ef_s, cx_s, fixed_crop_w, pw, ph, 1.0)
+                                )
                             if getattr(snap_rgb, "ndim", 0) == 3:
                                 os.makedirs(_live_dir, exist_ok=True)
                                 snap_path = os.path.join(_live_dir, f"preview_clip_{parte_num}.jpg")
@@ -1427,7 +1547,10 @@ def main(argv):
                 auto_hashtags=cfg.get("auto_hashtags", True),
                 politicas_tiktok=cfg.get("politicas_tiktok", "alto"),
                 thumbnail_engine=cfg.get("thumbnail_engine", "clasico"),
-                thumbnail_style=cfg.get("thumbnail_style", "kinetik"))
+                thumbnail_style=cfg.get("thumbnail_style", "kinetik"),
+                streamer_corner=cfg.get("streamer_corner", "auto"),
+                streamer_game_mode=cfg.get("streamer_game_mode", "zoom"),
+                streamer_cam_ratio=cfg.get("streamer_cam_ratio", 0.38))
         except InicioFueraDeVideo as e:
             print("RESULT_ERROR:" + json.dumps({"code": "inicio_fuera_video"}))
             write_progress(f"Error: {e}", -1)

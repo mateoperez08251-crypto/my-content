@@ -313,3 +313,54 @@ class Cliente:
                 if i == intentos - 1:
                     raise ServidorCaido(f"se cortó la descarga del clip ({type(e).__name__})") from e
                 time.sleep(5)
+
+    def reaccionar(self, video_path, payload, sprites_paths, destino_mp4, progreso=None):
+        """Envía el video + personaje al servidor Colab remoto para renderizar con GPU/Lip-Sync."""
+        import json as _json
+        archivos = []
+        abiertos = []
+        try:
+            fv = open(video_path, 'rb')
+            abiertos.append(fv)
+            archivos.append(('video', (os.path.basename(video_path), fv, 'video/mp4')))
+            for exp, ruta in (sprites_paths or {}).items():
+                if ruta and os.path.isfile(ruta):
+                    fs = open(ruta, 'rb')
+                    abiertos.append(fs)
+                    archivos.append((f'sprite_{exp}', (f'{exp}.png', fs, 'image/png')))
+            r = self._pedir(
+                'POST', '/api/bot/remoto/reaccionar',
+                data={'payload': _json.dumps(payload, ensure_ascii=False)},
+                files=archivos, timeout=(15, 600),
+            )
+            jid = self._json(r)['job_id']
+        finally:
+            for fh in abiertos:
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+
+        inicio = time.monotonic()
+        while time.monotonic() - inicio < 3600:
+            st = self._json(self._pedir('GET', f'/api/bot/remoto/reaccion/{jid}'))
+            if callable(progreso):
+                progreso(st.get('mensaje') or 'Renderizando en Colab…', int(st.get('progreso') or 0))
+            if st.get('estado') == 'listo':
+                self._bajar(f'/api/bot/remoto/reaccion/{jid}/video', destino_mp4)
+                thumb_dst = os.path.splitext(destino_mp4)[0] + '_miniatura.jpg'
+                try:
+                    if st.get('tiene_miniatura'):
+                        self._bajar(f'/api/bot/remoto/reaccion/{jid}/miniatura', thumb_dst)
+                except Exception:
+                    thumb_dst = ''
+                return {
+                    'video': destino_mp4,
+                    'miniatura': thumb_dst if thumb_dst and os.path.isfile(thumb_dst) else '',
+                    'motor_usado': st.get('motor_usado', 'expresivo'),
+                    'duracion': st.get('duracion', 0),
+                }
+            if st.get('estado') == 'error':
+                raise FalloTrabajo(st.get('error') or 'Error al renderizar la reacción en Colab.')
+            time.sleep(2.5)
+        raise FalloTrabajo('Tiempo agotado esperando la reacción en Colab.')

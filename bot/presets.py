@@ -17,6 +17,7 @@ CALIDAD = {
     'cold_open': False, 'jump_cuts': False, 'auto_split': False,
     'ambient_music': 'off', 'clean_vocals': False,
     'auto_thumbnail': 'off', 'thumbnail_engine': 'clasico', 'thumbnail_style': 'kinetik', 'strip_metadata': True, 'auto_hashtags': True, 'politicas_tiktok': 'alto',
+    'streamer_corner': 'auto', 'streamer_game_mode': 'zoom', 'streamer_cam_ratio': 0.38,
 }
 
 
@@ -69,6 +70,16 @@ def snapshot(opciones):
     if 'thumbnail_style' in result:
         from smart_thumbnail import validate_thumbnail_style
         result['thumbnail_style'] = validate_thumbnail_style(result.get('thumbnail_style', 'kinetik'))
+    if result.get('video_format') == 'vertical_streamer':
+        result['encuadre'] = 'streamer'
+    if any(k in result for k in ('streamer_corner', 'streamer_game_mode', 'streamer_cam_ratio')) or result.get('encuadre') == 'streamer':
+        from reencuadre import validate_streamer_options
+        sc, sgm, scr = validate_streamer_options(
+            result.get('streamer_corner', 'auto'),
+            result.get('streamer_game_mode', 'zoom'),
+            result.get('streamer_cam_ratio', 0.38),
+        )
+        result.update(streamer_corner=sc, streamer_game_mode=sgm, streamer_cam_ratio=scr)
     if 'strip_metadata' in result:
         sm = result.get('strip_metadata', True)
         if not isinstance(sm, bool):
