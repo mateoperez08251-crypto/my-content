@@ -17,7 +17,7 @@ CALIDAD = {
     'cold_open': False, 'jump_cuts': False, 'auto_split': False,
     'ambient_music': 'off', 'clean_vocals': False,
     'auto_thumbnail': 'off', 'thumbnail_engine': 'clasico', 'thumbnail_style': 'kinetik', 'strip_metadata': True, 'auto_hashtags': True, 'politicas_tiktok': 'alto',
-    'streamer_corner': 'auto', 'streamer_game_mode': 'zoom', 'streamer_cam_ratio': 0.38,
+    'streamer_corner': 'auto', 'streamer_game_mode': 'cam_arriba_centro', 'streamer_cam_ratio': 0.26,
 }
 
 
@@ -76,8 +76,8 @@ def snapshot(opciones):
         from reencuadre import validate_streamer_options
         sc, sgm, scr = validate_streamer_options(
             result.get('streamer_corner', 'auto'),
-            result.get('streamer_game_mode', 'zoom'),
-            result.get('streamer_cam_ratio', 0.38),
+            result.get('streamer_game_mode', 'cam_arriba_centro'),
+            result.get('streamer_cam_ratio', 0.26),
         )
         result.update(streamer_corner=sc, streamer_game_mode=sgm, streamer_cam_ratio=scr)
     if 'strip_metadata' in result:

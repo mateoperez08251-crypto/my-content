@@ -773,28 +773,28 @@ def estado_en(tiempos, centros, modos, pares, t):
 
 
 STREAMER_CORNERS = ("auto", "top_left", "top_right", "bottom_left", "bottom_right")
-STREAMER_GAME_MODES = ("zoom", "completo")
+STREAMER_GAME_MODES = ("cam_arriba_centro", "zoom", "completo")
 
 
-def validate_streamer_options(corner="auto", game_mode="zoom", cam_ratio=0.38):
+def validate_streamer_options(corner="auto", game_mode="cam_arriba_centro", cam_ratio=0.26):
     """Valida `(streamer_corner, streamer_game_mode, streamer_cam_ratio)`."""
     c = str(corner or "auto").strip().lower()
     if c not in STREAMER_CORNERS:
         raise ValueError("Esquina de cámara no válida. Usa auto, top_left, top_right, bottom_left o bottom_right.")
-    gm = str(game_mode or "zoom").strip().lower()
+    gm = str(game_mode or "cam_arriba_centro").strip().lower()
     if gm not in STREAMER_GAME_MODES:
-        raise ValueError("Modo de juego no válido. Elige zoom o completo.")
+        raise ValueError("Modo de juego no válido. Elige cam_arriba_centro, zoom o completo.")
     if isinstance(cam_ratio, bool):
-        raise ValueError("La altura de cámara debe ser un número entre 0.28 y 0.48.")
+        raise ValueError("La altura de cámara debe ser un número entre 0.20 y 0.48.")
     try:
         r = float(cam_ratio)
     except (ValueError, TypeError):
-        raise ValueError("La altura de cámara debe ser un número entre 0.28 y 0.48.") from None
+        raise ValueError("La altura de cámara debe ser un número entre 0.20 y 0.48.") from None
     if not math.isfinite(r):
         raise ValueError("La altura de cámara debe ser un número finito.")
     if r > 1.0:
         r = r / 100.0
-    r = max(0.28, min(0.48, round(r, 3)))
+    r = max(0.20, min(0.48, round(r, 3)))
     return c, gm, r
 
 

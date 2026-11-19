@@ -55,7 +55,7 @@ def _escribir_wav_sintetico(ruta: str, dur_s: float = 0.8):
 class StreamerFramingTests(unittest.TestCase):
     def test_validate_streamer_options_and_presets_snapshot(self):
         self.assertEqual(reencuadre.validate_streamer_options("top_right", "completo", 42), ("top_right", "completo", 0.42))
-        self.assertEqual(reencuadre.validate_streamer_options("auto", "zoom", 0.1), ("auto", "zoom", 0.28))
+        self.assertEqual(reencuadre.validate_streamer_options("auto", "cam_arriba_centro", 0.1), ("auto", "cam_arriba_centro", 0.20))
         with self.assertRaises(ValueError):
             reencuadre.validate_streamer_options("centro", "zoom", 0.38)
         with self.assertRaises(ValueError):
@@ -64,13 +64,13 @@ class StreamerFramingTests(unittest.TestCase):
         snap = presets.snapshot({
             "video_format": "vertical_streamer",
             "streamer_corner": "bottom_right",
-            "streamer_game_mode": "completo",
-            "streamer_cam_ratio": 0.44,
+            "streamer_game_mode": "cam_arriba_centro",
+            "streamer_cam_ratio": 0.24,
         })
         self.assertEqual(snap["encuadre"], "streamer")
         self.assertEqual(snap["streamer_corner"], "bottom_right")
-        self.assertEqual(snap["streamer_game_mode"], "completo")
-        self.assertEqual(snap["streamer_cam_ratio"], 0.44)
+        self.assertEqual(snap["streamer_game_mode"], "cam_arriba_centro")
+        self.assertEqual(snap["streamer_cam_ratio"], 0.24)
 
     def test_detectar_facecam_esquina_y_composicion_zoom_y_completo(self):
         # 6 frames 640x360 con caja roja fija arriba-izquierda (facecam) y contenido azul móvil abajo
@@ -97,13 +97,18 @@ class StreamerFramingTests(unittest.TestCase):
             forzado = reencuadre.detectar_facecam_en_frames(frames, 1920, 1080, esquina="bottom_right", detector=object())
             self.assertEqual(forzado["esquina"], "bottom_right")
 
-        # Composición 1080x1920 en ambos modos (zoom y completo)
+        # Composición 1080x1920 en los 3 modos (cam_arriba_centro, zoom y completo)
         src_rgb = cv2.cvtColor(cv2.resize(frames[0], (1920, 1080)), cv2.COLOR_BGR2RGB)
+        out_top = smart_editor._componer_streamer(src_rgb, 1080, 1920, info, game_mode="cam_arriba_centro", cam_ratio=0.24)
         out_zoom = smart_editor._componer_streamer(src_rgb, 1080, 1920, info, game_mode="zoom", cam_ratio=0.38)
         out_full = smart_editor._componer_streamer(src_rgb, 1080, 1920, info, game_mode="completo", cam_ratio=0.38)
+        self.assertEqual(out_top.shape, (1920, 1080, 3))
         self.assertEqual(out_zoom.shape, (1920, 1080, 3))
         self.assertEqual(out_full.shape, (1920, 1080, 3))
-        # Panel superior debe capturar el color rojo de la facecam (R > B en RGB)
+        # En cam_arriba_centro la cápsula centrada arriba tiene el rojo de la facecam y los costados tienen el juego
+        self.assertGreater(float(out_top[200, 540, 0]), float(out_top[200, 540, 2]) + 40)
+        self.assertGreater(float(out_top[200, 40, 2]), float(out_top[200, 40, 0]) + 40)
+        # Panel superior en franja debe capturar el color rojo de la facecam (R > B en RGB)
         self.assertGreater(float(out_zoom[200, 540, 0]), float(out_zoom[200, 540, 2]) + 40)
         # Los modos zoom y completo producen paneles inferiores distintos
         self.assertFalse(np.array_equal(out_zoom[900:, :], out_full[900:, :]))
@@ -173,6 +178,7 @@ class ReaccionesIATests(unittest.TestCase):
 
     def test_vistas_previas_webp_y_ui_clip_presentes(self):
         for fname in (
+            "encuadre_streamer_top_center.webp",
             "encuadre_streamer_zoom.webp",
             "encuadre_streamer_completo.webp",
             "reaccion_split.webp",
@@ -184,23 +190,46 @@ class ReaccionesIATests(unittest.TestCase):
             with Image.open(p) as im:
                 self.assertEqual(im.size, (270, 480))
 
+        for vname in (
+            "prev_streamer_top_center.mp4",
+            "prev_streamer_zoom.mp4",
+            "prev_streamer_completo.mp4",
+            "prev_reaccion_split.mp4",
+            "prev_reaccion_pip.mp4",
+            "prev_reaccion_pausa.mp4",
+        ):
+            vp = ROOT / "static" / "presets" / vname
+            self.assertTrue(vp.is_file(), vname)
+            self.assertGreater(vp.stat().st_size, 50_000, vname)
+            dur = sr.duracion_video(str(vp))
+            self.assertAlmostEqual(dur, 10.0, delta=0.4)
+
         client = content.app.test_client()
         html = client.get("/clip").get_data(as_text=True)
         for token in (
             'value="vertical_streamer"',
-            "encuadre_streamer_zoom.webp",
-            "encuadre_streamer_completo.webp",
+            'value="cam_arriba_centro"',
+            'id="live-encuadre"',
+            'id="live-streamer-esquina"',
+            "prev_streamer_top_center.mp4",
+            "prev_streamer_zoom.mp4",
+            "prev_streamer_completo.mp4",
             'data-vista="reacciones"',
             'id="vista-reacciones"',
-            "reaccion_split.webp",
-            "reaccion_pip.webp",
-            "reaccion_pausa.webp",
+            'id="rp-estilo"',
+            'id="rp-modelo-img"',
+            "generarImagenBasePersonaje()",
+            "prev_reaccion_split.mp4",
+            "prev_reaccion_pip.mp4",
+            "prev_reaccion_pausa.mp4",
             "analizarVideoReaccion()",
             "renderizarVideoReaccion()",
             "enviarReaccionACola()",
         ):
             self.assertIn(token, html)
 
+        self.assertIn("3D Pixar", rc.construir_prompt_personaje("chico latino", "animado_3d"))
+        self.assertIn("photorealistic", rc.construir_prompt_personaje("streamer real", "realista"))
         st_ls = rl.estado()
         self.assertIn("disponible", st_ls)
 

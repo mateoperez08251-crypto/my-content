@@ -355,6 +355,35 @@ class LiveManager:
                       dubbing_language='original')
         if preset:
             config.update(self.motor.cargar_preset(preset) or {})
+        streamer_mode = str(data.get('streamer_mode') or '').strip().lower()
+        if streamer_mode in ('cam_arriba_centro', 'zoom', 'completo'):
+            from reencuadre import validate_streamer_options
+            sc, sgm, scr = validate_streamer_options(
+                data.get('streamer_corner', config.get('streamer_corner', 'auto')),
+                streamer_mode,
+                data.get('streamer_cam_ratio', 0.24 if streamer_mode == 'cam_arriba_centro' else 0.34),
+            )
+            config.update(
+                video_format='vertical_streamer',
+                encuadre='streamer',
+                streamer_corner=sc,
+                streamer_game_mode=sgm,
+                streamer_cam_ratio=scr,
+            )
+        elif config.get('video_format') == 'vertical_streamer' or config.get('encuadre') == 'streamer':
+            from reencuadre import validate_streamer_options
+            sc, sgm, scr = validate_streamer_options(
+                config.get('streamer_corner', 'auto'),
+                config.get('streamer_game_mode', 'cam_arriba_centro'),
+                config.get('streamer_cam_ratio', 0.24),
+            )
+            config.update(
+                video_format='vertical_streamer',
+                encuadre='streamer',
+                streamer_corner=sc,
+                streamer_game_mode=sgm,
+                streamer_cam_ratio=scr,
+            )
         for key in ('source','start_time','end_time','skip_intro_seconds','cast_id','voice_cast','custom_output_dir',
                     'subir_tiktok','subir_youtube','subir_facebook'):
             config.pop(key, None)

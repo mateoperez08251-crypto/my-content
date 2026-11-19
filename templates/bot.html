@@ -1252,13 +1252,15 @@ body.tema-kinetik.tema-kinetik-oscuro ::-webkit-scrollbar-thumb{background:rgba(
 }
 .visual-card:hover:not(:disabled){border-color:var(--acento);transform:translateY(-2px)}
 .visual-card.activo{border-color:var(--acento);box-shadow:0 0 0 2px var(--acento-suave)}
-.visual-card img{display:block;width:auto;max-width:100%;height:224px;aspect-ratio:9/16;margin:0 auto;object-fit:cover;border-radius:8px;background:#0b0d12;border:1.5px solid var(--borde)}
+.visual-card img,.visual-card video{display:block;width:auto;max-width:100%;height:234px;aspect-ratio:9/16;margin:0 auto;object-fit:cover;border-radius:8px;background:#0b0d12;border:1.5px solid var(--borde);pointer-events:none}
+.visual-card .vc-media{position:relative;display:flex;justify-content:center}
+.visual-card .vc-tag{position:absolute;top:6px;right:calc(50% - 60px);padding:2px 6px;font:700 9.5px/1 var(--mono);background:#111214;color:#E8FF00;border:1px solid #E8FF00;border-radius:3px;pointer-events:none}
 .visual-card b{display:block;font:800 13px/1.25 var(--titulo);white-space:normal;text-transform:uppercase;letter-spacing:.02em}
 .visual-card small{display:block;font:500 12px/1.4 var(--cuerpo);color:var(--suave);white-space:normal;text-transform:none}
 body.tema-kinetik .visual-card{border-radius:6px;border:1.5px solid var(--tinta);background:var(--bg);color:var(--tinta)}
 body.tema-kinetik .visual-card:hover:not(:disabled){background:var(--panel-solid);color:var(--tinta);box-shadow:4px 4px 0 rgba(17,18,20,.85)}
 body.tema-kinetik .visual-card.activo{border:2px solid var(--acento);background:var(--panel-solid);color:var(--tinta);box-shadow:5px 5px 0 var(--acento)}
-body.tema-kinetik .visual-card img{border-radius:4px;border:2px solid var(--tinta);box-shadow:3px 3px 0 rgba(17,18,20,.82)}
+body.tema-kinetik .visual-card img,body.tema-kinetik .visual-card video{border-radius:4px;border:2px solid var(--tinta);box-shadow:3px 3px 0 rgba(17,18,20,.82)}
 body.tema-kinetik.tema-kinetik-oscuro .visual-card{background:var(--panel);color:var(--texto);border-color:var(--tinta)}
 body.tema-kinetik.tema-kinetik-oscuro .visual-card:hover:not(:disabled){background:var(--panel-elev);color:var(--texto);border-color:var(--acento);box-shadow:4px 4px 0 rgba(0,0,0,.78)}
 body.tema-kinetik.tema-kinetik-oscuro .visual-card.activo{background:var(--panel-elev);color:var(--texto);border-color:var(--acento);box-shadow:5px 5px 0 var(--acento)}
@@ -1591,19 +1593,24 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
             <div id="ed-streamer-opciones" hidden style="margin-top:12px;padding-top:12px;border-top:1px solid var(--borde)">
               <div class="ajustes">
                 <div><label for="ed-streamer-esquina">Dónde está la cámara del streamer</label><select id="ed-streamer-esquina"><option value="auto">Automático (detectar esquina)</option><option value="top_left">Arriba · Izquierda</option><option value="top_right">Arriba · Derecha</option><option value="bottom_left">Abajo · Izquierda</option><option value="bottom_right">Abajo · Derecha</option></select></div>
-                <div><label for="ed-streamer-modo">Vista del juego / pantalla abajo</label><select id="ed-streamer-modo" onchange="actualizarTarjetasStreamer()"><option value="zoom">Zoom acción (llena todo el ancho)</option><option value="completo">Juego completo (todo el HUD visible)</option></select></div>
-                <div><label for="ed-streamer-altura">Altura de la cámara arriba</label><select id="ed-streamer-altura"><option value="0.34">34% · Más espacio al juego</option><option value="0.38">38% · Equilibrado (recomendado)</option><option value="0.44">44% · Cámara protagonista</option></select></div>
+                <div><label for="ed-streamer-modo">Estilo de cámara y juego</label><select id="ed-streamer-modo" onchange="actualizarTarjetasStreamer()"><option value="cam_arriba_centro">Cámara pequeña centrada arriba + Juego grande (recomendado)</option><option value="zoom">Franja cámara arriba + Zoom acción abajo</option><option value="completo">Franja cámara arriba + Juego completo (HUD 100%)</option></select></div>
+                <div><label for="ed-streamer-altura">Tamaño de la cámara arriba</label><select id="ed-streamer-altura"><option value="0.24">24% · Compacta · Juego gigante (recomendado)</option><option value="0.30">30% · Pequeña</option><option value="0.38">38% · Equilibrada</option><option value="0.44">44% · Cámara grande</option></select></div>
               </div>
-              <div class="visual-picker" aria-label="Ejemplos visuales del encuadre Streamer">
-                <button type="button" class="visual-card activo" data-streamer-prev="zoom" onclick="elegirModoStreamer('zoom')">
-                  <img src="/static/presets/encuadre_streamer_zoom.webp" loading="lazy" alt="Vista previa Streamer Zoom acción">
-                  <b>Zoom acción · Sin bordes</b>
-                  <small>Cámara del streamer enfocada arriba y centro de acción del juego abajo sin duplicar la cámara.</small>
+              <div class="visual-picker" aria-label="Ejemplos en video IA de 10 segundos del encuadre Streamer">
+                <button type="button" class="visual-card activo" data-streamer-prev="cam_arriba_centro" onclick="elegirModoStreamer('cam_arriba_centro')">
+                  <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_streamer_top_center.mp4" poster="/static/presets/encuadre_streamer_top_center.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">CAM REAL</span></div>
+                  <b>Cámara centrada arriba · Juego gigante</b>
+                  <small>Recorta la cámara real del streamer en una cápsula pequeña centrada arriba del todo mientras el juego ocupa toda la pantalla con máxima nitidez.</small>
+                </button>
+                <button type="button" class="visual-card" data-streamer-prev="zoom" onclick="elegirModoStreamer('zoom')">
+                  <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_streamer_zoom.mp4" poster="/static/presets/encuadre_streamer_zoom.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">CAM REAL</span></div>
+                  <b>Franja arriba · Zoom acción</b>
+                  <small>Cámara real del streamer en franja superior y centro de acción del juego abajo sin bordes ni cámara duplicada.</small>
                 </button>
                 <button type="button" class="visual-card" data-streamer-prev="completo" onclick="elegirModoStreamer('completo')">
-                  <img src="/static/presets/encuadre_streamer_completo.webp" loading="lazy" alt="Vista previa Streamer Juego completo HUD">
-                  <b>Juego completo · HUD 100%</b>
-                  <small>Cámara del streamer arriba y toda la pantalla 16:9 abajo con fondo suave para ver minimapa y marcadores.</small>
+                  <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_streamer_completo.mp4" poster="/static/presets/encuadre_streamer_completo.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">CAM REAL</span></div>
+                  <b>Franja arriba · Juego completo HUD</b>
+                  <small>Cámara real del streamer arriba y pantalla 16:9 completa abajo sobre fondo suave para ver todo el minimapa, vida y marcadores.</small>
                 </button>
               </div>
             </div>
@@ -1665,6 +1672,8 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
         <div><label for="live-seconds">Duración del clip (s)</label><input id="live-seconds" type="number" min="10" max="300" value="60" onchange="modoLive()"></div>
         <div id="live-window-group" hidden><label for="live-window">Analizar cada (s)</label><input id="live-window" type="number" min="120" max="900" value="180"></div>
         <div><label for="live-preset">Preset de Smart Split</label><select id="live-preset"><option value="">Modo ligero (sin preset)</option></select></div>
+        <div><label for="live-encuadre">Cámara real del streamer (9:16)</label><select id="live-encuadre" onchange="if($('live-esquina-wrap'))$('live-esquina-wrap').hidden=!this.value"><option value="cam_arriba_centro" selected>🎥 Cámara real pequeña centrada arriba + Juego grande</option><option value="zoom">🎥 Franja cámara real arriba + Zoom acción</option><option value="completo">🎥 Franja cámara real arriba + Juego completo (HUD)</option><option value="">Usar el encuadre del preset</option></select></div>
+        <div id="live-esquina-wrap"><label for="live-streamer-esquina">Esquina de su cámara</label><select id="live-streamer-esquina"><option value="auto">Automático (detectar esquina)</option><option value="top_left">Arriba · Izquierda</option><option value="top_right">Arriba · Derecha</option><option value="bottom_left">Abajo · Izquierda</option><option value="bottom_right">Abajo · Derecha</option></select></div>
         <div><label for="live-buffer">Búfer máx. (MiB)</label><input id="live-buffer" type="number" min="256" max="16384" value="1024"></div>
       </div>
       <label>Cuentas de destino</label><div id="chips-live" class="chips"></div>
@@ -1864,13 +1873,19 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
           <div><label for="rp-intensidad">Intensidad (1-5)</label><input id="rp-intensidad" type="number" min="1" max="5" value="4"></div>
         </div>
         <div class="ajustes" style="margin-top:8px">
+          <div><label for="rp-estilo">Estilo visual del personaje</label><select id="rp-estilo"><option value="animado_3d">3D Animado (estilo Pixar / cine)</option><option value="anime">Anime / VTuber (cel-shaded)</option><option value="realista">Realista / Fotográfico (streamer real)</option><option value="caricatura_2d">Caricatura 2D / Cómic editorial</option><option value="cyberpunk">3D Cyberpunk / Gamer Neón</option></select></div>
+          <div><label for="rp-modelo-img">Modelo IA para crear imagen</label><select id="rp-modelo-img"><option value="auto">Automático (Colab GPU o FLUX nube)</option><option value="flux_nube">FLUX en nube (gratis · funciona en PC 4 GB)</option><option value="sdxl_turbo">SDXL-Turbo (Colab T4 15 GB · rápido)</option><option value="zimage_turbo">Z-Image-Turbo 6B (Colab L4/A100 16+ GB)</option></select></div>
+          <div><label for="rp-desc-visual">Descripción física para crear con IA</label><input id="rp-desc-visual" maxlength="400" placeholder="Ej.: joven latino con hoodie negro, gorra verde neón y audífonos naranjas"></div>
+        </div>
+        <div class="ajustes" style="margin-top:8px">
           <div><label for="rp-muletillas">Muletillas o estilo de habla (opcional)</label><input id="rp-muletillas" maxlength="220" placeholder="Ej.: ¡Brutal!, espera un segundo, qué locura"></div>
           <div><label for="rp-prompt">Instrucciones extra de personalidad (opcional)</label><input id="rp-prompt" maxlength="600" placeholder="Ej.: Reacciona como comentarista deportivo latino"></div>
         </div>
         <div class="fila" style="margin-top:10px">
           <button type="button" class="prim" onclick="guardarPersonajeReaccion()">Guardar personaje</button>
+          <button type="button" id="rp-btn-gen-img" onclick="generarImagenBasePersonaje()">🎨 Crear imagen con IA</button>
           <button type="button" id="rp-btn-probar-voz" onclick="probarVozPersonaje()">🔊 Probar voz</button>
-          <button type="button" id="rp-btn-gen-exp" onclick="generarExpresionesPersonaje()">✨ Generar 5 expresiones (Colab GPU)</button>
+          <button type="button" id="rp-btn-gen-exp" onclick="generarExpresionesPersonaje()">✨ 5 expresiones (Qwen Colab GPU)</button>
           <span id="rp-estado" class="muted" aria-live="polite" style="flex:2"></span>
         </div>
         <div id="rp-expresiones-wrap" hidden style="margin-top:12px">
@@ -1903,19 +1918,19 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
       </div>
 
       <input type="hidden" id="rr-layout" value="split">
-      <div class="visual-picker" aria-label="Ejemplos visuales de cómo se verá el video-reacción">
+      <div class="visual-picker" aria-label="Ejemplos en video IA de 10 segundos de cómo se verá el video-reacción">
         <button type="button" class="visual-card activo" data-r-layout="split" onclick="elegirLayoutReaccion('split')">
-          <img src="/static/presets/reaccion_split.webp" loading="lazy" alt="Vista previa Reacción Split 50/50">
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_split.mp4" poster="/static/presets/reaccion_split.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">10S IA</span></div>
           <b>Split 50/50 · Arriba/Abajo</b>
           <small>Video original arriba y tu personaje IA animado abajo con onda de voz y subtítulos en el centro.</small>
         </button>
         <button type="button" class="visual-card" data-r-layout="pip" onclick="elegirLayoutReaccion('pip')">
-          <img src="/static/presets/reaccion_pip.webp" loading="lazy" alt="Vista previa Reacción PiP Esquina">
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_pip.mp4" poster="/static/presets/reaccion_pip.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">10S IA</span></div>
           <b>Esquina PiP · Streamer IA</b>
           <small>Video vertical completo con tu personaje reaccionando desde la esquina inferior en marco Kinetik.</small>
         </button>
         <button type="button" class="visual-card" data-r-layout="pausar" onclick="elegirLayoutReaccion('pausar')">
-          <img src="/static/presets/reaccion_pausa.webp" loading="lazy" alt="Vista previa Reacción Pausar y Comentar">
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_pausa.mp4" poster="/static/presets/reaccion_pausa.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">10S IA</span></div>
           <b>Pausar y Comentar · Primer plano</b>
           <small>Pausa el video en los mejores segundos, entra el personaje en grande a opinar y luego sigue el clip.</small>
         </button>
@@ -2082,6 +2097,7 @@ function cambiarPestanaBot(nombre) {
   const titulo = document.getElementById?.('titulo-vista');
   if (titulo) titulo.textContent = {cola:'Cola y actividad',anadir:'Añadir videos',cuentas:'Cuentas y reglas',edicion:'Edición IA',sistema:'Ritmo, Colab y avisos',reacciones:'Reacciones IA con personajes'}[destino];
   if (destino === 'reacciones' && typeof cargarReaccionesIA === 'function') cargarReaccionesIA();
+  if (typeof gestionarVideosPreview === 'function') setTimeout(gestionarVideosPreview, 60);
 }
 if (typeof window !== 'undefined' && typeof URLSearchParams !== 'undefined') {
   const params = new URLSearchParams(window.location?.search || '');
@@ -2758,6 +2774,8 @@ async function iniciarLive() {
     const result = await api('/api/bot/lives', {url:$('live-url').value, mode:$('live-mode').value,
       seconds:Number($('live-seconds').value), window:Number($('live-window').value),
       preset:$('live-preset').value, buffer_mb:Number($('live-buffer').value),
+      streamer_mode:$('live-encuadre')?.value || '',
+      streamer_corner:$('live-streamer-esquina')?.value || 'auto',
       accounts:[...selLive], text:$('live-text').value});
     toast('Solicitud de captura creada. El estado indicará si conecta con el live.');
     await cargarLives();
@@ -3458,8 +3476,8 @@ function seleccionarPreset() {
     'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100],
     'ed-comentario':['commentary_mode','off'], 'ed-comentario-estilo':['commentary_style','gancho'],
     'ed-comentario-voz':['commentary_voice','male'], 'ed-ambiente':['ambient_music','off'],
-    'ed-streamer-esquina':['streamer_corner','auto'], 'ed-streamer-modo':['streamer_game_mode','zoom'],
-    'ed-streamer-altura':['streamer_cam_ratio','0.38']};
+    'ed-streamer-esquina':['streamer_corner','auto'], 'ed-streamer-modo':['streamer_game_mode','cam_arriba_centro'],
+    'ed-streamer-altura':['streamer_cam_ratio','0.24']};
   for (const [id,[key,def]] of Object.entries(mapping)) {
     const value = String(presetBase[key] ?? def), element = $(id);
     if (!element) continue;
@@ -3509,19 +3527,29 @@ function formatoInicio(value) {
 function vistaComentario() {
   if ($('ed-comentario-opciones')) $('ed-comentario-opciones').hidden = ($('ed-comentario')?.value || 'off') === 'off';
 }
+function gestionarVideosPreview() {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+  document.querySelectorAll('video.prev-ia-vid').forEach(v => {
+    const visible = Boolean(v.offsetParent !== null && !v.closest?.('[hidden]'));
+    if (visible) { v.play?.().catch?.(() => {}); }
+    else { v.pause?.(); }
+  });
+}
 function actualizarTarjetasStreamer() {
-  const modo = $('ed-streamer-modo')?.value || 'zoom';
+  const modo = $('ed-streamer-modo')?.value || 'cam_arriba_centro';
   if (typeof document !== 'undefined') document.querySelectorAll?.('[data-streamer-prev]')?.forEach(el => {
     el?.classList?.toggle('activo', el?.dataset?.streamerPrev === modo);
   });
 }
 function elegirModoStreamer(modo) {
-  if ($('ed-streamer-modo')) $('ed-streamer-modo').value = modo === 'completo' ? 'completo' : 'zoom';
+  const ok = ['cam_arriba_centro','zoom','completo'].includes(modo) ? modo : 'cam_arriba_centro';
+  if ($('ed-streamer-modo')) $('ed-streamer-modo').value = ok;
   actualizarTarjetasStreamer();
 }
 function vistaFormatoEdicion() {
   if ($('ed-streamer-opciones')) $('ed-streamer-opciones').hidden = ($('ed-formato')?.value || '') !== 'vertical_streamer';
   actualizarTarjetasStreamer();
+  gestionarVideosPreview();
 }
 function vistaSubtitulos() {
   $('sub-preview').hidden = $('ed-subs').value === 'no';
@@ -3556,8 +3584,8 @@ function ajustesEdicion() {
     auto_split:$('ed-auto-split')?.value === 'si',
     clean_vocals:$('ed-limpiar-voz')?.value === 'si',
     streamer_corner:$('ed-streamer-esquina')?.value || 'auto',
-    streamer_game_mode:$('ed-streamer-modo')?.value === 'completo' ? 'completo' : 'zoom',
-    streamer_cam_ratio:Number($('ed-streamer-altura')?.value || 0.38)};
+    streamer_game_mode:['cam_arriba_centro','zoom','completo'].includes($('ed-streamer-modo')?.value) ? $('ed-streamer-modo').value : 'cam_arriba_centro',
+    streamer_cam_ratio:Number($('ed-streamer-altura')?.value || 0.24)};
   if (c.video_format === 'vertical_streamer') c.encuadre = 'streamer';
   else if (c.video_format !== presetBase.video_format) c.encuadre = c.video_format === 'vertical' ? 'caras' : 'difuminado';
   for (const key of ['source','start_time','end_time','cast_id','voice_cast','voice_config','custom_output_dir','output_path',
@@ -4389,6 +4417,7 @@ function nuevoPersonajeReaccion() {
   _reaccEditandoId = null;
   if ($('reacc-form-titulo')) $('reacc-form-titulo').textContent = 'Crear nuevo personaje';
   if ($('rp-nombre')) $('rp-nombre').value = '';
+  if ($('rp-desc-visual')) $('rp-desc-visual').value = '';
   if ($('rp-muletillas')) $('rp-muletillas').value = '';
   if ($('rp-prompt')) $('rp-prompt').value = '';
   if ($('rp-expresiones-wrap')) $('rp-expresiones-wrap').hidden = true;
@@ -4406,6 +4435,9 @@ function editarPersonajeReaccion(cid) {
   $('rp-motor').value = p.motor_animacion || 'expresivo';
   $('rp-color').value = p.color_acento || '#FF4D00';
   $('rp-intensidad').value = p.intensidad || 4;
+  if ($('rp-estilo')) $('rp-estilo').value = p.estilo_visual || 'animado_3d';
+  if ($('rp-modelo-img')) $('rp-modelo-img').value = p.modelo_generacion || 'auto';
+  if ($('rp-desc-visual')) $('rp-desc-visual').value = p.descripcion_visual || '';
   $('rp-muletillas').value = p.muletillas || '';
   $('rp-prompt').value = p.prompt_extra || '';
   pintarExpresionesPersonaje(p);
@@ -4434,6 +4466,9 @@ async function guardarPersonajeReaccion() {
       motor_animacion: $('rp-motor').value,
       color_acento: $('rp-color').value,
       intensidad: Number($('rp-intensidad').value || 4),
+      estilo_visual: $('rp-estilo')?.value || 'animado_3d',
+      modelo_generacion: $('rp-modelo-img')?.value || 'auto',
+      descripcion_visual: $('rp-desc-visual')?.value.trim() || '',
       muletillas: $('rp-muletillas').value.trim(),
       prompt_extra: $('rp-prompt').value.trim(),
     };
@@ -4485,6 +4520,28 @@ async function probarVozPersonaje() {
     toast('Reproduciendo muestra de voz del personaje.');
   } catch (e) { toast(e.message, true); }
   finally { if (btn) btn.disabled = false; }
+}
+async function generarImagenBasePersonaje() {
+  if (!_reaccEditandoId) {
+    await guardarPersonajeReaccion();
+    if (!_reaccEditandoId) return;
+  }
+  const btn = $('rp-btn-gen-img');
+  if (btn) btn.disabled = true;
+  if ($('rp-estado')) $('rp-estado').textContent = 'Creando retrato del personaje con IA…';
+  try {
+    const j = await api(`/api/reacciones/personajes/${encodeURIComponent(_reaccEditandoId)}/generar_imagen`, {
+      estilo_visual: $('rp-estilo')?.value || 'animado_3d',
+      modelo_generacion: $('rp-modelo-img')?.value || 'auto',
+      descripcion_visual: $('rp-desc-visual')?.value.trim() || '',
+    });
+    await cargarReaccionesIA();
+    editarPersonajeReaccion(_reaccEditandoId);
+    toast(`Retrato creado con ${j.modelo_usado || 'IA'} (${j.estilo_visual || ''}).`, false, 'Personaje IA');
+    if ($('rp-estado')) $('rp-estado').textContent = `Retrato listo (${j.modelo_usado || 'IA'}).`;
+  } catch (e) {
+    if ($('rp-estado')) $('rp-estado').textContent = e.message;
+  } finally { if (btn) btn.disabled = false; }
 }
 async function generarExpresionesPersonaje() {
   if (!_reaccEditandoId) { toast('Guarda o selecciona un personaje primero.', true); return; }

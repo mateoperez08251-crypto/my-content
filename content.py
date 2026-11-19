@@ -3332,6 +3332,8 @@ def reacciones_personajes():
             "success": True,
             "personajes": rc.listar_personajes(),
             "personalidades": rc.PERSONALIDADES,
+            "estilos_personaje": rc.ESTILOS_PERSONAJE,
+            "modelos_generacion": rc.MODELOS_GENERACION_PERSONAJE,
             "expresiones": list(rc.EXPRESIONES),
             "lipsync": rl.estado(),
             "qwen_gpu": bool(pg.disponible()),
@@ -3395,6 +3397,23 @@ def reacciones_personaje_probar_voz(cid):
         except OSError:
             pass
         return Response(audio_bytes, mimetype="audio/wav")
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>/generar_imagen", methods=["POST"])
+def reacciones_personaje_generar_imagen(cid):
+    import reaction_characters as rc
+    try:
+        d = request.get_json(silent=True) or {}
+        res = rc.generar_imagen_base_ia(
+            cid,
+            descripcion=d.get("descripcion_visual") or "",
+            estilo_visual=d.get("estilo_visual") or "",
+            modelo=d.get("modelo_generacion") or "auto",
+            log=log,
+        )
+        return jsonify({"success": True, **res})
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 

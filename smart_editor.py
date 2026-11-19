@@ -110,12 +110,35 @@ def _zoom_en(pulsos, t, fuerza=0.12):
     return 1 + fuerza * z
 
 
-def _componer_streamer(frame, final_w, final_h, cam_info, game_mode="zoom", cam_ratio=0.38):
-    """Compone 9:16 estilo Streamer: cámara del creador arriba + juego/pantalla abajo."""
+def _realzar_nitidez_suave(img_rgb):
+    """Micro-enfoque limpio para que el juego se vea nítido al ampliar a 9:16."""
+    suave = cv2.GaussianBlur(img_rgb, (0, 0), 1.1)
+    return cv2.addWeighted(img_rgb, 1.18, suave, -0.18, 0)
+
+
+def _recortar_facecam_cover(frame, bx, by, bw, bh, fcx, fcy, dst_w, dst_h):
+    target_ar = dst_w / max(dst_h, 1)
+    src_ar = bw / max(bh, 1)
+    if src_ar > target_ar:
+        crop_ch = bh
+        crop_cw = max(2, min(bw, int(round(bh * target_ar))))
+    else:
+        crop_cw = bw
+        crop_ch = max(2, min(bh, int(round(bw / target_ar))))
+    cx0 = int(round(fcx - crop_cw * 0.5))
+    cx0 = max(bx, min(cx0, bx + bw - crop_cw))
+    cy0 = int(round(fcy - crop_ch * 0.44))
+    cy0 = max(by, min(cy0, by + bh - crop_ch))
+    cam_crop = frame[cy0:cy0 + crop_ch, cx0:cx0 + crop_cw]
+    interp = cv2.INTER_LANCZOS4 if (dst_w > crop_cw or dst_h > crop_ch) else cv2.INTER_AREA
+    return cv2.resize(cam_crop, (dst_w, dst_h), interpolation=interp)
+
+
+def _componer_streamer(frame, final_w, final_h, cam_info, game_mode="cam_arriba_centro", cam_ratio=0.26):
+    """Compone 9:16 estilo Streamer: cámara compacta centrada arriba del todo o franja + juego protagonista."""
     orig_h, orig_w = frame.shape[:2]
-    ratio = max(0.28, min(0.48, float(cam_ratio or 0.38)))
-    cam_h = max(64, int(round(final_h * ratio / 2.0)) * 2)
-    game_h = max(64, final_h - cam_h)
+    modo = str(game_mode or "cam_arriba_centro").strip().lower()
+    ratio = max(0.20, min(0.48, float(cam_ratio or 0.26)))
 
     if isinstance(cam_info, dict) and cam_info.get("box"):
         bx, by, bw, bh = [int(v) for v in cam_info["box"]]
@@ -131,26 +154,58 @@ def _componer_streamer(frame, final_w, final_h, cam_info, game_mode="zoom", cam_
     bw = max(2, min(bw, orig_w - bx))
     bh = max(2, min(bh, orig_h - by))
 
+    if modo == "cam_arriba_centro":
+        # El juego ocupa TODO el lienzo 9:16 (máxima claridad) y la cámara va pequeña, centrada arriba del todo.
+        target_g_ar = final_w / max(final_h, 1)
+        if orig_w / max(orig_h, 1) > target_g_ar:
+            gch = orig_h
+            gcw = max(2, min(orig_w, int(round(orig_h * target_g_ar))))
+        else:
+            gcw = orig_w
+            gch = max(2, min(orig_h, int(round(orig_w / target_g_ar))))
+        gx0 = (orig_w - gcw) // 2
+        gy0 = (orig_h - gch) // 2
+        if esquina.endswith("left") and gx0 < bx + bw:
+            gx0 = min(orig_w - gcw, max(gx0, min(bx + bw, int(orig_w * 0.34))))
+        elif esquina.endswith("right") and (gx0 + gcw) > bx:
+            gx0 = max(0, min(gx0, max(bx - gcw, int(orig_w * 0.66) - gcw)))
+        game_crop = frame[gy0:gy0 + gch, gx0:gx0 + gcw]
+        interp_g = cv2.INTER_LANCZOS4 if (final_w > gcw or final_h > gch) else cv2.INTER_AREA
+        salida = cv2.resize(game_crop, (final_w, final_h), interpolation=interp_g)
+        if final_w > gcw * 1.15:
+            salida = _realzar_nitidez_suave(salida)
+
+        # Cápsula compacta centrada arriba del todo (proporción 4:3 / 16:11 limpia)
+        cap_h = max(84, int(round(final_h * max(0.18, min(0.28, ratio * 0.86)) / 2.0)) * 2)
+        cap_w = max(120, min(int(final_w * 0.68), int(round(cap_h * 1.38 / 2.0)) * 2))
+        px0 = (final_w - cap_w) // 2
+        py0 = max(12, int(round(final_h * 0.022)))
+        cam_tile = _recortar_facecam_cover(frame, bx, by, bw, bh, fcx, fcy, cap_w, cap_h)
+
+        # Composición con esquinas suavemente redondeadas, borde nítido y sombra sutil
+        base_pil = Image.fromarray(salida).convert("RGBA")
+        tile_pil = Image.fromarray(cam_tile).convert("RGBA")
+        rad = max(10, int(cap_w * 0.045))
+        mask = Image.new("L", (cap_w, cap_h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, cap_w - 1, cap_h - 1], radius=rad, fill=255)
+        sombra = Image.new("RGBA", (final_w, final_h), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(sombra)
+        off = max(5, int(final_w * 0.008))
+        sd.rounded_rectangle([px0 + off, py0 + off, px0 + cap_w + off, py0 + cap_h + off], radius=rad, fill=(10, 12, 16, 170))
+        base_pil = Image.alpha_composite(base_pil, sombra)
+        base_pil.paste(tile_pil, (px0, py0), mask)
+        bd = ImageDraw.Draw(base_pil)
+        bd.rounded_rectangle([px0, py0, px0 + cap_w - 1, py0 + cap_h - 1], radius=rad, outline=(244, 241, 234, 245), width=max(2, int(final_w * 0.004)))
+        return np.array(base_pil.convert("RGB"), dtype=np.uint8)
+
+    cam_h = max(64, int(round(final_h * ratio / 2.0)) * 2)
+    game_h = max(64, final_h - cam_h)
+
     # 1. Panel superior: encuadre `cover` centrado en la cara dentro de la caja de la cámara
-    target_cam_ar = final_w / max(cam_h, 1)
-    src_cam_ar = bw / max(bh, 1)
-    if src_cam_ar > target_cam_ar:
-        crop_ch = bh
-        crop_cw = max(2, min(bw, int(round(bh * target_cam_ar))))
-    else:
-        crop_cw = bw
-        crop_ch = max(2, min(bh, int(round(bw / target_cam_ar))))
-    cx0 = int(round(fcx - crop_cw * 0.5))
-    cx0 = max(bx, min(cx0, bx + bw - crop_cw))
-    # Margen superior ligero para no cortar la cabeza del streamer
-    cy0 = int(round(fcy - crop_ch * 0.44))
-    cy0 = max(by, min(cy0, by + bh - crop_ch))
-    cam_crop = frame[cy0:cy0 + crop_ch, cx0:cx0 + crop_cw]
-    interp_cam = cv2.INTER_LANCZOS4 if (final_w > crop_cw or cam_h > crop_ch) else cv2.INTER_AREA
-    top_panel = cv2.resize(cam_crop, (final_w, cam_h), interpolation=interp_cam)
+    top_panel = _recortar_facecam_cover(frame, bx, by, bw, bh, fcx, fcy, final_w, cam_h)
 
     # 2. Panel inferior: juego / pantalla que está viendo el streamer
-    if str(game_mode or "zoom").strip().lower() == "completo":
+    if modo == "completo":
         # Juego completo 16:9 visible (HUD, minimapa, marcador) sobre fondo difuminado suave
         esc = max(final_w / orig_w, game_h / orig_h)
         pw, ph = max(2, int(orig_w * esc / 8)), max(2, int(orig_h * esc / 8))
@@ -180,7 +235,6 @@ def _componer_streamer(frame, final_w, final_h, cam_info, game_mode="zoom", cam_
             gch = max(2, min(orig_h, int(round(orig_w / target_g_ar))))
         gx0 = (orig_w - gcw) // 2
         gy0 = (orig_h - gch) // 2
-        # Desplazar horizontalmente lo justo para sacar la facecam de la esquina si entra en el recorte
         if esquina.endswith("left") and gx0 < bx + bw and (orig_w - gcw) >= min(bx + bw, orig_w - gcw):
             gx0 = min(orig_w - gcw, max(gx0, min(bx + bw, int(orig_w * 0.34))))
         elif esquina.endswith("right") and (gx0 + gcw) > bx:
@@ -188,9 +242,10 @@ def _componer_streamer(frame, final_w, final_h, cam_info, game_mode="zoom", cam_
         game_crop = frame[gy0:gy0 + gch, gx0:gx0 + gcw]
         interp_g = cv2.INTER_LANCZOS4 if (final_w > gcw or game_h > gch) else cv2.INTER_AREA
         bottom_panel = cv2.resize(game_crop, (final_w, game_h), interpolation=interp_g)
+        if final_w > gcw * 1.15:
+            bottom_panel = _realzar_nitidez_suave(bottom_panel)
 
     salida = np.vstack([top_panel, bottom_panel])
-    # Línea divisoria editorial limpia entre cámara y juego
     salida[max(0, cam_h - 3):min(final_h, cam_h + 3)] = (17, 18, 20)
     return salida
 
@@ -567,7 +622,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         cold_open=False, jump_cuts=False, auto_split=False, ambient_music="off", clean_vocals=False,
                         auto_thumbnail="off", strip_metadata=True, auto_hashtags=True, politicas_tiktok="off",
                         thumbnail_engine="clasico", thumbnail_style="kinetik",
-                        streamer_corner="auto", streamer_game_mode="zoom", streamer_cam_ratio=0.38):
+                        streamer_corner="auto", streamer_game_mode="cam_arriba_centro", streamer_cam_ratio=0.26):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import bisect
@@ -1549,8 +1604,8 @@ def main(argv):
                 thumbnail_engine=cfg.get("thumbnail_engine", "clasico"),
                 thumbnail_style=cfg.get("thumbnail_style", "kinetik"),
                 streamer_corner=cfg.get("streamer_corner", "auto"),
-                streamer_game_mode=cfg.get("streamer_game_mode", "zoom"),
-                streamer_cam_ratio=cfg.get("streamer_cam_ratio", 0.38))
+                streamer_game_mode=cfg.get("streamer_game_mode", "cam_arriba_centro"),
+                streamer_cam_ratio=cfg.get("streamer_cam_ratio", 0.26))
         except InicioFueraDeVideo as e:
             print("RESULT_ERROR:" + json.dumps({"code": "inicio_fuera_video"}))
             write_progress(f"Error: {e}", -1)

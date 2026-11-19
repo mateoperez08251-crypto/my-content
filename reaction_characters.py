@@ -24,6 +24,36 @@ MOTORES_ANIMACION = ("expresivo", "lipsync")
 LAYOUTS_REACCION = ("split", "pip", "pausar")
 MODOS_INTERACCION = ("continuo", "pausar", "mixto")
 
+ESTILOS_PERSONAJE = {
+    "animado_3d": {
+        "nombre": "3D Animado (estilo Pixar / cine)",
+        "prompt": "high-end 3D Pixar-style animated character portrait, expressive large eyes, clean stylized shading, head and shoulders centered, studio rim lighting, clean minimalist warm background, no text, no watermark",
+    },
+    "anime": {
+        "nombre": "Anime / VTuber (cel-shaded)",
+        "prompt": "modern high-budget anime character portrait, crisp cel-shaded lineart, vibrant expressive eyes, head and shoulders centered, clean studio background, no text, no watermark",
+    },
+    "realista": {
+        "nombre": "Realista / Fotográfico (streamer real)",
+        "prompt": "photorealistic 4K studio webcam portrait of a charismatic creator, sharp facial detail, natural skin texture, studio key light and soft bokeh background, head and shoulders centered, no text, no watermark",
+    },
+    "caricatura_2d": {
+        "nombre": "Caricatura 2D / Cómic editorial",
+        "prompt": "bold modern 2D vector comic mascot character portrait, clean black ink outlines, vibrant flat colors, head and shoulders centered, clean cream backdrop, no text, no watermark",
+    },
+    "cyberpunk": {
+        "nombre": "3D Cyberpunk / Gamer Neón",
+        "prompt": "stylized 3D cyberpunk gaming creator character portrait, futuristic neon orange and lime accents, studio headphones, dramatic studio rim light, head and shoulders centered, no text, no watermark",
+    },
+}
+
+MODELOS_GENERACION_PERSONAJE = {
+    "auto": "Automático (GPU Colab si hay, si no FLUX nube)",
+    "flux_nube": "FLUX en nube (gratis · rápido en PC 4 GB sin GPU)",
+    "sdxl_turbo": "SDXL-Turbo (Colab GPU T4 15 GB · 4 pasos)",
+    "zimage_turbo": "Z-Image-Turbo 6B (Colab L4/A100 16+ GB · Apache 2.0)",
+}
+
 PERSONALIDADES = {
     "sarcastico": {
         "nombre": "Crítico sarcástico",
@@ -101,6 +131,13 @@ def validar_datos_personaje(datos: dict) -> dict:
     color_acento = str(datos.get("color_acento") or "#FF4D00").strip()
     if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color_acento):
         color_acento = "#FF4D00"
+    estilo_visual = str(datos.get("estilo_visual") or "animado_3d").strip().lower()
+    if estilo_visual not in ESTILOS_PERSONAJE:
+        estilo_visual = "animado_3d"
+    modelo_generacion = str(datos.get("modelo_generacion") or "auto").strip().lower()
+    if modelo_generacion not in MODELOS_GENERACION_PERSONAJE:
+        modelo_generacion = "auto"
+    descripcion_visual = str(datos.get("descripcion_visual") or "").strip()[:400]
     return {
         "nombre": nombre,
         "personalidad": personalidad,
@@ -112,6 +149,9 @@ def validar_datos_personaje(datos: dict) -> dict:
         "motor_animacion": motor,
         "layout_defecto": layout,
         "color_acento": color_acento,
+        "estilo_visual": estilo_visual,
+        "modelo_generacion": modelo_generacion,
+        "descripcion_visual": descripcion_visual,
     }
 
 
@@ -304,4 +344,106 @@ def generar_expresiones_ia(cid: str, log=print) -> dict:
         out.convert("RGBA").save(carpeta / f"{exp}.png", format="PNG", optimize=True)
         generadas.append(exp)
     return {"personaje": _cargar_meta(carpeta), "generadas": generadas}
+
+
+def construir_prompt_personaje(descripcion: str, estilo_visual: str = "animado_3d", nombre: str = "") -> str:
+    est = ESTILOS_PERSONAJE.get(str(estilo_visual or "animado_3d").lower(), ESTILOS_PERSONAJE["animado_3d"])
+    sujeto = re.sub(r"\s+", " ", str(descripcion or "")).strip() or f"charismatic creator named {nombre or 'host'} wearing headphones"
+    return f"{sujeto}, {est['prompt']}, facing camera, neutral friendly expression"
+
+
+def _generar_con_flux_nube(prompt: str) -> bytes:
+    """Genera retrato con FLUX en nube (HF Inference si hay HF_TOKEN o Pollinations FLUX gratis)."""
+    import urllib.parse
+    import requests
+    hf_tok = ""
+    try:
+        from app_secrets import get_secret
+        hf_tok = get_secret("huggingface", "token", env="HF_TOKEN") or ""
+    except Exception:
+        pass
+    if hf_tok:
+        try:
+            r = requests.post(
+                "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell",
+                headers={"Authorization": f"Bearer {hf_tok}"},
+                json={"inputs": prompt, "parameters": {"width": 768, "height": 768}},
+                timeout=(12, 90),
+            )
+            if r.status_code == 200 and r.content and len(r.content) > 4000:
+                return r.content
+        except Exception:
+            pass
+    url = (
+        "https://image.pollinations.ai/prompt/"
+        + urllib.parse.quote(prompt, safe="")
+        + "?model=flux&width=768&height=768&nologo=true&enhance=false"
+    )
+    r = requests.get(url, timeout=(15, 90))
+    if r.status_code == 200 and r.content and len(r.content) > 4000:
+        return r.content
+    raise RuntimeError(f"FLUX en nube respondió HTTP {r.status_code}. Puedes subir tu imagen manualmente o usar GPU en Colab.")
+
+
+def _generar_con_gpu_colab(prompt: str, modelo: str, log=print) -> Image.Image:
+    import torch
+    if not torch.cuda.is_available():
+        raise RuntimeError("No hay GPU NVIDIA disponible en esta máquina.")
+    vram = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+    if modelo == "zimage_turbo" and vram >= 15.0:
+        from diffusers import DiffusionPipeline
+        log("[reacciones] Cargando Tongyi-MAI/Z-Image-Turbo en GPU...")
+        pipe = DiffusionPipeline.from_pretrained("Tongyi-MAI/Z-Image-Turbo", torch_dtype=torch.bfloat16)
+        pipe.enable_model_cpu_offload()
+        with torch.inference_mode():
+            return pipe(prompt=prompt, width=768, height=768, num_inference_steps=8, guidance_scale=0.0).images[0]
+    from diffusers import AutoPipelineForText2Image
+    log("[reacciones] Cargando stabilityai/sdxl-turbo en GPU...")
+    pipe = AutoPipelineForText2Image.from_pretrained("stabilityai/sdxl-turbo", torch_dtype=torch.float16, variant="fp16").to("cuda")
+    with torch.inference_mode():
+        return pipe(prompt=prompt, width=512, height=512, num_inference_steps=4, guidance_scale=0.0).images[0]
+
+
+def generar_imagen_base_ia(cid: str, descripcion: str = "", estilo_visual: str = "", modelo: str = "auto", log=print) -> dict:
+    """Crea la imagen base (`neutral.png`) del personaje con el estilo y modelo IA elegidos."""
+    carpeta = _carpeta_segura(cid)
+    meta = _cargar_meta(carpeta)
+    if not meta:
+        raise ValueError("El personaje no existe.")
+    est = str(estilo_visual or meta.get("estilo_visual") or "animado_3d").strip().lower()
+    if est not in ESTILOS_PERSONAJE:
+        est = "animado_3d"
+    mod = str(modelo or meta.get("modelo_generacion") or "auto").strip().lower()
+    if mod not in MODELOS_GENERACION_PERSONAJE:
+        mod = "auto"
+    desc = str(descripcion or meta.get("descripcion_visual") or "").strip()
+    prompt = construir_prompt_personaje(desc, est, meta.get("nombre", ""))
+
+    modelo_usado = mod
+    gpu_disponible = False
+    try:
+        import torch
+        gpu_disponible = bool(torch.cuda.is_available())
+    except Exception:
+        gpu_disponible = False
+
+    if mod in ("sdxl_turbo", "zimage_turbo") or (mod == "auto" and gpu_disponible):
+        objetivo = "sdxl_turbo" if mod == "auto" else mod
+        try:
+            img = _generar_con_gpu_colab(prompt, objetivo, log=log)
+            img.convert("RGBA").resize((768, 768), Image.Resampling.LANCZOS).save(carpeta / "neutral.png", format="PNG", optimize=True)
+            modelo_usado = objetivo
+        except Exception as exc:
+            if mod != "auto":
+                raise
+            log(f"[reacciones] GPU local no disponible ({exc}); uso FLUX en nube.")
+            raw = _generar_con_flux_nube(prompt)
+            guardar_imagen_expresion(cid, "neutral", raw)
+            modelo_usado = "flux_nube"
+    else:
+        raw = _generar_con_flux_nube(prompt)
+        guardar_imagen_expresion(cid, "neutral", raw)
+        modelo_usado = "flux_nube"
+
+    return {"personaje": _cargar_meta(carpeta), "modelo_usado": modelo_usado, "estilo_visual": est, "prompt": prompt}
 
