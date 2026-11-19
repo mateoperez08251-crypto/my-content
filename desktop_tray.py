@@ -4,8 +4,8 @@ import threading
 
 
 class Bandeja:
-    def __init__(self, icon_path, log=print):
-        self.icon_path, self.log = icon_path, log
+    def __init__(self, icon_path, log=print, nombre='My Content'):
+        self.icon_path, self.log, self.nombre = icon_path, log, nombre
         self._lock = threading.RLock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -14,6 +14,23 @@ class Bandeja:
         self._thread = None
         self._worker = None
         self._ready = False
+        self._popup = None
+        self._cerrar_popup = None
+        self._on_notify = None
+
+    def configurar(self, icon_path=None, nombre=None, popup=None, cerrar_popup=None, on_notify=None):
+        """Permite personalizar icono, nombre y avisos Kinetik antes de iniciar la bandeja."""
+        with self._lock:
+            if icon_path is not None:
+                self.icon_path = icon_path
+            if nombre is not None:
+                self.nombre = str(nombre)
+            if popup is not None:
+                self._popup = popup
+            if cerrar_popup is not None:
+                self._cerrar_popup = cerrar_popup
+            if on_notify is not None:
+                self._on_notify = on_notify
 
     @property
     def disponible(self):
@@ -29,6 +46,7 @@ class Bandeja:
             self._thread.start()
 
     def notificar(self, titulo, mensaje):
+        on_notify = None
         with self._lock:
             if self._stop.is_set():
                 return False
@@ -37,7 +55,13 @@ class Bandeja:
             if aviso not in self._pending:
                 self._pending.append(aviso)
             self._wake.set()
-            return True
+            on_notify = self._on_notify
+        if callable(on_notify):
+            try:
+                on_notify(aviso[0], aviso[1])
+            except Exception:
+                pass
+        return True
 
     def _run(self, mostrar, salir):
         icon = None
@@ -54,9 +78,11 @@ class Bandeja:
                 self.cerrar()
                 salir()
 
-            menu = pystray.Menu(pystray.MenuItem('Abrir My Content', abrir, default=True),
-                                pystray.MenuItem('Salir de My Content', cerrar))
-            icon = pystray.Icon('MyContent', image, 'My Content', menu)
+            nombre = self.nombre or 'My Content'
+            clave = ''.join(ch for ch in nombre if ch.isalnum()) or 'MyContent'
+            menu = pystray.Menu(pystray.MenuItem(f'Abrir {nombre}', abrir, default=True),
+                                pystray.MenuItem(f'Salir de {nombre}', cerrar))
+            icon = pystray.Icon(clave, image, nombre, menu)
             with self._lock:
                 self._icon = icon
             icon.run(setup=self._preparar)
@@ -89,9 +115,18 @@ class Bandeja:
                     self._wake.clear()
                     continue
                 titulo, mensaje = self._pending.popleft()
+                popup = self._popup
+                icon = self._icon
+            mostrado = False
+            if callable(popup):
                 try:
-                    if self._icon.HAS_NOTIFICATION:
-                        self._icon.notify(mensaje, titulo)
+                    mostrado = bool(popup(titulo, mensaje))
+                except Exception:
+                    mostrado = False
+            if not mostrado and icon is not None:
+                try:
+                    if icon.HAS_NOTIFICATION:
+                        icon.notify(mensaje, titulo)
                 except Exception:
                     self.log('Windows no pudo mostrar el aviso. La app continúa.')
             # Evita que varios avisos a la vez se tapen entre sí.
@@ -104,6 +139,12 @@ class Bandeja:
             self._ready = False
             self._pending.clear()
             icon, self._icon = self._icon, None
+            cerrar_popup = self._cerrar_popup
+        if callable(cerrar_popup):
+            try:
+                cerrar_popup()
+            except Exception:
+                pass
         if icon is not None:
             # visible=False ejecuta NIM_DELETE antes de os._exit, sin esperar al message loop.
             try:

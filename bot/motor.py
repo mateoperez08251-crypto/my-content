@@ -499,8 +499,11 @@ class Motor:
                     return True
             else:
                 self._despertar_prep.set()
-            manual_listo = bool(self.cfg.get('subida_manual')) and any(
-                s.get('adelantada') for s in self.db.subidas_pendientes())
+            cuentas_manual = {c['id'] for c in self.db.cuentas() if c.get('subida_manual')}
+            manual_listo = any(
+                s.get('adelantada') and (bool(self.cfg.get('subida_manual')) or s.get('cuenta_id') in cuentas_manual)
+                for s in self.db.subidas_pendientes()
+            )
             if not manual_listo and (modo == 'solo_preparar' or self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])):
                 if not self._edicion_actual:
                     self.actividad = ('Clips guardados en esta PC. Publicación en pausa.' if not self.db.por_preparar(excluir_live=excluir_live, excluir_populares=not self.cfg['radar_populares'])
@@ -1306,11 +1309,13 @@ class Motor:
             return 'Bot en pausa. Pulsa Lanzar subidas guardadas para activarlo.'
         if self.cfg['modo_cola'] == 'solo_preparar':
             return 'Solo editar y guardar. Pulsa Lanzar subidas guardadas para publicar.'
-        if self.cfg.get('subida_manual') and not s.get('adelantada'):
+        c = cuenta or self.db.cuenta(s['cuenta_id'])
+        if (self.cfg.get('subida_manual') or (c and c.get('subida_manual'))) and not s.get('adelantada'):
+            if c and c.get('subida_manual') and not self.cfg.get('subida_manual'):
+                return 'Subida manual en esta cuenta: pulsa "Subir ahora" en este clip para publicarlo.'
             return 'Subida manual: pulsa "Subir ahora" en este clip para publicarlo.'
         if self.cfg['modo_cola'] == 'preparar_primero' and self.db.por_preparar(excluir_live=True, excluir_populares=not self.cfg['radar_populares']):
             return 'Esperando a terminar toda la edición. Lanzar subidas guardadas permite publicar lo que ya está listo.'
-        c = cuenta or self.db.cuenta(s['cuenta_id'])
         if not c:
             return 'La cuenta ya no existe.'
         if not c['activa']:
@@ -1343,12 +1348,14 @@ class Motor:
         if ahora < self._libre_global:
             return None
         cuentas = {c["id"]: c for c in self.db.cuentas()}
-        manual = bool(self.cfg.get('subida_manual'))
+        manual_global = bool(self.cfg.get('subida_manual'))
         for s in self.db.subidas_listas():
-            if manual and not s.get('adelantada'):
-                continue  # Subida manual: solo sale lo que el usuario mandó con "Subir ahora".
             c = cuentas.get(s["cuenta_id"])
-            if not c or (c["proxima_libre"] > ahora and not s.get('adelantada')) or navegador.ocupado(self.perfil(c)):
+            if not c:
+                continue
+            if (manual_global or bool(c.get('subida_manual'))) and not s.get('adelantada'):
+                continue  # Subida manual (global o de esta cuenta): solo sale con "Subir ahora".
+            if (c["proxima_libre"] > ahora and not s.get('adelantada')) or navegador.ocupado(self.perfil(c)):
                 continue
             if not _en_franjas(c, self.cfg):
                 continue
@@ -1980,6 +1987,7 @@ class Motor:
             c["login_abierto"] = navegador.login_abierto(self.perfil(c))
             c["comprobando"] = c['id'] in comprobando
             c["detalle_sesion"] = self._detalle_sesion.get(c["id"], "")
+            c["subida_manual"] = bool(c.get("subida_manual"))
             cuentas.append(c)
         pendientes = self.db.subidas_pendientes()
         for s in pendientes:
@@ -2000,7 +2008,11 @@ class Motor:
             cola = [s for s in pendientes if s['cuenta_id'] == cuenta['id']]
             cuenta['pendientes'] = len(cola)
             proxima = plan.get('escenarios', {}).get('min', {}).get('proximas', {}).get(cuenta['id'])
-            cuenta['proxima_estimada'] = proxima.get('inicio') if proxima and not plan['retenida'] else None
+            cuenta['proxima_estimada'] = (
+                proxima.get('inicio')
+                if proxima and not plan['retenida'] and not (self.cfg.get('subida_manual') or cuenta.get('subida_manual'))
+                else None
+            )
             siguiente = next((s for s in cola if proxima and s['id'] == proxima['id']), cola[0] if cola else None)
             cuenta['siguiente'] = siguiente
             cuenta['espera'] = self._motivo_subida(siguiente, cuenta) if siguiente else 'Sin clips pendientes.'

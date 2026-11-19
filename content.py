@@ -549,7 +549,69 @@ def send_email_alert(remitente, password, destinatario, subject, body):
         return False
 
 
-_bandeja = Bandeja(paths.res_path('static', 'icons', 'my-content.png'), log=lambda texto: log(texto))
+VISTA_INICIAL = "clip" if "--clip" in sys.argv else "main"
+_notificaciones_ui = collections.deque(maxlen=12)
+_notificacion_ui_seq = 0
+_notificacion_ui_lock = threading.Lock()
+_tema_clip_cache = None
+
+
+def _leer_tema_clip():
+    global _tema_clip_cache
+    if _tema_clip_cache in ("claro", "oscuro"):
+        return _tema_clip_cache
+    try:
+        with open(paths.data_path("clip_ui.json"), "r", encoding="utf-8") as f:
+            tema = str((json.load(f) or {}).get("tema", "claro")).strip().lower()
+            _tema_clip_cache = "oscuro" if tema == "oscuro" else "claro"
+    except Exception:
+        _tema_clip_cache = "claro"
+    return _tema_clip_cache
+
+
+def _guardar_tema_clip(tema):
+    global _tema_clip_cache
+    valor = "oscuro" if str(tema or "").strip().lower() == "oscuro" else "claro"
+    _tema_clip_cache = valor
+    try:
+        with open(paths.data_path("clip_ui.json"), "w", encoding="utf-8") as f:
+            json.dump({"tema": valor}, f)
+    except Exception:
+        pass
+    return valor
+
+
+def _registrar_notificacion_ui(titulo, mensaje):
+    global _notificacion_ui_seq
+    try:
+        from windows_toast import clasificar_aviso
+    except ImportError:
+        clasificar_aviso = lambda a, b: 'error' if 'error' in f'{a} {b}'.lower() else 'info'
+    t = str(titulo or "My Content Clip").strip()[:80]
+    m = str(mensaje or "").strip()[:260]
+    if not m and not t:
+        return
+    with _notificacion_ui_lock:
+        _notificacion_ui_seq += 1
+        _notificaciones_ui.append({
+            "id": _notificacion_ui_seq,
+            "titulo": t,
+            "mensaje": m,
+            "tipo": clasificar_aviso(t, m),
+            "ts": int(time.time()),
+        })
+
+
+def _obtener_notificaciones_ui():
+    with _notificacion_ui_lock:
+        return list(_notificaciones_ui)
+
+
+_bandeja = Bandeja(
+    paths.res_path('static', 'icons', 'my-content-clip.png' if VISTA_INICIAL == 'clip' else 'my-content.png'),
+    log=lambda texto: log(texto),
+    nombre='My Content Clip' if VISTA_INICIAL == 'clip' else 'My Content',
+)
 atexit.register(_bandeja.cerrar)
 
 
@@ -1167,7 +1229,10 @@ def index():
 
 @app.route('/favicon.ico')
 def favicon():
-    return send_from_directory(paths.res_path('static', 'icons'), 'my-content.ico', mimetype='image/vnd.microsoft.icon')
+    ref = str(request.referrer or '')
+    es_clip = (VISTA_INICIAL == 'clip') or ('/clip' in ref)
+    archivo = 'my-content-clip.ico' if es_clip else 'my-content.ico'
+    return send_from_directory(paths.res_path('static', 'icons'), archivo, mimetype='image/vnd.microsoft.icon')
 
 
 # Ventana de pywebview (se asigna al arrancar). Sus diálogos nativos son seguros
@@ -2686,7 +2751,29 @@ def my_content_clip():
 
 @app.route("/api/bot/estado", methods=["GET"])
 def bot_estado():
-    return _bot_respuesta(lambda: _bot().estado())
+    def _estado_con_avisos():
+        est = dict(_bot().estado())
+        est["notificaciones_recientes"] = _obtener_notificaciones_ui()
+        est["tema_clip"] = _leer_tema_clip()
+        return est
+    return _bot_respuesta(_estado_con_avisos)
+
+
+@app.route("/api/clip/tema", methods=["POST"])
+def clip_guardar_tema():
+    data = request.get_json(silent=True) or {}
+    return jsonify({"success": True, "tema": _guardar_tema_clip(data.get("tema"))})
+
+
+@app.route("/api/bot/probar_aviso", methods=["POST"])
+def bot_probar_aviso():
+    data = request.get_json(silent=True) or {}
+    titulo = str(data.get("titulo") or ("My Content Clip" if VISTA_INICIAL == "clip" else "My Content")).strip()[:80]
+    mensaje = str(data.get("mensaje") or "Notificaciones Kinetik Print activas en escritorio y en la app.").strip()[:240]
+    enviado = show_notification(titulo, mensaje)
+    if not enviado:
+        _registrar_notificacion_ui(titulo, mensaje)
+    return jsonify({"success": True, "escritorio": bool(enviado), "titulo": titulo, "mensaje": mensaje})
 
 
 @app.route("/api/bot/config", methods=["POST"])
@@ -2865,7 +2952,7 @@ def bot_cuenta_editar(cid):
     def guardar():
         _bot().guardar_cuenta(cid, {
             k: v for k, v in d.items() if k in ("nombre", "activa", "limite_dia", "url_subida", "preset_corte",
-                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "franjas", "monetizada", "proteger_fyp")})
+                                              "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "franjas", "monetizada", "proteger_fyp", "subida_manual")})
         if 'monetizada' in d or 'proteger_fyp' in d:
             from firebase_radar.local_radar import solicitar_revision
             solicitar_revision()
@@ -3356,8 +3443,10 @@ def abrir_my_content_clip():
 
 # Una ventana por app; el servidor, el bot y los datos son los mismos.
 VENTANAS_APP = {
-    "main": {"titulo": "Content App Premium", "ruta": "/", "fondo": "#09111e"},
-    "clip": {"titulo": "My Content Clip", "ruta": "/clip", "fondo": "#F4F1EA"},
+    "main": {"titulo": "Content App Premium", "ruta": "/", "fondo": "#09111e",
+             "icono": "my-content.ico", "icono_png": "my-content.png", "app_id": "MyContent.App"},
+    "clip": {"titulo": "My Content Clip", "ruta": "/clip", "fondo": "#F4F1EA",
+             "icono": "my-content-clip.ico", "icono_png": "my-content-clip.png", "app_id": "MyContent.Clip"},
 }
 _ventanas = {}
 _url_base_app = f"http://127.0.0.1:{PUERTO_PREFERIDO}"
@@ -3367,7 +3456,8 @@ def _crear_ventana(vista, oculta=False):
     import webview  # type: ignore
     datos = VENTANAS_APP[vista]
     url = _url_base_app + datos["ruta"]
-    ventana = webview.create_window(datos["titulo"], url, width=1280, height=800, background_color=datos["fondo"],
+    fondo = "#0E0F11" if (vista == "clip" and _leer_tema_clip() == "oscuro") else datos["fondo"]
+    ventana = webview.create_window(datos["titulo"], url, width=1280, height=800, background_color=fondo,
                                     min_size=(1000, 600), maximized=not oculta, hidden=oculta)
     _ventanas[vista] = ventana
 
@@ -3385,8 +3475,11 @@ def _crear_ventana(vista, oculta=False):
     ventana.events.loaded += lambda: _pagina_cargada.set()
     if winproc.ES_WINDOWS:
         from windows_icon import aplicar as aplicar_icono_ventana
-        ventana.events.loaded += lambda: aplicar_icono_ventana(
-            datos["titulo"], paths.res_path('static', 'icons', 'my-content.ico'), log)
+        ruta_icono = paths.res_path('static', 'icons', datos["icono"])
+        _poner_icono = lambda: aplicar_icono_ventana(datos["titulo"], ruta_icono, log)
+        if hasattr(ventana.events, 'shown'):
+            ventana.events.shown += _poner_icono
+        ventana.events.loaded += _poner_icono
     return ventana
 
 
@@ -3595,6 +3688,11 @@ if __name__ == "__main__":
             raise ImportError("Modo navegador elegido")
         import webview  # type: ignore
 
+        datos_inicio = VENTANAS_APP[VISTA_INICIAL]
+        if winproc.ES_WINDOWS:
+            from windows_icon import definir_app_id
+            definir_app_id(datos_inicio["app_id"], log)
+
         window = _crear_ventana(VISTA_INICIAL, oculta=hidden_mode)
         _window = window
         # pywebview avisa aquí si WebView2 no inicia; sin esto el fallo no deja rastro.
@@ -3606,17 +3704,54 @@ if __name__ == "__main__":
                 _vigilar_en_hilo(_ventanas.get(VISTA_INICIAL) or window, URL_APP)
 
         if winproc.ES_WINDOWS:
+            popup_fn, cerrar_popup_fn = None, None
+            if VISTA_INICIAL == "clip":
+                from windows_toast import KinetikToastHost
+                _toast_host = KinetikToastHost(
+                    icon_path=paths.res_path('static', 'icons', datos_inicio["icono"]),
+                    marca="MY CONTENT CLIP",
+                    tema_fn=_leer_tema_clip,
+                    on_click=show_window,
+                    log=log,
+                )
+                popup_fn, cerrar_popup_fn = _toast_host.mostrar, _toast_host.cerrar
+            _bandeja.configurar(
+                icon_path=paths.res_path('static', 'icons', datos_inicio["icono_png"]),
+                nombre=NOMBRE_APP,
+                popup=popup_fn,
+                cerrar_popup=cerrar_popup_fn,
+                on_notify=_registrar_notificacion_ui,
+            )
             _bandeja.iniciar(show_window, _salir_limpio)
         _arranque("Abriendo ventana...")
         if not hidden_mode:
             _vigilar_en_hilo(window, URL_APP)
         webview.start(private_mode=False, icon=paths.res_path('static', 'icons',
-                       'my-content.ico' if winproc.ES_WINDOWS else 'my-content.png'))
+                       datos_inicio["icono"] if winproc.ES_WINDOWS else datos_inicio["icono_png"]))
         _salir_limpio("la ventana se cerró sin bandeja disponible")
     except ImportError:
         print("Abriendo en el navegador...")
         import webbrowser
+        datos_inicio = VENTANAS_APP[VISTA_INICIAL]
         if winproc.ES_WINDOWS:
+            popup_fn, cerrar_popup_fn = None, None
+            if VISTA_INICIAL == "clip":
+                from windows_toast import KinetikToastHost
+                _toast_host = KinetikToastHost(
+                    icon_path=paths.res_path('static', 'icons', datos_inicio["icono"]),
+                    marca="MY CONTENT CLIP",
+                    tema_fn=_leer_tema_clip,
+                    on_click=lambda: webbrowser.open(URL_APP),
+                    log=log,
+                )
+                popup_fn, cerrar_popup_fn = _toast_host.mostrar, _toast_host.cerrar
+            _bandeja.configurar(
+                icon_path=paths.res_path('static', 'icons', datos_inicio["icono_png"]),
+                nombre=NOMBRE_APP,
+                popup=popup_fn,
+                cerrar_popup=cerrar_popup_fn,
+                on_notify=_registrar_notificacion_ui,
+            )
             _bandeja.iniciar(lambda: webbrowser.open(URL_APP), _salir_limpio)
         if not hidden_mode:
             time.sleep(1.5)

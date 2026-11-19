@@ -53,3 +53,17 @@ def aplicar(titulo, ruta, log=print):
         user.EnumWindows(callback_type(visit), 0)
     except Exception as exc:
         log(f'No se pudo cambiar el icono de la ventana: {exc}')
+def definir_app_id(app_id, log=print):
+    """Asigna un AppUserModelID propio en Windows para separar el icono de la barra de tareas."""
+    if os.name != 'nt' or not app_id:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes as w
+        shell = ctypes.WinDLL('shell32', use_last_error=True)
+        shell.SetCurrentProcessExplicitAppUserModelID.argtypes = [w.LPCWSTR]
+        shell.SetCurrentProcessExplicitAppUserModelID.restype = ctypes.c_long
+        return shell.SetCurrentProcessExplicitAppUserModelID(str(app_id)) == 0
+    except Exception as exc:
+        log(f'No se pudo asignar el identificador de la barra de tareas: {exc}')
+        return False

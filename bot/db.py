@@ -121,6 +121,8 @@ class DB:
                 self._con.execute('ALTER TABLE cuentas ADD COLUMN monetizada INTEGER NOT NULL DEFAULT 0')
             if 'proteger_fyp' not in cuentas:
                 self._con.execute('ALTER TABLE cuentas ADD COLUMN proteger_fyp INTEGER NOT NULL DEFAULT 0')
+            if 'subida_manual' not in cuentas:
+                self._con.execute('ALTER TABLE cuentas ADD COLUMN subida_manual INTEGER NOT NULL DEFAULT 0')
             for campo, tipo in [('intervalo_horas', 'REAL'), ('hora_inicio', 'TEXT'), ('hora_fin', 'TEXT')]:
                 if campo not in cuentas:
                     self._con.execute(f'ALTER TABLE cuentas ADD COLUMN {campo} {tipo}')
@@ -191,7 +193,7 @@ class DB:
     def editar_cuenta(self, cid, **campos):
         from .ritmo import validar
         permitidos = {"nombre", "activa", "limite_dia", "url_subida", "estado", "proxima_libre", "preset_corte",
-                      "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "franjas", "monetizada", "proteger_fyp"}
+                      "intervalo_horas", "intervalo_unidad", "hora_inicio", "hora_fin", "franjas", "monetizada", "proteger_fyp", "subida_manual"}
         sets = {k: v for k, v in campos.items() if k in permitidos}
         if 'monetizada' in sets:
             if type(sets['monetizada']) is not bool:
@@ -203,6 +205,9 @@ class DB:
                 raise ValueError('Elige si activar la protección Para ti.')
             if sets['proteger_fyp'] and self.cuenta(cid)['plataforma'] != 'tiktok':
                 raise ValueError('Estos controles se aplican a TikTok.')
+        if 'subida_manual' in sets:
+            if type(sets['subida_manual']) is not bool:
+                raise ValueError('Elige si activar la subida manual en esta cuenta.')
         sets = validar(sets)
         # Un cambio de intervalo se cuenta desde la última publicación, sin borrar su historial.
         if 'intervalo_horas' in sets and 'proxima_libre' not in sets:

@@ -6,8 +6,8 @@
 <title>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</title>
 {% if app_clip %}<link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Barlow+Condensed:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">{% endif %}
-<link rel="icon" type="image/svg+xml" href="/static/icons/my-content.svg">
-<link rel="alternate icon" href="/static/icons/my-content.ico">
+<link rel="icon" type="image/svg+xml" href="/static/icons/{{ 'my-content-clip.svg' if app_clip else 'my-content.svg' }}">
+<link rel="alternate icon" href="/static/icons/{{ 'my-content-clip.ico' if app_clip else 'my-content.ico' }}">
 <meta name="theme-color" content="{{ '#F4F1EA' if app_clip else '#0B1525' }}">
 <script async src="https://unpkg.com/@phosphor-icons/web"></script>
 <style>
@@ -696,11 +696,14 @@ body.tema-kinetik .bot-nav-wrap{
   background:var(--bg);border-right:1.5px solid var(--tinta);padding:20px 16px 14px;gap:14px
 }
 body.tema-kinetik .marca-bot{
-  padding:0 2px 14px;border-bottom:1.5px solid var(--tinta);display:block
+  padding:0 2px 14px;border-bottom:1.5px solid var(--tinta);display:flex;align-items:center;gap:10px
 }
-body.tema-kinetik .marca-bot img{display:none}
+body.tema-kinetik .marca-bot img{
+  display:block;width:34px;height:34px;border-radius:8px;flex-shrink:0;
+  box-shadow:2px 2px 0 rgba(17,18,20,.85)
+}
 body.tema-kinetik .marca-bot h1{
-  font:900 22px/1 var(--titulo);text-transform:uppercase;letter-spacing:-.04em;color:var(--tinta)
+  font:900 18.5px/1.02 var(--titulo);text-transform:uppercase;letter-spacing:-.035em;color:var(--tinta)
 }
 body.tema-kinetik .marca-bot small{
   font:600 10.5px/1.3 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--suave);margin-top:5px
@@ -1076,7 +1079,49 @@ body.tema-kinetik dialog #yt-auto{background:var(--panel-solid);border:1.5px sol
 body.tema-kinetik dialog #cookies-descarga-estado,body.tema-kinetik dialog #yt-auto-estado,body.tema-kinetik dialog #texto-estado{color:var(--tinta);font:600 12.5px var(--mono)}
 body.tema-kinetik dialog::backdrop{background:rgba(17,18,20,.62);backdrop-filter:none}
 body.tema-kinetik #vista-rapida-titulo{color:var(--tinta)!important;font-family:var(--titulo)!important;font-weight:800!important}
-body.tema-kinetik #toast{background:var(--tinta);color:var(--volt);border:1.5px solid var(--tinta);border-radius:6px;font:600 12.5px var(--mono)}
+@keyframes kinetikToastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@keyframes kinetikToastBar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+body.tema-kinetik #toast{
+  --kt-acento:var(--acento);--kt-badge-txt:#FFF;
+  position:fixed;right:22px;bottom:22px;left:auto;transform:none;
+  width:min(384px,calc(100vw - 32px));padding:0;border-radius:0;overflow:hidden;
+  background:var(--bg);color:var(--tinta);border:2px solid var(--tinta);
+  box-shadow:6px 6px 0 rgba(17,18,20,.92);backdrop-filter:none;-webkit-backdrop-filter:none;
+  font:500 13px/1.45 var(--cuerpo);animation:kinetikToastIn .18s cubic-bezier(.22,1,.36,1)
+}
+body.tema-kinetik #toast.ktoast-ok{--kt-acento:var(--volt);--kt-badge-txt:#111214}
+body.tema-kinetik #toast.ktoast-error{--kt-acento:var(--mal);--kt-badge-txt:#FFF}
+body.tema-kinetik #toast .ktoast-wrap{display:flex;align-items:stretch;min-height:92px}
+body.tema-kinetik #toast .ktoast-franja{
+  flex:0 0 8px;background:var(--kt-acento);border-right:1.5px solid var(--tinta)
+}
+body.tema-kinetik #toast .ktoast-main{flex:1;min-width:0;display:flex;flex-direction:column}
+body.tema-kinetik #toast .ktoast-head{
+  display:flex;align-items:center;gap:8px;padding:7px 10px 7px 12px;
+  background:var(--panel-solid);border-bottom:1px solid var(--fino)
+}
+body.tema-kinetik #toast .ktoast-head img{width:20px;height:20px;border-radius:4px;flex-shrink:0}
+body.tema-kinetik #toast .ktoast-marca{
+  font:700 10.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--suave);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+body.tema-kinetik #toast .ktoast-pill{
+  margin-left:auto;padding:3px 7px;font:700 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  background:var(--kt-acento);color:var(--kt-badge-txt);border:1.5px solid var(--tinta);flex-shrink:0
+}
+body.tema-kinetik #toast .ktoast-x{
+  margin-left:4px;padding:0;width:24px;height:24px;min-height:24px;border:0;background:transparent;
+  color:var(--suave);font:700 16px/1 var(--mono);cursor:pointer;display:inline-flex;align-items:center;justify-content:center
+}
+body.tema-kinetik #toast .ktoast-x:hover:not(:disabled){background:var(--tinta);color:var(--bg)}
+body.tema-kinetik #toast .ktoast-body{padding:10px 13px 11px;display:flex;flex-direction:column;gap:3px}
+body.tema-kinetik #toast .ktoast-titulo{font:800 13.5px/1.2 var(--titulo);color:var(--tinta);letter-spacing:-.01em}
+body.tema-kinetik #toast .ktoast-msg{font:500 12.5px/1.42 var(--cuerpo);color:var(--suave);word-break:break-word}
+body.tema-kinetik #toast .ktoast-pista{height:4px;background:var(--panel-solid);overflow:hidden}
+body.tema-kinetik #toast .ktoast-barra{
+  height:100%;width:100%;background:var(--kt-acento);transform-origin:left center;
+  animation:kinetikToastBar 4.4s linear forwards
+}
 body.tema-kinetik ::-webkit-scrollbar{width:9px;height:9px}
 body.tema-kinetik ::-webkit-scrollbar-thumb{background:rgba(17,18,20,.32);border-radius:4px}
 body.tema-kinetik ::-webkit-scrollbar-track{background:var(--panel)}
@@ -1087,11 +1132,122 @@ body.tema-kinetik.modo-ligero-ram #lado-bot,
 body.tema-kinetik.modo-ligero-ram #lado-regla{background:var(--bg)!important}
 body.tema-kinetik.modo-ligero-ram .card{background:transparent!important;box-shadow:none!important}
 body.tema-kinetik.modo-ligero-ram .metrica{background:transparent!important;box-shadow:none!important}
+
+/* === Interruptor Claro / Oscuro (☀ / ☾) Kinetik Print === */
+.kinetik-tema-row{display:none}
+body.tema-kinetik .kinetik-tema-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;border-top:1px solid var(--fino)
+}
+body.tema-kinetik .kinetik-tema-btn{
+  display:inline-flex;align-items:center;gap:2px;padding:3px;min-height:30px;
+  border-radius:999px;border:1.5px solid var(--tinta);background:var(--panel-solid);color:var(--tinta);
+  cursor:pointer
+}
+body.tema-kinetik .kinetik-tema-btn:hover:not(:disabled){background:var(--panel-elev);color:var(--tinta)}
+body.tema-kinetik .kinetik-tema-btn .k-ico{
+  width:24px;height:22px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;line-height:1;transition:background .18s ease,color .18s ease
+}
+body.tema-kinetik:not(.tema-kinetik-oscuro) .kinetik-tema-btn .k-sol{background:var(--acento);color:#FFF}
+body.tema-kinetik.tema-kinetik-oscuro .kinetik-tema-btn .k-luna{background:var(--acento);color:#FFF}
+
+/* ===== Kinetik Print · Modo Oscuro (Carbon Edition) ===== */
+body.tema-kinetik.tema-kinetik-oscuro{
+  color-scheme:dark;
+  --bg:#0E0F11;--lateral:#0E0F11;--panel:#151619;--panel-solid:#17181C;--panel-elev:#202227;--relleno:#26282E;
+  --borde:rgba(234,229,217,.22);--borde-luz:#EAE5D9;--fino:rgba(234,229,217,.16);
+  --texto:#F4F1EA;--suave:#B2ADA2;--tenue:#8A857B;
+  --acento:#FF4D00;--acento-azul:#FF4D00;--acento-suave:rgba(255,77,0,.16);--azul:#FF7A45;
+  --volt:#E8FF00;--tinta:#EAE5D9;
+  --ok:#34D399;--mal:#F87171;--aviso:#FBBF24;
+  background:var(--bg);color:var(--texto)
+}
+body.tema-kinetik.tema-kinetik-oscuro ::selection{background:var(--volt);color:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro .kinetik-mark{
+  opacity:.52;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23EAE5D9' stroke-width='1.2'%3E%3Ccircle cx='12' cy='12' r='4.2'/%3E%3Cline x1='12' y1='1' x2='12' y2='23'/%3E%3Cline x1='1' y1='12' x2='23' y2='12'/%3E%3C/svg%3E")
+}
+body.tema-kinetik.tema-kinetik-oscuro .bot-tab:hover{background:rgba(234,229,217,.06);color:var(--texto)}
+body.tema-kinetik.tema-kinetik-oscuro .bot-tab.activa{background:rgba(255,77,0,.14);color:var(--texto)}
+body.tema-kinetik.tema-kinetik-oscuro .bot-tab.activa::before{
+  background:var(--acento);color:#0E0F11;padding:2px 6px;border-radius:3px;font-size:13px
+}
+body.tema-kinetik.tema-kinetik-oscuro .salud-item:hover:not(:disabled){background:rgba(234,229,217,.07);color:var(--texto)}
+body.tema-kinetik.tema-kinetik-oscuro button{background:var(--panel-solid);color:var(--texto);border-color:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro button:hover:not(:disabled){background:var(--tinta);color:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro button.prim{background:var(--acento);border-color:var(--acento);color:#FFF}
+body.tema-kinetik.tema-kinetik-oscuro button.prim:hover:not(:disabled){background:#FF6420;border-color:#FF6420;color:#FFF}
+body.tema-kinetik.tema-kinetik-oscuro .kinetik-cta-top{background:var(--acento);border-color:var(--acento);color:#FFF}
+body.tema-kinetik.tema-kinetik-oscuro .kinetik-cta-top:hover:not(:disabled){background:#FF6420;border-color:#FF6420;color:#FFF}
+body.tema-kinetik .bot-tab:hover:not(:disabled){background:rgba(17,18,20,.06);color:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .bot-tab:hover:not(:disabled){background:rgba(234,229,217,.08);color:var(--texto)}
+body.tema-kinetik.tema-kinetik-oscuro .bot-tab.activa:hover:not(:disabled){background:rgba(255,77,0,.18);color:var(--texto)}
+body.tema-kinetik.tema-kinetik-oscuro button.peligro{border-color:var(--mal);color:var(--mal);background:transparent}
+body.tema-kinetik.tema-kinetik-oscuro button.peligro:hover:not(:disabled){background:var(--mal);color:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro a{color:#FF7A45}
+body.tema-kinetik.tema-kinetik-oscuro .chip.on{background:var(--volt);color:#0E0F11;border-color:var(--volt)}
+body.tema-kinetik.tema-kinetik-oscuro .switch input[type=checkbox]{background:var(--relleno);border-color:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .switch input[type=checkbox]::after{background:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .switch input[type=checkbox]:checked{background:var(--acento);border-color:var(--acento)}
+body.tema-kinetik.tema-kinetik-oscuro .switch input[type=checkbox]:checked::after{background:#FFF}
+body.tema-kinetik.tema-kinetik-oscuro .e-ok,body.tema-kinetik.tema-kinetik-oscuro .e-listo,body.tema-kinetik.tema-kinetik-oscuro .e-publicada{background:rgba(52,211,153,.14);color:#6EE7B7;border-color:#34D399}
+body.tema-kinetik.tema-kinetik-oscuro .e-mal,body.tema-kinetik.tema-kinetik-oscuro .e-error,body.tema-kinetik.tema-kinetik-oscuro .e-sin_login,body.tema-kinetik.tema-kinetik-oscuro .e-sin_destino{background:rgba(248,113,113,.15);color:#FCA5A5;border-color:#F87171}
+body.tema-kinetik.tema-kinetik-oscuro .e-aviso,body.tema-kinetik.tema-kinetik-oscuro .e-revisar,body.tema-kinetik.tema-kinetik-oscuro .e-sin_comprobar,body.tema-kinetik.tema-kinetik-oscuro .e-cancelando{background:var(--volt);color:#0E0F11;border-color:var(--volt)}
+body.tema-kinetik.tema-kinetik-oscuro .e-info,body.tema-kinetik.tema-kinetik-oscuro .e-pendiente,body.tema-kinetik.tema-kinetik-oscuro .e-omitido{background:var(--panel-elev);color:var(--texto);border-color:var(--borde-luz)}
+body.tema-kinetik.tema-kinetik-oscuro .e-subiendo,body.tema-kinetik.tema-kinetik-oscuro .e-cortando,body.tema-kinetik.tema-kinetik-oscuro .e-descargando{background:rgba(255,77,0,.2);color:#FF9E70;border-color:var(--acento)}
+/* Tarjetas 9:16 + stickers amarillo ácido #E8FF00 con texto negro carbón como la maqueta Carbon Edition */
+body.tema-kinetik.tema-kinetik-oscuro .vaso-clip{background:var(--panel);border-color:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .vaso-clip:hover{box-shadow:4px 4px 0 var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .vaso-clip.es-seleccionado{box-shadow:4px 4px 0 var(--acento);border-color:var(--acento)}
+body.tema-kinetik.tema-kinetik-oscuro .vaso-kinetik-stage{border-color:rgba(234,229,217,.22);background:#090A0C}
+body.tema-kinetik.tema-kinetik-oscuro .nota-video{box-shadow:3px 3px 0 rgba(0,0,0,.72)}
+body.tema-kinetik.tema-kinetik-oscuro .nota-video.nivel-viral,
+body.tema-kinetik.tema-kinetik-oscuro .nota-video.nivel-alta{
+  background:var(--volt);color:#0E0F11;border:1.5px solid #0E0F11
+}
+body.tema-kinetik.tema-kinetik-oscuro .nota-video.nivel-media{
+  background:var(--tinta);color:#0E0F11;border:1.5px solid #0E0F11
+}
+body.tema-kinetik.tema-kinetik-oscuro .nota-video.nivel-baja{
+  background:var(--panel-solid);color:#FF7A45;border:1.5px solid var(--acento)
+}
+body.tema-kinetik.tema-kinetik-oscuro .vaso-cerrar{background:var(--tinta);color:#0E0F11;border-color:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .lado-kinetik-frame{background:var(--panel);border-color:var(--tinta)}
+body.tema-kinetik.tema-kinetik-oscuro .lado-scrubber-row input[type=range]{background:var(--acento);height:3px}
+body.tema-kinetik.tema-kinetik-oscuro .lado-scrubber-row input[type=range]::-webkit-slider-thumb{background:var(--acento);border:1.5px solid #0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro #lado-bot #registro{background:#090A0C;border-color:var(--borde);color:#D7D2C5}
+body.tema-kinetik.tema-kinetik-oscuro .regla-pasos i{background:var(--volt);color:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro dialog,
+body.tema-kinetik.tema-kinetik-oscuro dialog.card.cookies-dialog,
+body.tema-kinetik.tema-kinetik-oscuro dialog#cookies-descarga-modal,
+body.tema-kinetik.tema-kinetik-oscuro dialog#texto-dialog,
+body.tema-kinetik.tema-kinetik-oscuro dialog#vista-rapida-dialog{
+  background:var(--bg)!important;color:var(--texto)!important;border-color:var(--tinta)!important;
+  box-shadow:8px 8px 0 rgba(0,0,0,.78)!important
+}
+body.tema-kinetik.tema-kinetik-oscuro dialog .muted{color:var(--suave)}
+body.tema-kinetik.tema-kinetik-oscuro dialog::backdrop{background:rgba(0,0,0,.76)}
+body.tema-kinetik.tema-kinetik-oscuro .marca-bot img{box-shadow:2px 2px 0 rgba(0,0,0,.78)}
+body.tema-kinetik.tema-kinetik-oscuro #toast{
+  background:var(--panel);color:var(--texto);border-color:var(--tinta);
+  box-shadow:6px 6px 0 rgba(0,0,0,.85)
+}
+body.tema-kinetik.tema-kinetik-oscuro #toast.ktoast-ok{--kt-acento:var(--volt);--kt-badge-txt:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro #toast.ktoast-error{--kt-acento:var(--mal);--kt-badge-txt:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-head{background:var(--panel-elev);border-bottom-color:var(--fino)}
+body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-pill{border-color:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-titulo{color:var(--texto)}
+body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-msg{color:var(--suave)}
+body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-pista{background:var(--relleno)}
+body.tema-kinetik.tema-kinetik-oscuro #toast .ktoast-x:hover:not(:disabled){background:var(--tinta);color:#0E0F11}
+body.tema-kinetik.tema-kinetik-oscuro ::-webkit-scrollbar-thumb{background:rgba(234,229,217,.28)}
+
 body.app-clip .volver-app{display:none}
 
 </style>
 </head>
 <body class="{{ 'app-clip tema-kinetik' if app_clip else '' }}">
+{% if app_clip %}<script>(function(){try{if(localStorage.getItem("kinetik_tema")==="oscuro"){document.body.classList.add("tema-kinetik-oscuro");var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content","#0E0F11");}}catch(_){}})();</script>{% endif %}
 <div class="kinetik-marks" aria-hidden="true"><i class="kinetik-mark m-top"></i><i class="kinetik-mark m-bot"></i><i class="kinetik-mark m-left"></i><i class="kinetik-mark m-right"></i></div>
 <header>
   <h2 id="titulo-vista">Cola y actividad</h2>
@@ -1106,7 +1262,7 @@ body.app-clip .volver-app{display:none}
 </header>
 
 <div class="bot-nav-wrap">
-  <div class="marca-bot"><img src="/static/icons/bot.svg" width="32" height="32" alt=""><div><h1>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</h1><small>{{ 'Clips · Lives · Subida' if app_clip else 'My Content' }}</small></div></div>
+  <div class="marca-bot"><img src="/static/icons/{{ 'my-content-clip.svg' if app_clip else 'bot.svg' }}" width="32" height="32" alt=""><div><h1>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</h1><small>{{ 'Clips · Lives · Subida' if app_clip else 'My Content' }}</small></div></div>
   <nav class="bot-tabs" aria-label="Secciones del bot">
     <button type="button" class="bot-tab activa" data-num="01" data-vista="cola" onclick="cambiarPestanaBot('cola')">
       <i class="ph-duotone ph-queue"></i> Cola y actividad <span class="tab-badge" id="badge-cola">0</span>
@@ -1126,8 +1282,8 @@ body.app-clip .volver-app{display:none}
   </nav>
   <div class="salud" id="salud" aria-label="Estado del bot"></div>
   <div class="bot-encendido"><label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Bot encendido</label>
-    <label class="switch" title="El bot edita y guarda los clips, pero no publica solo. Cada clip sale cuando pulses ↑ Subir ahora."><input type="checkbox" id="subida_manual" onchange="cambiarSubidaManual(this.checked)"> ✋ Subida manual</label>
-    <div class="kinetik-emblema"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 19L11 5h4l-3 7 7 3v4l-9-3-1.5 3H5z"/></svg><span>KINETIK STUDIO</span></div></div>
+    <label class="switch" title="Aplica subida manual a todas las cuentas a la vez. También puedes activarla por cuenta en Cuentas y reglas."><input type="checkbox" id="subida_manual" onchange="cambiarSubidaManual(this.checked)"> ✋ Manual (todas)</label>
+    <div class="kinetik-tema-row"><button type="button" id="btn-kinetik-tema" class="kinetik-tema-btn" onclick="alternarModoOscuroKinetik()" title="Cambiar entre modo claro (Papel) y oscuro (Carbon)" aria-label="Cambiar modo claro y oscuro"><span class="k-ico k-sol" aria-hidden="true">☀</span><span class="k-ico k-luna" aria-hidden="true">☾</span></button><div class="kinetik-emblema" style="padding-top:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 19L11 5h4l-3 7 7 3v4l-9-3-1.5 3H5z"/></svg><span>KINETIK</span></div></div></div>
 </div>
 
 <main>
@@ -1397,6 +1553,7 @@ body.app-clip .volver-app{display:none}
         </div>
         <div class="fila" style="margin-top:8px">
           <button class="prim" onclick="guardarAvisos()">Guardar avisos</button>
+          <button type="button" onclick="probarNotificacionKinetik()">Probar notificación</button>
           <span id="avisos-estado" class="muted" aria-live="polite" style="flex:2"></span>
         </div>
       </div>
@@ -1546,7 +1703,7 @@ body.app-clip .volver-app{display:none}
     <button type="button" onclick="cerrarVistaRapidaBot()">Cerrar</button>
   </div>
 </dialog>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const ICON = {tiktok:'ph-tiktok-logo', youtube:'ph-youtube-logo', facebook:'ph-facebook-logo'};
@@ -1604,8 +1761,69 @@ if (typeof window !== 'undefined' && typeof URLSearchParams !== 'undefined') {
   });
 }
 
-function toast(t, mal) { const el = $('toast'); el.textContent = t; el.style.color = mal ? 'var(--mal)' : '';
-  el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => el.style.display = 'none', 3500); }
+let _ultimoAvisoUiId = null;
+function cerrarToast() {
+  const el = $('toast');
+  if (!el) return;
+  clearTimeout(el._t);
+  el.style.display = 'none';
+}
+function _tipoToastKinetik(texto, mal, titulo) {
+  if (mal) return 'error';
+  const s = `${titulo || ''} ${texto || ''}`.toLowerCase();
+  if (/error|fall[oó]|no se pudo|sin sesi[oó]n|vencid|bloquead|expirad/.test(s)) return 'error';
+  if (/publicad|listo|completad|[eé]xito|subido|guardad|activad|importadas|detectado|✓/.test(s)) return 'ok';
+  return 'info';
+}
+function toast(t, mal, titulo) {
+  const el = $('toast');
+  if (!el) return;
+  const esKinetik = typeof document !== 'undefined' && document.body?.classList?.contains('tema-kinetik');
+  if (esKinetik && 'innerHTML' in el) {
+    const tipo = _tipoToastKinetik(t, mal, titulo);
+    const etiqueta = tipo === 'error' ? 'ERROR' : (tipo === 'ok' ? 'LISTO' : 'AVISO');
+    const cabecera = titulo || (tipo === 'error' ? 'Atención' : (tipo === 'ok' ? 'Acción completada' : 'Aviso del sistema'));
+    el.className = `ktoast-${tipo}`;
+    el.style.color = '';
+    el.innerHTML = `<div class="ktoast-wrap"><span class="ktoast-franja" aria-hidden="true"></span><div class="ktoast-main">` +
+      `<div class="ktoast-head"><img src="/static/icons/my-content-clip.svg" alt="" width="20" height="20">` +
+      `<span class="ktoast-marca">MY CONTENT CLIP</span><span class="ktoast-pill">${etiqueta}</span>` +
+      `<button type="button" class="ktoast-x" onclick="cerrarToast()" aria-label="Cerrar notificación">×</button></div>` +
+      `<div class="ktoast-body"><div class="ktoast-titulo">${esc(cabecera)}</div><div class="ktoast-msg">${esc(t)}</div></div>` +
+      `<div class="ktoast-pista"><div class="ktoast-barra"></div></div></div></div>`;
+    el.style.display = 'block';
+    void el.offsetWidth;
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.style.display = 'none'; }, 4400);
+    return;
+  }
+  el.textContent = t;
+  el.style.color = mal ? 'var(--mal)' : '';
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 3500);
+}
+function _procesarNotificacionesServidor(lista) {
+  if (!Array.isArray(lista) || !lista.length) return;
+  if (_ultimoAvisoUiId === null) {
+    _ultimoAvisoUiId = Number(lista[lista.length - 1]?.id || 0);
+    return;
+  }
+  const nuevas = lista.filter(n => Number(n?.id || 0) > _ultimoAvisoUiId);
+  if (!nuevas.length) return;
+  const ultima = nuevas[nuevas.length - 1];
+  _ultimoAvisoUiId = Number(ultima.id || _ultimoAvisoUiId);
+  toast(ultima.mensaje || ultima.titulo || '', ultima.tipo === 'error', ultima.titulo || 'My Content Clip');
+}
+async function probarNotificacionKinetik() {
+  try {
+    const r = await api('/api/bot/probar_aviso', {
+      titulo: 'Notificaciones Kinetik Print',
+      mensaje: 'Estilo sincronizado entre escritorio, bandeja y My Content Clip.',
+    });
+    toast(r.mensaje || 'Notificación de prueba enviada.', false, r.titulo || 'Notificaciones Kinetik Print');
+  } catch (e) {}
+}
 
 async function api(url, body, metodo) {
   const r = await fetch(url, {method: metodo || (body !== undefined ? 'POST' : 'GET'),
@@ -1819,7 +2037,7 @@ function tarjetaCuenta(c) {
       : (c.detalle_sesion && c.estado !== 'ok' ? `<p class="muted" style="margin:4px 0 8px">${esc(c.detalle_sesion)}</p>` : '');
   return `<article class="cuenta-panel" id="cuenta-${c.id}">
     <div class="cuenta-cabecera"><h3>${plat(c.plataforma)} ${esc(c.nombre)}</h3>${est(c.comprobando ? 'sin_comprobar' : c.estado)}</div>
-    <p class="muted">${c.activa ? 'Cuenta activa' : 'Cuenta pausada'} · ${c.hoy}/${c.limite_dia} hoy · ${c.pendientes || 0} pendientes</p>
+    <p class="muted">${c.activa ? 'Cuenta activa' : 'Cuenta pausada'}${c.subida_manual ? ' · ✋ Subida manual' : ''} · ${c.hoy}/${c.limite_dia} hoy · ${c.pendientes || 0} pendientes</p>
     ${avisoSesion}
     <div class="proximo"><b>${faltan === null ? 'Sin hora estimada' : faltan ? 'Turno estimado en '+Math.floor(faltan/60)+' h '+faltan%60+' min' : 'Turno disponible'}</b>
       ${proxima ? '<div class="muted">'+fechaSubida(proxima)+'</div>' : ''}<p>${esc(c.espera || '')}</p>
@@ -1827,6 +2045,7 @@ function tarjetaCuenta(c) {
     </div>
     <div class="acc">
       <button onclick="pausarCuenta(${c.id},${!c.activa})">${c.activa ? 'Pausar cuenta' : 'Activar cuenta'}</button>
+      <button class="${c.subida_manual ? 'prim' : ''}" data-manual-cuenta="${c.id}" onclick="cambiarSubidaManualCuenta(${c.id},${!c.subida_manual})" title="Si está activa, esta cuenta guarda sus clips y solo publica cuando pulses ↑ Subir ahora">${c.subida_manual ? '✋ Manual: ON' : '✋ Subida manual'}</button>
       <button onclick="verColaCuenta(${c.id})">Ver cola</button>
       ${siguiente ? `<button class="prim" onclick="adelantarClip(${Number(siguiente.id)})">Subir siguiente ahora</button>` : ''}
       ${c.login_abierto
@@ -1908,6 +2127,7 @@ function pintar() {
   }
   const avisos = E.avisos || {};
   $('avisos-estado').textContent = `${avisos.pendiente || 0} pendientes · ${avisos.enviado || 0} enviados · ${avisos.fallido || 0} fallidos`;
+  if (typeof _procesarNotificacionesServidor === 'function') _procesarNotificacionesServidor(E.notificaciones_recientes);
   $('remoto-estado').textContent = c.remoto_url ? (E.remoto || 'Sin probar todavía') : '';
   pintarYoutubeAuto();
   $('modo-activo').textContent = 'Modo: ' + ({alternar:'subir cada clip apenas esté listo',preparar_primero:'editar cola y publicar',solo_preparar:'solo editar y guardar',solo_subir:'solo publicar guardados'}[c.modo_cola] || c.modo_cola) + (c.subida_manual ? ' · ✋ subida manual' : '');
@@ -2126,7 +2346,7 @@ function pintarLado() {
   }
   const htmlCuentas = (E.cuentas || []).map(c => {
     const limite = Number(c.limite_dia) || 0, hoy = Number(c.hoy) || 0;
-    return `<div class="lado-medidor"><span>${esc(c.nombre)}</span><span>${c.activa ? `${hoy} de ${limite}` : 'Pausada'}</span><i><b style="width:${limite ? Math.min(100, hoy / limite * 100) : 0}%"></b></i></div>`;
+    return `<div class="lado-medidor"><span>${esc(c.nombre)}${c.subida_manual ? ' ✋' : ''}</span><span>${c.activa ? `${hoy} de ${limite}` : 'Pausada'}</span><i><b style="width:${limite ? Math.min(100, hoy / limite * 100) : 0}%"></b></i></div>`;
   }).join('') || '<p class="muted">Sin cuentas.</p>';
   if (cuentas.dataset.firma !== htmlCuentas) { cuentas.innerHTML = htmlCuentas; cuentas.dataset.firma = htmlCuentas; }
 }
@@ -2598,6 +2818,13 @@ async function probar(id) {
   finally { pruebasPendientes.delete(id); await cargar(); }
 }
 async function pausarCuenta(id, activa) { await api(`/api/bot/cuentas/${id}`, {activa}); cargar(); }
+async function cambiarSubidaManualCuenta(id, on) {
+  try {
+    await api(`/api/bot/cuentas/${id}`, {subida_manual: Boolean(on)});
+    await cargar();
+    toast(on ? '✋ Subida manual activada en esta cuenta: publicará solo cuando pulses ↑ Subir ahora.' : 'Subida automática reactivada en esta cuenta.');
+  } catch (e) { toast(e.message, true); }
+}
 async function cerrarSesionCuenta(id) {
   const cuenta = E?.cuentas?.find(c => c.id === id);
   if (!cuenta || sesionesCerrarPendientes.has(id)) return;
@@ -3465,6 +3692,27 @@ $('vista-rapida-dialog')?.addEventListener('close', () => {
 });
 function alternarModoInmersivoBot() {
   try { window.parent?.postMessage({type: 'bot-toggle-immersive'}, '*'); } catch (_) {}
+}
+function sincronizarTemaKinetik(tema) {
+  if (typeof fetch !== 'function') return;
+  fetch('/api/clip/tema', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({tema: tema === 'oscuro' ? 'oscuro' : 'claro'}),
+  }).catch(() => {});
+}
+function alternarModoOscuroKinetik() {
+  if (typeof document === 'undefined' || !document.body) return;
+  const oscuro = document.body.classList.toggle('tema-kinetik-oscuro');
+  const tema = oscuro ? 'oscuro' : 'claro';
+  try { localStorage.setItem('kinetik_tema', tema); } catch (_) {}
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', oscuro ? '#0E0F11' : '#F4F1EA');
+  const btn = $('btn-kinetik-tema');
+  if (btn) btn.setAttribute('aria-pressed', oscuro ? 'true' : 'false');
+  sincronizarTemaKinetik(tema);
+}
+if (typeof document !== 'undefined' && document.body?.classList?.contains('tema-kinetik')) {
+  sincronizarTemaKinetik(document.body.classList.contains('tema-kinetik-oscuro') ? 'oscuro' : 'claro');
 }
 const muestrasVoz = new Map();
 let audioMuestra = null;
