@@ -156,11 +156,12 @@ def download_video(url, output_dir="videos_descargados", quality="best", cancel_
     print(f"Descargando video: {url} (Calidad: {quality})")
 
     # Elegir resolución y FPS antes que códec: AV1 a 720p no debe desplazar VP9 a 4K.
-    if quality == "best":
+    q_clean = str(quality or "best").strip().lower()
+    if q_clean == "best":
         formato = 'bv*+ba/b'
     else:
         try:
-            altura = int(quality)
+            altura = int(q_clean[:-1] if q_clean.endswith("p") else q_clean)
         except (TypeError, ValueError):
             raise DescargaError('Elige best o una altura válida en píxeles.') from None
         if not 1 <= altura <= 8192:

@@ -37,19 +37,22 @@ def _crear_video_sintetico(ruta: str, w: int = 320, h: int = 180, fps: int = 15,
     subprocess.run(cmd, check=True, capture_output=True, timeout=30)
 
 
-def _escribir_wav_sintetico(ruta: str, dur_s: float = 0.8):
+def _escribir_wav_sintetico(text: str, output_wav: str, language: str = "es", voice: str = "male",
+                            voice_config: dict | None = None, steps: int = 10, dur_s: float = 0.5):
+    """Replica exacta de la firma y tupla de retorno real de smart_commentary.synthesize_commentary_line."""
     sr_hz = 48000
     n = int(sr_hz * dur_s)
     t = np.linspace(0, dur_s, n, dtype=np.float32)
     pcm = (np.sin(2 * np.pi * 520 * t) * 14000).astype("<i2")
     stereo = np.column_stack([pcm, pcm])
-    with wave.open(ruta, "wb") as wf:
+    os.makedirs(os.path.dirname(os.path.abspath(output_wav)), exist_ok=True)
+    with wave.open(output_wav, "wb") as wf:
         wf.setnchannels(2)
         wf.setsampwidth(2)
         wf.setframerate(sr_hz)
         wf.writeframes(stereo.tobytes())
     env = np.full(max(1, int(dur_s * 50)), 0.72, dtype=np.float32)
-    return {"duracion": dur_s, "envolvente": env, "palabras": []}
+    return (output_wav, [], dur_s, env)
 
 
 class StreamerFramingTests(unittest.TestCase):
@@ -154,27 +157,167 @@ class ReaccionesIATests(unittest.TestCase):
         self.assertGreaterEqual(lista[1]["segundo"] - lista[0]["segundo"], 2.2)
         self.assertEqual(lista[1]["emocion"], "excited")
 
-    def test_render_end_to_end_split_pip_y_pausar(self):
+    def test_render_end_to_end_todos_los_layouts_y_marcos(self):
         if not shutil.which("ffmpeg"):
             self.skipTest("FFmpeg no disponible en PATH")
         with tempfile.TemporaryDirectory() as tmp:
             in_mp4 = os.path.join(tmp, "entrada.mp4")
-            _crear_video_sintetico(in_mp4, w=320, h=180, fps=15, dur_s=2.0)
+            _crear_video_sintetico(in_mp4, w=320, h=180, fps=15, dur_s=1.8)
             with patch.object(rc, "raiz_personajes", return_value=Path(tmp) / "personajes"), \
-                 patch.object(ra.sc, "synthesize_commentary_line", side_effect=lambda txt, wav, **kw: _escribir_wav_sintetico(wav, 0.6)):
-                p = rc.guardar_personaje({"nombre": "Pana Bot", "personalidad": "hype", "voz": "male"})
-                interv = [{"segundo": 0.6, "modo": "pausar", "emocion": "surprised", "texto": "¡Qué locura!"}]
-                for layout in ("split", "pip", "pausar"):
+                 patch.object(ra.sc, "synthesize_commentary_line", side_effect=_escribir_wav_sintetico):
+                p = rc.guardar_personaje({
+                    "nombre": "Pana Bot", "personalidad": "hype", "voz": "male", "marco_estilo": "streamer_pro",
+                })
+                self.assertEqual(p["marco_estilo"], "streamer_pro")
+                interv = [{"segundo": 0.5, "modo": "pausar", "emocion": "surprised", "texto": "¡Qué locura!"}]
+                casos = [
+                    ("split", "streamer_pro"),
+                    ("split_arriba", "kinetik_print"),
+                    ("pip_arriba_centro", "streamer_pro"),
+                    ("pip", "neon_cyber"),
+                    ("pausar", "minimal"),
+                ]
+                for layout, marco in casos:
                     out_mp4 = os.path.join(tmp, f"out_{layout}.mp4")
                     res = ra.renderizar_video_reaccion(
                         in_mp4, out_mp4, p, interv,
-                        layout=layout, motor_animacion="expresivo",
+                        layout=layout, motor_animacion="expresivo", marco_estilo=marco,
                         resolucion=(360, 640), fps=15,
                     )
                     self.assertTrue(os.path.isfile(out_mp4), layout)
                     self.assertGreater(os.path.getsize(out_mp4), 5000, layout)
+                    self.assertTrue(res["miniatura"] and os.path.isfile(res["miniatura"]), layout)
                     self.assertEqual(res["motor_usado"], "expresivo")
-                    self.assertGreater(res["duracion"], 2.2)  # 2.0s video + pausa ~0.85s
+                    self.assertEqual(res["layout"], layout)
+                    self.assertEqual(res["marco_estilo"], marco)
+                    self.assertGreater(res["duracion"], 2.0)
+
+    def test_probar_voz_remoto_colab_y_enviar_cola(self):
+        from bot.remoto import Cliente, ClienteRemoto
+        self.assertIs(ClienteRemoto, Cliente)
+
+        client = content.app.test_client()
+        with tempfile.TemporaryDirectory() as tmp:
+            import smart_commentary as sc_mod
+            with patch.object(rc, "raiz_personajes", return_value=Path(tmp) / "personajes"), \
+                 patch.object(content, "_carpeta_reacciones", return_value=tmp), \
+                 patch.object(sc_mod, "synthesize_commentary_line", side_effect=_escribir_wav_sintetico):
+                p = rc.guardar_personaje({"nombre": "Voz Test", "personalidad": "hype", "voz": "male"})
+                r_voz = client.post(f"/api/reacciones/personajes/{p['id']}/probar_voz", json={})
+                self.assertEqual(r_voz.status_code, 200)
+                self.assertGreater(len(r_voz.data), 1000)
+
+                # Verificar enviar_cola con carpeta real (sin crash de método carpeta_clips)
+                fake_mp4 = os.path.join(tmp, "reaccion_abc123.mp4")
+                Path(fake_mp4).write_bytes(b"ftypmp42" + b"0" * 2048)
+                with content._reacciones_lock:
+                    content._reacciones_trabajos["abc123"] = {
+                        "estado": "listo", "video": fake_mp4, "miniatura": "", "titulo": "Clip Reacción",
+                    }
+                encolados = []
+
+                class _FakeDB:
+                    def cuentas(self):
+                        return [{"id": 7, "plataforma": "tiktok", "nombre": "Cuenta 7"}]
+                    def encolar_local(self, clave, nombre, archivo, cuentas, plat, texto):
+                        self.assert_ok = os.path.isfile(archivo)
+                        encolados.append((clave, archivo, cuentas, plat, texto))
+
+                class _FakeMotor:
+                    carpeta = tmp
+                    db = _FakeDB()
+                    def despertar(self): pass
+
+                with patch.object(content, "_bot", return_value=_FakeMotor()):
+                    r_cola = client.post("/api/reacciones/enviar_cola", json={
+                        "job_id": "abc123", "cuentas": [7], "texto": "Mi reacción viral",
+                    })
+                    self.assertEqual(r_cola.status_code, 200)
+                    self.assertEqual(r_cola.get_json().get("encoladas"), 1)
+                    self.assertEqual(len(encolados), 1)
+                    self.assertTrue(os.path.isfile(encolados[0][1]))
+
+    def test_live_url_reaccion_y_calidad_yt_downloader(self):
+        self.assertTrue(content._url_parece_live("https://www.youtube.com/live/abc123"))
+        self.assertTrue(content._url_parece_live("https://www.twitch.tv/ibai"))
+        self.assertTrue(content._url_parece_live("https://kick.com/westcol"))
+        self.assertTrue(content._url_parece_live("https://www.tiktok.com/@streamer/live"))
+        self.assertFalse(content._url_parece_live("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        self.assertFalse(content._url_parece_live("https://www.twitch.tv/videos/123456"))
+
+        # Verificar que quality="720p" ya no falla en yt_downloader.download_video
+        import yt_downloader
+        with patch.object(yt_downloader.yt_dlp, "YoutubeDL") as mock_ydl:
+            mock_ydl.return_value.__enter__.return_value.extract_info.return_value = {}
+            mock_ydl.return_value.__enter__.return_value.prepare_filename.return_value = "dummy.mp4"
+            with tempfile.TemporaryDirectory() as tmp:
+                dummy = os.path.join(tmp, "dummy.mp4")
+                Path(dummy).write_bytes(b"0" * 1024)
+                mock_ydl.return_value.__enter__.return_value.prepare_filename.return_value = dummy
+                ruta = yt_downloader.download_video("https://www.youtube.com/watch?v=test", tmp, quality="720p")
+                self.assertEqual(ruta, dummy)
+
+        # Verificar que _resolver_video_reaccion enruta es_live=True a _capturar_clip_live_para_reaccion
+        with tempfile.TemporaryDirectory() as tmp:
+            clip_falso = os.path.join(tmp, "live_clip.mp4")
+            Path(clip_falso).write_bytes(b"1" * 2048)
+            with patch.object(content, "_asegurar_yt_dlp"), \
+                 patch.object(content, "_carpeta_reacciones", return_value=tmp), \
+                 patch.object(content, "_capturar_clip_live_para_reaccion", return_value=clip_falso) as m_live:
+                tok, ruta_res = content._resolver_video_reaccion(
+                    {"url": "https://www.twitch.tv/ibai", "es_live": True, "live_duracion": 30}, None
+                )
+                self.assertTrue(tok)
+                self.assertEqual(ruta_res, clip_falso)
+                m_live.assert_called_once()
+
+    def test_recorte_duracion_clips_y_reintento_ssl_remoto(self):
+        self.assertEqual(sr.parsear_tiempo_a_segundos("01:30"), 90.0)
+        self.assertEqual(sr.parsear_tiempo_a_segundos("2 min"), 120.0)
+        self.assertEqual(sr.parsear_tiempo_a_segundos("45s"), 45.0)
+        self.assertEqual(sr.formatear_mmss(95), "01:35")
+
+        tr_comp, _ = sr.seleccionar_tramos_reaccion("dummy.mp4", 40.0, modo_recorte="completo", duracion_clip=60.0)
+        self.assertEqual(len(tr_comp), 1)
+        self.assertFalse(tr_comp[0]["recortar"])
+
+        tr_man, _ = sr.seleccionar_tramos_reaccion("dummy.mp4", 300.0, modo_recorte="tramo", duracion_clip=45.0, inicio_manual=90.0)
+        self.assertEqual(len(tr_man), 1)
+        self.assertEqual(tr_man[0]["inicio"], 90.0)
+        self.assertEqual(tr_man[0]["fin"], 135.0)
+        self.assertTrue(tr_man[0]["recortar"])
+
+        with patch.object(sr.cv, "transcribir", side_effect=RuntimeError("sin groq")):
+            tr_multi, _ = sr.seleccionar_tramos_reaccion("dummy.mp4", 240.0, modo_recorte="auto_viral", duracion_clip=45.0, cantidad_clips=3)
+        self.assertEqual(len(tr_multi), 3)
+        for i in range(len(tr_multi) - 1):
+            self.assertLessEqual(tr_multi[i]["fin"], tr_multi[i + 1]["inicio"] + 1.5)
+
+        if shutil.which("ffmpeg"):
+            with tempfile.TemporaryDirectory() as tmp:
+                src = os.path.join(tmp, "largo.mp4")
+                cut = os.path.join(tmp, "tramo.mp4")
+                _crear_video_sintetico(src, w=320, h=180, fps=15, dur_s=5.0)
+                sr.recortar_tramo_video(src, cut, inicio_s=1.0, duracion_s=3.0)
+                self.assertTrue(os.path.isfile(cut))
+                self.assertAlmostEqual(sr.duracion_video(cut), 3.0, delta=0.5)
+
+        # Verificar reintento y mensaje claro ante SSLError en Cliente.reaccionar
+        from bot import remoto
+        with tempfile.TemporaryDirectory() as tmp:
+            v = os.path.join(tmp, "clip.mp4")
+            Path(v).write_bytes(b"0" * 1024)
+            cli = remoto.Cliente("https://ejemplo.trycloudflare.com", "clave")
+            try:
+                with patch.object(cli, "_pedir", side_effect=remoto.ServidorCaido("SSLError")) as m_pedir, \
+                     patch.object(remoto.time, "sleep"):
+                    with self.assertRaises(remoto.ServidorCaido) as ctx:
+                        cli.reaccionar(v, {}, {}, os.path.join(tmp, "out.mp4"))
+                    self.assertEqual(m_pedir.call_count, 3)
+                    self.assertIn("SSL", str(ctx.exception))
+                    self.assertIn("6C", str(ctx.exception))
+            finally:
+                cli.s.close()
 
     def test_vistas_previas_webp_y_ui_clip_presentes(self):
         for fname in (
@@ -182,6 +325,8 @@ class ReaccionesIATests(unittest.TestCase):
             "encuadre_streamer_zoom.webp",
             "encuadre_streamer_completo.webp",
             "reaccion_split.webp",
+            "reaccion_split_arriba.webp",
+            "reaccion_pip_arriba.webp",
             "reaccion_pip.webp",
             "reaccion_pausa.webp",
         ):
@@ -195,6 +340,8 @@ class ReaccionesIATests(unittest.TestCase):
             "prev_streamer_zoom.mp4",
             "prev_streamer_completo.mp4",
             "prev_reaccion_split.mp4",
+            "prev_reaccion_split_arriba.mp4",
+            "prev_reaccion_pip_arriba.mp4",
             "prev_reaccion_pip.mp4",
             "prev_reaccion_pausa.mp4",
         ):
@@ -218,10 +365,24 @@ class ReaccionesIATests(unittest.TestCase):
             'id="vista-reacciones"',
             'id="rp-estilo"',
             'id="rp-modelo-img"',
+            'id="rp-marco"',
+            'id="rr-marco"',
+            'id="rr-btn-cookies"',
+            'id="rr-es-live"',
+            'id="rr-live-dur"',
+            'id="rr-recorte-modo"',
+            'id="rr-duracion-clip"',
+            'id="rr-num-clips"',
+            'id="rr-inicio-tramo"',
+            "renderizarTodosClipsReaccion()",
             "generarImagenBasePersonaje()",
             "prev_reaccion_split.mp4",
+            "prev_reaccion_split_arriba.mp4",
+            "prev_reaccion_pip_arriba.mp4",
             "prev_reaccion_pip.mp4",
             "prev_reaccion_pausa.mp4",
+            'data-r-layout="split_arriba"',
+            'data-r-layout="pip_arriba_centro"',
             "analizarVideoReaccion()",
             "renderizarVideoReaccion()",
             "enviarReaccionACola()",

@@ -1,0 +1,17 @@
+{
+  "nombre": "flawer",
+  "personalidad": "analitico",
+  "prompt_extra": "",
+  "muletillas": "",
+  "idioma": "es",
+  "intensidad": 4,
+  "voz": "eleven:bvJ2Om99yEu6BdP8gmOx",
+  "motor_animacion": "expresivo",
+  "layout_defecto": "split",
+  "color_acento": "#ff4d00",
+  "estilo_visual": "caricatura_2d",
+  "modelo_generacion": "zimage_turbo",
+  "descripcion_visual": "",
+  "creado": 1795116332,
+  "actualizado": 1795117161
+}

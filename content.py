@@ -67,6 +67,7 @@ import faulthandler
 import json
 import platform
 import queue
+import shutil
 import socket
 import subprocess
 import threading
@@ -77,7 +78,7 @@ import smtplib
 from email.mime.text import MIMEText
 
 import requests
-from flask import Flask, render_template, request, jsonify, send_from_directory, redirect
+from flask import Flask, Response, render_template, request, jsonify, send_from_directory, redirect
 
 import paths
 import radar_config
@@ -3269,8 +3270,67 @@ def _carpeta_reacciones():
     return carpeta
 
 
+def _url_parece_live(url):
+    """Detecta rápidamente enlaces típicos de directos en vivo sin bloquear VODs normales."""
+    from urllib.parse import urlsplit
+    u = str(url or "").strip()
+    try:
+        p = urlsplit(u)
+        host = (p.hostname or "").lower()
+        ruta = (p.path or "").strip("/").lower()
+    except ValueError:
+        return False
+    if host in ("youtube.com", "www.youtube.com", "m.youtube.com"):
+        return ruta.startswith("live/") or ruta.endswith("/live")
+    if host in ("twitch.tv", "www.twitch.tv", "m.twitch.tv"):
+        partes = [x for x in ruta.split("/") if x]
+        return len(partes) == 1 and partes[0] not in ("videos", "directory", "clips")
+    if host in ("kick.com", "www.kick.com"):
+        partes = [x for x in ruta.split("/") if x]
+        return len(partes) == 1 and partes[0] not in ("categories", "browse", "video")
+    if host in ("tiktok.com", "www.tiktok.com", "m.tiktok.com"):
+        return ruta.endswith("/live")
+    return False
+
+
+def _capturar_clip_live_para_reaccion(url, carpeta_dl, duracion_s=45):
+    """Captura un clip limpio de un Live (YouTube / Twitch / Kick / TikTok) usando las cookies guardadas."""
+    from bot import live as live_mod
+    dur_ok = max(15, min(180, int(duracion_s or 45)))
+    info = live_mod.resolve_live(url)
+    streams = info["streams"]
+    ffmpeg_exe = FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg"
+    salida = os.path.join(carpeta_dl, "live_clip.mp4")
+    cmd = [ffmpeg_exe, "-hide_banner", "-loglevel", "error", "-y"]
+    for st in streams:
+        cmd += ["-rw_timeout", "15000000"]
+        headers = st.get("headers") or {}
+        if headers:
+            cmd += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in headers.items())]
+        cmd += ["-fflags", "+genpts+discardcorrupt", "-i", st["url"]]
+    for kind in ("video", "audio"):
+        idx = next((i for i, s in enumerate(streams) if s[kind]), None)
+        if idx is not None:
+            cmd += ["-map", f"{idx}:{'v' if kind == 'video' else 'a'}:0"]
+    cmd += [
+        "-t", str(dur_ok),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+        salida,
+    ]
+    r = subprocess.run(
+        cmd, capture_output=True, text=True,
+        timeout=dur_ok + 65,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if r.returncode != 0 or not os.path.isfile(salida) or os.path.getsize(salida) < 10_000:
+        err = (r.stderr or "").strip()[:240]
+        raise RuntimeError(f"No se pudo capturar el clip del live: {err or 'señal interrumpida'}")
+    return salida
+
+
 def _resolver_video_reaccion(data=None, archivo_subido=None):
-    """Resuelve el archivo de video desde subida multipart, token previo, clip en cola o URL."""
+    """Resuelve el archivo de video desde subida multipart, token previo, clip en cola, URL VOD o Live."""
     data = data or {}
     if archivo_subido is not None and getattr(archivo_subido, "filename", ""):
         token = uuid.uuid4().hex[:14]
@@ -3307,19 +3367,47 @@ def _resolver_video_reaccion(data=None, archivo_subido=None):
         tok = uuid.uuid4().hex[:14]
         carpeta_dl = os.path.join(_carpeta_reacciones(), f"dl_{tok}")
         os.makedirs(carpeta_dl, exist_ok=True)
-        res = yt_downloader.download_video(url, carpeta_dl, quality="720p")
-        ruta = res if isinstance(res, str) else (res.get("path") if isinstance(res, dict) else "")
-        if not ruta or not os.path.isfile(ruta):
-            candidatos = [os.path.join(carpeta_dl, f) for f in os.listdir(carpeta_dl)
-                          if f.lower().endswith((".mp4", ".mkv", ".webm", ".mov"))]
-            ruta = candidatos[0] if candidatos else ""
+        es_live_req = str(data.get("es_live") or "").strip().lower() in ("true", "1", "si", "sí", "yes")
+        live_dur = 45
+        try:
+            live_dur = max(15, min(180, int(data.get("live_duracion") or 45)))
+        except (TypeError, ValueError):
+            live_dur = 45
+
+        if es_live_req or _url_parece_live(url):
+            ruta = _capturar_clip_live_para_reaccion(url, carpeta_dl, duracion_s=live_dur)
+        else:
+            # Si es una URL de plataforma live (ej. youtube.com/watch?v=... que resulta estar en directo),
+            # comprobar rápido antes para no colgar la descarga esperando que termine el stream.
+            from bot import live as live_mod
+            if live_mod.plataforma(url):
+                try:
+                    ruta = _capturar_clip_live_para_reaccion(url, carpeta_dl, duracion_s=live_dur)
+                except live_mod.NotLive:
+                    ruta = ""
+                except live_mod.LiveError:
+                    if es_live_req:
+                        raise
+                    ruta = ""
+            else:
+                ruta = ""
+
+            if not ruta:
+                cal = str(data.get("calidad") or "720").strip().lower()
+                q_num = "1080" if cal in ("1080", "1080p") else "720"
+                res = yt_downloader.download_video(url, carpeta_dl, quality=q_num)
+                ruta = res if isinstance(res, str) else (res.get("path") if isinstance(res, dict) else "")
+                if not ruta or not os.path.isfile(ruta):
+                    candidatos = [os.path.join(carpeta_dl, f) for f in os.listdir(carpeta_dl)
+                                  if f.lower().endswith((".mp4", ".mkv", ".webm", ".mov"))]
+                    ruta = candidatos[0] if candidatos else ""
         if not ruta or not os.path.isfile(ruta):
             raise RuntimeError("No se pudo descargar el video desde esa URL.")
         with _reacciones_lock:
             _reacciones_fuentes[tok] = ruta
         return tok, ruta
 
-    raise ValueError("Elige un clip de la cola, sube un archivo de video o pega una URL.")
+    raise ValueError("Elige un clip de la cola, sube un archivo de video o pega una URL (video o Live).")
 
 
 @app.route("/api/reacciones/personajes", methods=["GET", "POST"])
@@ -3327,6 +3415,7 @@ def reacciones_personajes():
     import reaction_characters as rc
     import reaction_lipsync as rl
     import portada_generativa as pg
+    from bot import cookies_descarga
     if request.method == "GET":
         return jsonify({
             "success": True,
@@ -3334,10 +3423,13 @@ def reacciones_personajes():
             "personalidades": rc.PERSONALIDADES,
             "estilos_personaje": rc.ESTILOS_PERSONAJE,
             "modelos_generacion": rc.MODELOS_GENERACION_PERSONAJE,
+            "marcos_personaje": rc.MARCOS_PERSONAJE,
+            "layouts_reaccion": list(rc.LAYOUTS_REACCION),
             "expresiones": list(rc.EXPRESIONES),
             "lipsync": rl.estado(),
             "qwen_gpu": bool(pg.disponible()),
             "remoto_activo": bool((_bot().cfg or {}).get("remoto_url")),
+            "cookies_youtube": cookies_descarga.estado(paths.data_path("cookies_youtube.txt")),
         })
     try:
         d = request.get_json(silent=True) or {}
@@ -3388,7 +3480,6 @@ def reacciones_personaje_probar_voz(cid):
     try:
         sc.synthesize_commentary_line(
             frase, tmp_wav, language=p.get("idioma", "es"), voice=p.get("voz", "male"),
-            ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
         )
         with open(tmp_wav, "rb") as fh:
             audio_bytes = fh.read()
@@ -3444,18 +3535,83 @@ def reacciones_analizar():
         if not personaje:
             return jsonify({"success": False, "error": "Crea o elige un personaje primero."}), 400
         token, ruta = _resolver_video_reaccion(data, archivo)
+        ffmpeg_exe = FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg"
+        ffprobe_exe = FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe"
+        dur_orig = sr.duracion_video(ruta, ffprobe_exe=ffprobe_exe)
+
+        modo_recorte = str(data.get("modo_recorte") or "auto_viral").strip().lower()
+        duracion_clip = sr.parsear_tiempo_a_segundos(data.get("duracion_clip"), defecto=60.0)
+        inicio_tramo = sr.parsear_tiempo_a_segundos(data.get("inicio_tramo"), defecto=0.0)
+        try:
+            cantidad_clips = max(1, min(5, int(data.get("cantidad_clips") or 1)))
+        except (TypeError, ValueError):
+            cantidad_clips = 1
         usar_vision = str(data.get("usar_vision", "true")).lower() not in ("false", "0", "no")
-        resultado = sr.analizar_video_para_reaccion(
+
+        tramos, palabras_globales = sr.seleccionar_tramos_reaccion(
             ruta,
-            personaje,
-            modo_interaccion=str(data.get("modo_interaccion") or "mixto"),
-            frecuencia=str(data.get("frecuencia") or "media"),
-            usar_vision=usar_vision,
-            ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
-            ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
+            dur_orig,
+            modo_recorte=modo_recorte,
+            duracion_clip=duracion_clip,
+            inicio_manual=inicio_tramo,
+            cantidad_clips=cantidad_clips,
+            idioma=str(personaje.get("idioma") or "es"),
             log=log,
         )
-        return jsonify({"success": True, "video_token": token, **resultado})
+
+        clips_analizados = []
+        for idx, tr in enumerate(tramos):
+            if tr.get("recortar"):
+                clip_tok = f"{token}_c{idx + 1}_{uuid.uuid4().hex[:6]}"
+                clip_mp4 = os.path.join(_carpeta_reacciones(), f"tramo_{clip_tok}.mp4")
+                sr.recortar_tramo_video(ruta, clip_mp4, tr["inicio"], tr["duracion"], ffmpeg_exe=ffmpeg_exe)
+                with _reacciones_lock:
+                    _reacciones_fuentes[clip_tok] = clip_mp4
+                ruta_clip = clip_mp4
+            else:
+                clip_tok = token
+                ruta_clip = ruta
+
+            trans_prev = None
+            if palabras_globales:
+                trans_prev = sr._formatear_palabras_tramo(palabras_globales, tr["inicio"], tr["fin"])
+
+            res_c = sr.analizar_video_para_reaccion(
+                ruta_clip,
+                personaje,
+                modo_interaccion=str(data.get("modo_interaccion") or "mixto"),
+                frecuencia=str(data.get("frecuencia") or "media"),
+                usar_vision=usar_vision,
+                ffmpeg_exe=ffmpeg_exe,
+                ffprobe_exe=ffprobe_exe,
+                log=log,
+                transcripcion_previa=trans_prev,
+            )
+            if tr.get("titulo") and (not res_c.get("titulo_sugerido") or res_c["titulo_sugerido"].endswith("reacciona a esto")):
+                res_c["titulo_sugerido"] = tr["titulo"]
+            clips_analizados.append({
+                "indice": idx + 1,
+                "video_token": clip_tok,
+                "inicio": tr["inicio"],
+                "fin": tr["fin"],
+                "etiqueta_tramo": tr["etiqueta"],
+                **res_c,
+            })
+
+        primero = clips_analizados[0]
+        return jsonify({
+            "success": True,
+            "video_token": primero["video_token"],
+            "etiqueta_tramo": primero["etiqueta_tramo"],
+            "duracion_original": round(dur_orig, 2),
+            "clips": clips_analizados,
+            "resumen_video": primero["resumen_video"],
+            "titulo_sugerido": primero["titulo_sugerido"],
+            "duracion_video": primero["duracion_video"],
+            "vision_usada": primero["vision_usada"],
+            "tiene_transcripcion": primero["tiene_transcripcion"],
+            "intervenciones": primero["intervenciones"],
+        })
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
@@ -3474,10 +3630,15 @@ def reacciones_render():
         intervenciones = d.get("intervenciones") or []
         layout = str(d.get("layout") or personaje.get("layout_defecto") or "split")
         motor_anim = str(d.get("motor_animacion") or personaje.get("motor_animacion") or "expresivo")
+        marco_estilo = str(d.get("marco_estilo") or personaje.get("marco_estilo") or "streamer_pro")
         subtitulos_activos = bool(d.get("subtitulos", True))
         calidad = str(d.get("calidad") or "720p")
         res_wh = (1080, 1920) if calidad == "1080p" else (720, 1280)
-        usar_colab = bool(d.get("usar_colab", False))
+        usar_colab = d.get("usar_colab")
+        if usar_colab is None:
+            usar_colab = bool(((_bot().cfg or {}).get("remoto_url") or "").strip()) and not MODO_SERVIDOR
+        else:
+            usar_colab = bool(usar_colab)
 
         jid = uuid.uuid4().hex[:12]
         salida_mp4 = os.path.join(_carpeta_reacciones(), f"reaccion_{jid}.mp4")
@@ -3499,20 +3660,25 @@ def reacciones_render():
                 remoto_url = (cfg_bot.get("remoto_url") or "").strip()
                 remoto_clave = (cfg_bot.get("remoto_clave") or "").strip()
                 if usar_colab and remoto_url and not MODO_SERVIDOR:
-                    from bot.remoto import ClienteRemoto
+                    from bot.remoto import Cliente
                     _upd("Enviando video y personaje a Colab GPU…", 10)
-                    cli = ClienteRemoto(remoto_url, remoto_clave)
+                    cli = Cliente(remoto_url, remoto_clave)
                     sprites = rc.rutas_expresiones_personaje(personaje["id"])
                     payload = {
                         "personaje": personaje, "intervenciones": intervenciones,
                         "layout": layout, "motor_animacion": motor_anim,
+                        "marco_estilo": marco_estilo,
                         "subtitulos": subtitulos_activos, "calidad": calidad,
                     }
-                    res = cli.reaccionar(video_path, payload, sprites, salida_mp4, progreso=_upd)
+                    try:
+                        res = cli.reaccionar(video_path, payload, sprites, salida_mp4, progreso=_upd)
+                    finally:
+                        cli.s.close()
                 else:
                     res = ra.renderizar_video_reaccion(
                         video_path, salida_mp4, personaje, intervenciones,
                         layout=layout, motor_animacion=motor_anim,
+                        marco_estilo=marco_estilo,
                         subtitulos_activos=subtitulos_activos, resolucion=res_wh,
                         ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
                         ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
@@ -3605,7 +3771,7 @@ def reacciones_enviar_cola():
         thumb_src = t.get("miniatura") or ""
         for plat_k, cids in por_plat.items():
             for cid in cids:
-                dest_dir = m.carpeta_clips
+                dest_dir = os.path.join(m.carpeta, "bot_clips", f"reaccion_{jid}")
                 os.makedirs(dest_dir, exist_ok=True)
                 dest_mp4 = os.path.join(dest_dir, f"reaccion_{jid}_c{cid}.mp4")
                 shutil.copy2(ruta, dest_mp4)
@@ -3661,6 +3827,7 @@ def remoto_reaccionar():
                     in_mp4, out_mp4, p_guardado, payload.get("intervenciones") or [],
                     layout=str(payload.get("layout") or "split"),
                     motor_animacion=str(payload.get("motor_animacion") or "expresivo"),
+                    marco_estilo=str(payload.get("marco_estilo") or p_guardado.get("marco_estilo") or "streamer_pro"),
                     subtitulos_activos=bool(payload.get("subtitulos", True)),
                     resolucion=res_wh,
                     ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",

@@ -314,36 +314,136 @@ class Cliente:
                     raise ServidorCaido(f"se cortó la descarga del clip ({type(e).__name__})") from e
                 time.sleep(5)
 
-    def reaccionar(self, video_path, payload, sprites_paths, destino_mp4, progreso=None):
-        """Envía el video + personaje al servidor Colab remoto para renderizar con GPU/Lip-Sync."""
-        import json as _json
-        archivos = []
-        abiertos = []
+    def _preparar_video_para_tunel(self, video_path, max_mb=45, progreso=None):
+        """Reduce videos muy grandes (>45 MB) para no chocar con el límite/corte SSL de Cloudflare Tunnel."""
         try:
-            fv = open(video_path, 'rb')
-            abiertos.append(fv)
-            archivos.append(('video', (os.path.basename(video_path), fv, 'video/mp4')))
-            for exp, ruta in (sprites_paths or {}).items():
-                if ruta and os.path.isfile(ruta):
-                    fs = open(ruta, 'rb')
-                    abiertos.append(fs)
-                    archivos.append((f'sprite_{exp}', (f'{exp}.png', fs, 'image/png')))
-            r = self._pedir(
-                'POST', '/api/bot/remoto/reaccionar',
-                data={'payload': _json.dumps(payload, ensure_ascii=False)},
-                files=archivos, timeout=(15, 600),
+            tam_mb = os.path.getsize(video_path) / (1024 * 1024)
+        except OSError:
+            return video_path, None
+        if tam_mb <= max_mb:
+            return video_path, None
+        import shutil
+        import subprocess
+        import tempfile
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            try:
+                import imageio_ffmpeg
+                ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception:
+                return video_path, None
+        if callable(progreso):
+            progreso(f"Optimizando video ({int(tam_mb)} MB) para envío estable a Colab…", 8)
+        fd, tmp_mp4 = tempfile.mkstemp(prefix="colab_reacc_", suffix=".mp4")
+        os.close(fd)
+        cmd = [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-i", video_path,
+            "-vf", "scale='min(720,iw)':-2",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "112k", "-movflags", "+faststart",
+            tmp_mp4,
+        ]
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, timeout=300,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-            jid = self._json(r)['job_id']
-        finally:
-            for fh in abiertos:
+            if r.returncode == 0 and os.path.isfile(tmp_mp4) and os.path.getsize(tmp_mp4) > 10_000:
+                if os.path.getsize(tmp_mp4) < os.path.getsize(video_path):
+                    return tmp_mp4, tmp_mp4
+        except Exception:
+            pass
+        try:
+            os.remove(tmp_mp4)
+        except OSError:
+            pass
+        return video_path, None
+
+    def reaccionar(self, video_path, payload, sprites_paths, destino_mp4, progreso=None):
+        """Envía el video + personaje al servidor Colab remoto con reintentos SSL y tolerancia a cortes breves."""
+        import json as _json
+        ruta_envio, tmp_opt = self._preparar_video_para_tunel(video_path, max_mb=45, progreso=progreso)
+        jid = None
+        ultimo_err = None
+        try:
+            for intento in range(3):
+                archivos = []
+                abiertos = []
                 try:
-                    fh.close()
-                except Exception:
+                    if intento > 0 and callable(progreso):
+                        progreso(f"Reintentando envío a Colab ({intento + 1}/3)…", 10)
+                    fv = open(ruta_envio, 'rb')
+                    abiertos.append(fv)
+                    archivos.append(('video', (os.path.basename(ruta_envio), fv, 'video/mp4')))
+                    for exp, ruta in (sprites_paths or {}).items():
+                        if ruta and os.path.isfile(ruta):
+                            fs = open(ruta, 'rb')
+                            abiertos.append(fs)
+                            archivos.append((f'sprite_{exp}', (f'{exp}.png', fs, 'image/png')))
+                    r = self._pedir(
+                        'POST', '/api/bot/remoto/reaccionar',
+                        data={'payload': _json.dumps(payload, ensure_ascii=False)},
+                        files=archivos, headers={'Connection': 'close'}, timeout=(20, 600),
+                    )
+                    if r.status_code == 404:
+                        raise FalloTrabajo(
+                            'Tu servidor Colab tiene una versión anterior sin Reacciones IA. '
+                            'Abre la libreta actualizada My_Content_Colab.ipynb y ejecuta las celdas 2B, 6 y 6C.'
+                        )
+                    if r.status_code == 413:
+                        raise FalloTrabajo(
+                            'El video supera el límite del túnel de Cloudflare (100 MB). '
+                            'Elige una duración de clip más corta (ej. 30–90 s) y vuelve a intentarlo.'
+                        )
+                    d_ini = self._json(r)
+                    if r.status_code >= 400 or not d_ini.get('success') or not d_ini.get('job_id'):
+                        raise FalloTrabajo(d_ini.get('error') or f'Colab rechazó la reacción (HTTP {r.status_code}).')
+                    jid = d_ini['job_id']
+                    break
+                except ServidorCaido as exc:
+                    ultimo_err = exc
+                    if intento < 2:
+                        time.sleep(2.0 * (intento + 1))
+                        continue
+                    msg = str(exc)
+                    if 'SSL' in msg or 'Connection' in msg or 'EOF' in msg:
+                        raise ServidorCaido(
+                            'Se cortó la conexión SSL con Colab (túnel de Cloudflare caído o video demasiado grande). '
+                            'Comprueba que la celda 6C de Colab siga corriendo, pega la URL actual en Ajustes '
+                            'y elige un clip de 30–90 s.'
+                        ) from exc
+                    raise
+                finally:
+                    for fh in abiertos:
+                        try:
+                            fh.close()
+                        except Exception:
+                            pass
+        finally:
+            if tmp_opt:
+                try:
+                    os.remove(tmp_opt)
+                except OSError:
                     pass
 
+        if not jid:
+            raise ultimo_err or ServidorCaido('No se pudo iniciar el trabajo en Colab.')
+
         inicio = time.monotonic()
+        fallos_red = 0
         while time.monotonic() - inicio < 3600:
-            st = self._json(self._pedir('GET', f'/api/bot/remoto/reaccion/{jid}'))
+            try:
+                st = self._json(self._pedir('GET', f'/api/bot/remoto/reaccion/{jid}', timeout=(15, 30)))
+                fallos_red = 0
+            except ServidorCaido:
+                fallos_red += 1
+                if fallos_red >= 5:
+                    raise ServidorCaido(
+                        'Se perdió la conexión con Colab mientras renderizaba. Revisa la celda 6C de Colab.'
+                    ) from None
+                time.sleep(3.0)
+                continue
             if callable(progreso):
                 progreso(st.get('mensaje') or 'Renderizando en Colab…', int(st.get('progreso') or 0))
             if st.get('estado') == 'listo':
@@ -364,3 +464,6 @@ class Cliente:
                 raise FalloTrabajo(st.get('error') or 'Error al renderizar la reacción en Colab.')
             time.sleep(2.5)
         raise FalloTrabajo('Tiempo agotado esperando la reacción en Colab.')
+
+
+ClienteRemoto = Cliente

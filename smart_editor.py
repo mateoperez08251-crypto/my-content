@@ -175,11 +175,11 @@ def _componer_streamer(frame, final_w, final_h, cam_info, game_mode="cam_arriba_
         if final_w > gcw * 1.15:
             salida = _realzar_nitidez_suave(salida)
 
-        # Cápsula compacta centrada arriba del todo (proporción 4:3 / 16:11 limpia)
+        # Cápsula compacta centrada en zona alta segura (debajo de la barra superior de TikTok / Facebook / Reels)
         cap_h = max(84, int(round(final_h * max(0.18, min(0.28, ratio * 0.86)) / 2.0)) * 2)
         cap_w = max(120, min(int(final_w * 0.68), int(round(cap_h * 1.38 / 2.0)) * 2))
         px0 = (final_w - cap_w) // 2
-        py0 = max(12, int(round(final_h * 0.022)))
+        py0 = max(20, int(round(final_h * 0.075)))
         cam_tile = _recortar_facecam_cover(frame, bx, by, bw, bh, fcx, fcy, cap_w, cap_h)
 
         # Composición con esquinas suavemente redondeadas, borde nítido y sombra sutil

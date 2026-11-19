@@ -1875,6 +1875,7 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
         <div class="ajustes" style="margin-top:8px">
           <div><label for="rp-estilo">Estilo visual del personaje</label><select id="rp-estilo"><option value="animado_3d">3D Animado (estilo Pixar / cine)</option><option value="anime">Anime / VTuber (cel-shaded)</option><option value="realista">Realista / Fotográfico (streamer real)</option><option value="caricatura_2d">Caricatura 2D / Cómic editorial</option><option value="cyberpunk">3D Cyberpunk / Gamer Neón</option></select></div>
           <div><label for="rp-modelo-img">Modelo IA para crear imagen</label><select id="rp-modelo-img"><option value="auto">Automático (Colab GPU o FLUX nube)</option><option value="flux_nube">FLUX en nube (gratis · funciona en PC 4 GB)</option><option value="sdxl_turbo">SDXL-Turbo (Colab T4 15 GB · rápido)</option><option value="zimage_turbo">Z-Image-Turbo 6B (Colab L4/A100 16+ GB)</option></select></div>
+          <div><label for="rp-marco">Marco decorado estilo streamer</label><select id="rp-marco"><option value="streamer_pro">Marco Streamer Pro (esquinas neón + LIVE + placa)</option><option value="neon_cyber">Marco Gamer Neón Dual (RGB + cortes cyber)</option><option value="kinetik_print">Marco Kinetik Editorial (doble borde + Acid Volt)</option><option value="minimal">Marco Limpio (redondeado sutil)</option></select></div>
           <div><label for="rp-desc-visual">Descripción física para crear con IA</label><input id="rp-desc-visual" maxlength="400" placeholder="Ej.: joven latino con hoodie negro, gorra verde neón y audífonos naranjas"></div>
         </div>
         <div class="ajustes" style="margin-top:8px">
@@ -1898,41 +1899,113 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
     <section class="card col-12" id="reacc-estudio-sec">
       <h2><i class="ph-duotone ph-film-strip"></i> Crear Video-Reacción IA <small>Audio + Visión · Guion editable · Envío directo a tus cuentas</small></h2>
       <div class="ajustes">
-        <div><label for="rr-personaje">1. Personaje que reacciona</label><select id="rr-personaje"></select></div>
+        <div><label for="rr-personaje">1. Personaje que reacciona</label><select id="rr-personaje" onchange="sincronizarMarcoPersonaje()"></select></div>
         <div><label for="rr-clip-cola">2A. Elegir clip ya en cola</label><select id="rr-clip-cola"><option value="">— O sube archivo / pega URL —</option></select></div>
         <div><label for="rr-archivo">2B. Subir video local</label><input id="rr-archivo" type="file" accept="video/*"></div>
-        <div><label for="rr-url">2C. O pegar URL (YouTube, TikTok, Twitch, Kick)</label><input id="rr-url" placeholder="https://..."></div>
+        <div><label for="rr-url">2C. O pegar URL (Video o Live: YouTube, TikTok, Twitch, Kick)</label><input id="rr-url" placeholder="https://..."></div>
+      </div>
+
+      <div class="fila" style="margin-top:8px;flex-wrap:wrap;gap:10px;align-items:center">
+        <button type="button" id="rr-btn-cookies" onclick="abrirCookiesDescarga()">🍪 Cookies YouTube</button>
+        <span id="rr-cookies-estado" class="muted" aria-live="polite">Si YouTube da error al bajar, sube o conecta tus cookies aquí.</span>
+        <label class="switch" style="margin-left:auto"><input type="checkbox" id="rr-es-live" onchange="toggleLiveReaccion()"> 📡 Es un Live (sacar clip en directo)</label>
+        <select id="rr-live-dur" style="width:auto;min-width:130px" title="Duración del clip a capturar del directo" hidden>
+          <option value="20">Clip Live · 20 s</option>
+          <option value="30">Clip Live · 30 s</option>
+          <option value="45" selected>Clip Live · 45 s</option>
+          <option value="60">Clip Live · 60 s</option>
+          <option value="90">Clip Live · 90 s</option>
+        </select>
+      </div>
+
+      <div class="ajustes" style="margin-top:10px">
+        <div>
+          <label for="rr-recorte-modo">Qué usar del video</label>
+          <select id="rr-recorte-modo" onchange="actualizarControlesRecorteReaccion()">
+            <option value="auto_viral" selected>⚡ Sacar clip(s) virales con IA (recomendado para videos largos)</option>
+            <option value="tramo">✂ Elegir tramo exacto (desde minuto/segundo + duración)</option>
+            <option value="completo">🎬 Video completo sin recortar</option>
+          </select>
+        </div>
+        <div id="rr-duracion-wrap">
+          <label for="rr-duracion-clip">Duración de cada clip</label>
+          <select id="rr-duracion-clip" onchange="actualizarControlesRecorteReaccion()">
+            <option value="30">30 segundos (Short / TikTok rápido)</option>
+            <option value="45">45 segundos</option>
+            <option value="60" selected>60 segundos (1 minuto · recomendado)</option>
+            <option value="90">90 segundos (1 min 30 s)</option>
+            <option value="120">2 minutos</option>
+            <option value="180">3 minutos</option>
+            <option value="300">5 minutos</option>
+            <option value="custom">Personalizado (segundos o minutos)…</option>
+          </select>
+        </div>
+        <div id="rr-duracion-custom-wrap" hidden>
+          <label for="rr-duracion-custom-val">Duración personalizada</label>
+          <div class="fila" style="gap:6px">
+            <input id="rr-duracion-custom-val" type="number" min="10" max="600" step="5" value="75" style="min-width:74px">
+            <select id="rr-duracion-custom-unit" style="width:auto">
+              <option value="s" selected>segundos</option>
+              <option value="m">minutos</option>
+            </select>
+          </div>
+        </div>
+        <div id="rr-num-clips-wrap">
+          <label for="rr-num-clips">Cantidad de clips</label>
+          <select id="rr-num-clips">
+            <option value="1" selected>1 clip (el mejor momento)</option>
+            <option value="2">2 clips virales</option>
+            <option value="3">3 clips virales</option>
+            <option value="4">4 clips virales</option>
+            <option value="5">5 clips virales</option>
+          </select>
+        </div>
+        <div id="rr-inicio-wrap" hidden>
+          <label for="rr-inicio-tramo">Desde qué minuto / segundo</label>
+          <input id="rr-inicio-tramo" value="00:00" maxlength="20" placeholder="Ej.: 01:30 o 90">
+        </div>
       </div>
 
       <div class="ajustes" style="margin-top:10px">
         <div><label for="rr-modo">Cómo interactúa</label><select id="rr-modo"><option value="mixto">Mixto (comenta encima + pausa en el clímax)</option><option value="continuo">Continuo (habla encima bajando el audio original)</option><option value="pausar">Pausar y comentar (congela el video en cada reacción)</option></select></div>
         <div><label for="rr-frecuencia">Cantidad de reacciones</label><select id="rr-frecuencia"><option value="baja">Baja (2–3 intervenciones)</option><option value="media" selected>Media (3–5 intervenciones)</option><option value="alta">Alta (5–7 intervenciones)</option></select></div>
         <div><label for="rr-motor">Motor de animación</label><select id="rr-motor"><option value="expresivo">Expresivo Pro (rápido PC y Colab)</option><option value="lipsync">Lip-Sync IA realista (Colab GPU · celda 5D)</option></select></div>
+        <div><label for="rr-marco">Marco decorado del personaje</label><select id="rr-marco"><option value="streamer_pro">Marco Streamer Pro (esquinas neón + LIVE + placa)</option><option value="neon_cyber">Marco Gamer Neón Dual (RGB + cortes cyber)</option><option value="kinetik_print">Marco Kinetik Editorial (doble borde + Acid Volt)</option><option value="minimal">Marco Limpio (redondeado sutil)</option></select></div>
         <div><label for="rr-calidad">Resolución 9:16</label><select id="rr-calidad"><option value="720p">720×1280 · Rápido (ideal PC 4 GB)</option><option value="1080p">1080×1920 · Full HD (ideal Colab)</option></select></div>
       </div>
 
       <div class="fila" style="margin-top:10px">
         <label class="switch"><input type="checkbox" id="rr-vision" checked> Analizar imagen con Visión IA (entiende memes, juegos y jugadas)</label>
         <label class="switch"><input type="checkbox" id="rr-subs" checked> Subtítulos Kinetik del personaje</label>
-        <label class="switch"><input type="checkbox" id="rr-colab"> Renderizar en Colab remoto (si está conectado)</label>
+        <label class="switch"><input type="checkbox" id="rr-colab" checked> <span id="rr-colab-label">Renderizar en Colab remoto (recomendado · ahorra RAM en tu PC)</span></label>
       </div>
 
       <input type="hidden" id="rr-layout" value="split">
-      <div class="visual-picker" aria-label="Ejemplos en video IA de 10 segundos de cómo se verá el video-reacción">
+      <div class="visual-picker" aria-label="Ejemplos de cómo se verá el video-reacción con marco streamer">
         <button type="button" class="visual-card activo" data-r-layout="split" onclick="elegirLayoutReaccion('split')">
-          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_split.mp4" poster="/static/presets/reaccion_split.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">10S IA</span></div>
-          <b>Split 50/50 · Arriba/Abajo</b>
-          <small>Video original arriba y tu personaje IA animado abajo con onda de voz y subtítulos en el centro.</small>
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_split.mp4" poster="/static/presets/reaccion_split.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">50/50</span></div>
+          <b>Split 50/50 · Video arriba / Personaje abajo</b>
+          <small>Video original arriba y tu personaje IA con marco streamer abajo, onda de voz y subtítulos al centro.</small>
+        </button>
+        <button type="button" class="visual-card" data-r-layout="split_arriba" onclick="elegirLayoutReaccion('split_arriba')">
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_split_arriba.mp4" poster="/static/presets/reaccion_split_arriba.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">50/50</span></div>
+          <b>Split 50/50 · Personaje arriba / Video abajo</b>
+          <small>Tu personaje IA con marco decorado en la mitad superior (zona segura) y el video original en la mitad inferior.</small>
+        </button>
+        <button type="button" class="visual-card" data-r-layout="pip_arriba_centro" onclick="elegirLayoutReaccion('pip_arriba_centro')">
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_pip_arriba.mp4" poster="/static/presets/reaccion_pip_arriba.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">ZONA SEGURA</span></div>
+          <b>Cámara arriba centro · Zona segura TikTok/FB</b>
+          <small>Cámara centrada arriba pero debajo de las letras de TikTok y Facebook, con marco streamer y video completo detrás.</small>
         </button>
         <button type="button" class="visual-card" data-r-layout="pip" onclick="elegirLayoutReaccion('pip')">
-          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_pip.mp4" poster="/static/presets/reaccion_pip.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">10S IA</span></div>
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_pip.mp4" poster="/static/presets/reaccion_pip.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">PiP</span></div>
           <b>Esquina PiP · Streamer IA</b>
-          <small>Video vertical completo con tu personaje reaccionando desde la esquina inferior en marco Kinetik.</small>
+          <small>Video vertical completo con tu personaje reaccionando desde la esquina inferior con marco decorado de streamer.</small>
         </button>
         <button type="button" class="visual-card" data-r-layout="pausar" onclick="elegirLayoutReaccion('pausar')">
-          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_pausa.mp4" poster="/static/presets/reaccion_pausa.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">10S IA</span></div>
+          <div class="vc-media"><video class="prev-ia-vid" src="/static/presets/prev_reaccion_pausa.mp4" poster="/static/presets/reaccion_pausa.webp" muted loop playsinline preload="metadata"></video><span class="vc-tag">PAUSA</span></div>
           <b>Pausar y Comentar · Primer plano</b>
-          <small>Pausa el video en los mejores segundos, entra el personaje en grande a opinar y luego sigue el clip.</small>
+          <small>Pausa el video en los mejores segundos, entra el personaje en grande con marco streamer y luego sigue el clip.</small>
         </button>
       </div>
 
@@ -1942,14 +2015,16 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
       </div>
 
       <div id="rr-guion-wrap" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--borde)">
+        <div id="rr-clips-tabs" class="fila" hidden style="margin-bottom:10px;flex-wrap:wrap;gap:6px"></div>
         <div class="fila" style="justify-content:space-between">
-          <div><b>Guion editable de reacciones</b> <small id="rr-resumen" class="muted"></small></div>
+          <div><b>Guion editable de reacciones</b> <small id="rr-tramo-info" class="muted"></small> <small id="rr-resumen" class="muted"></small></div>
           <button type="button" class="mini" onclick="anadirIntervencionReaccion()">+ Añadir reacción</button>
         </div>
         <div style="margin-top:8px"><label for="rr-titulo">Título / texto para publicar</label><input id="rr-titulo" maxlength="120" placeholder="Título del video-reacción"></div>
         <div id="rr-timeline" class="reacc-timeline"></div>
-        <div class="fila" style="margin-top:12px">
+        <div class="fila" style="margin-top:12px;flex-wrap:wrap">
           <button type="button" class="prim" id="rr-btn-render" onclick="renderizarVideoReaccion()">🎬 2. Generar Video-Reacción</button>
+          <button type="button" id="rr-btn-render-todos" onclick="renderizarTodosClipsReaccion()" hidden>⚡ Generar TODOS los clips</button>
           <span id="rr-render-estado" class="muted" aria-live="polite" style="flex:2"></span>
         </div>
       </div>
@@ -2846,7 +2921,10 @@ async function abrirCookiesDescarga() {
   $('cookies-descarga-archivo').value = '';
   await cambiarDestinoCookies();
 }
-function cerrarCookiesDescarga() { $('cookies-descarga-modal').close(); }
+function cerrarCookiesDescarga() {
+  $('cookies-descarga-modal').close();
+  if (typeof cargarReaccionesIA === 'function' && vistaActiva === 'reacciones') cargarReaccionesIA().catch(() => {});
+}
 
 let youtubeAutoOcupado = false;
 function pintarYoutubeAuto() {
@@ -4346,8 +4424,66 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 
 /* === Módulo 06 · Reacciones IA con Personajes === */
 let _reaccPersonajes = [], _reaccEditandoId = null, _reaccVideoToken = '', _reaccGuion = [], _reaccJobId = '', _reaccPoll = null;
+let _reaccClips = [], _reaccClipIdx = 0;
 const _reaccSelCuentas = new Set();
 const _REACC_EXP_LABELS = {neutral:'Neutral (base)', hablando:'Hablando', sorprendido:'Sorprendido', riendo:'Riendo', serio:'Serio', pensando:'Pensando'};
+
+function actualizarControlesRecorteReaccion() {
+  const modo = $('rr-recorte-modo')?.value || 'auto_viral';
+  const durSel = $('rr-duracion-clip')?.value || '60';
+  const usaDur = modo !== 'completo';
+  if ($('rr-duracion-wrap')) $('rr-duracion-wrap').hidden = !usaDur;
+  if ($('rr-duracion-custom-wrap')) $('rr-duracion-custom-wrap').hidden = !usaDur || durSel !== 'custom';
+  if ($('rr-num-clips-wrap')) $('rr-num-clips-wrap').hidden = modo !== 'auto_viral';
+  if ($('rr-inicio-wrap')) $('rr-inicio-wrap').hidden = modo !== 'tramo';
+}
+function obtenerDuracionClipSegundos() {
+  const sel = $('rr-duracion-clip')?.value || '60';
+  if (sel !== 'custom') return Number(sel) || 60;
+  const val = Number($('rr-duracion-custom-val')?.value || 60);
+  const uni = $('rr-duracion-custom-unit')?.value || 's';
+  const seg = uni === 'm' ? val * 60 : val;
+  return Math.max(10, Math.min(600, Math.round(seg || 60)));
+}
+function guardarEdicionClipActual() {
+  if (!_reaccClips[_reaccClipIdx]) return;
+  _reaccClips[_reaccClipIdx].intervenciones = _reaccGuion;
+  if ($('rr-titulo')) _reaccClips[_reaccClipIdx].titulo_sugerido = $('rr-titulo').value.trim();
+}
+function seleccionarClipReaccion(idx) {
+  guardarEdicionClipActual();
+  if (!_reaccClips[idx]) return;
+  _reaccClipIdx = idx;
+  const c = _reaccClips[idx];
+  _reaccVideoToken = c.video_token;
+  _reaccGuion = c.intervenciones || [];
+  _reaccJobId = c.job_id || '';
+  if ($('rr-titulo')) $('rr-titulo').value = c.titulo_sugerido || '';
+  if ($('rr-tramo-info')) $('rr-tramo-info').textContent = c.etiqueta_tramo ? `✂ ${c.etiqueta_tramo} ·` : '';
+  if ($('rr-resumen')) $('rr-resumen').textContent = (c.vision_usada ? '👁 Visión + Audio · ' : '🎙 Audio · ') + (c.resumen_video || '');
+  pintarTabsClipsReaccion();
+  pintarTimelineReaccion();
+  if (c.video_url && $('rr-resultado-wrap')) {
+    $('rr-resultado-wrap').hidden = false;
+    $('rr-video-preview').src = c.video_url + '?t=' + Date.now();
+    $('rr-descargar-link').href = c.video_url + '?download=1';
+    $('rr-resultado-meta').textContent = `Clip ${idx + 1}/${_reaccClips.length} · Duración: ${c.duracion_render || 0}s · Motor: ${c.motor_usado || 'expresivo'}`;
+    if ($('rr-cuentas-chips') && E?.cuentas) chips('rr-cuentas-chips', _reaccSelCuentas, E.cuentas);
+  }
+}
+function pintarTabsClipsReaccion() {
+  const wrap = $('rr-clips-tabs'), btnTodos = $('rr-btn-render-todos');
+  if (btnTodos) {
+    btnTodos.hidden = _reaccClips.length <= 1;
+    btnTodos.textContent = `⚡ Generar TODOS los clips (${_reaccClips.length})`;
+  }
+  if (!wrap) return;
+  wrap.hidden = _reaccClips.length <= 1;
+  wrap.innerHTML = _reaccClips.map((c, i) => `
+    <button type="button" class="mini ${i === _reaccClipIdx ? 'prim' : ''}" onclick="seleccionarClipReaccion(${i})">
+      ${c.video_url ? '✅ ' : ''}Clip ${i + 1} · ${esc(c.etiqueta_tramo || (Math.round(c.duracion_video || 0) + 's'))}
+    </button>`).join('');
+}
 
 function sincronizarVocesPersonaje() {
   const src = $('ed-comentario-voz'), dst = $('rp-voz');
@@ -4357,11 +4493,31 @@ function sincronizarVocesPersonaje() {
   if ([...dst.options].some(o => o.value === prev)) dst.value = prev;
 }
 function elegirLayoutReaccion(layout) {
-  const val = ['split','pip','pausar'].includes(layout) ? layout : 'split';
+  const val = ['split','split_arriba','pip_arriba_centro','pip','pausar'].includes(layout) ? layout : 'split';
   if ($('rr-layout')) $('rr-layout').value = val;
   if (typeof document !== 'undefined') document.querySelectorAll?.('[data-r-layout]')?.forEach(el => {
     el?.classList?.toggle('activo', el?.dataset?.rLayout === val);
   });
+}
+function toggleLiveReaccion() {
+  const on = Boolean($('rr-es-live')?.checked);
+  if ($('rr-live-dur')) $('rr-live-dur').hidden = !on;
+}
+function sincronizarMarcoPersonaje() {
+  const pid = $('rr-personaje')?.value;
+  const p = _reaccPersonajes.find(x => x.id === pid);
+  if (p && p.marco_estilo && $('rr-marco')) $('rr-marco').value = p.marco_estilo;
+}
+function pintarCookiesReaccion(ck) {
+  const el = $('rr-cookies-estado');
+  if (!el) return;
+  if (ck && ck.hay) {
+    el.textContent = `🍪 Cookies YouTube activas${ck.fecha ? ' · ' + ck.fecha : ''}.`;
+    el.style.color = 'var(--ok, #16a34a)';
+  } else {
+    el.textContent = 'Sin cookies YouTube (opcional · súbelas aquí si YouTube da error al bajar).';
+    el.style.color = '';
+  }
 }
 async function cargarReaccionesIA() {
   sincronizarVocesPersonaje();
@@ -4369,7 +4525,20 @@ async function cargarReaccionesIA() {
     const j = await api('/api/reacciones/personajes');
     _reaccPersonajes = j.personajes || [];
     pintarPersonajesReaccion();
-    if ($('rr-colab') && !j.remoto_activo) $('rr-colab').checked = false;
+    sincronizarMarcoPersonaje();
+    pintarCookiesReaccion(j.cookies_youtube);
+    if ($('rr-colab')) {
+      if (!j.remoto_activo) {
+        $('rr-colab').checked = false;
+        $('rr-colab').disabled = true;
+        if ($('rr-colab-label')) $('rr-colab-label').textContent = 'Renderizar en Colab remoto (conecta Colab en Ajustes para activarlo; usará esta PC)';
+      } else {
+        const estabaDeshab = $('rr-colab').disabled;
+        $('rr-colab').disabled = false;
+        if (estabaDeshab) $('rr-colab').checked = true;
+        if ($('rr-colab-label')) $('rr-colab-label').textContent = '⚡ Renderizar en Colab GPU remoto (conectado · activo)';
+      }
+    }
     if ($('rp-estado') && j.lipsync && !j.lipsync.disponible && !$('rp-estado').textContent) {
       $('rp-estado').textContent = j.lipsync.motivo || '';
     }
@@ -4437,6 +4606,7 @@ function editarPersonajeReaccion(cid) {
   $('rp-intensidad').value = p.intensidad || 4;
   if ($('rp-estilo')) $('rp-estilo').value = p.estilo_visual || 'animado_3d';
   if ($('rp-modelo-img')) $('rp-modelo-img').value = p.modelo_generacion || 'auto';
+  if ($('rp-marco')) $('rp-marco').value = p.marco_estilo || 'streamer_pro';
   if ($('rp-desc-visual')) $('rp-desc-visual').value = p.descripcion_visual || '';
   $('rp-muletillas').value = p.muletillas || '';
   $('rp-prompt').value = p.prompt_extra || '';
@@ -4468,6 +4638,7 @@ async function guardarPersonajeReaccion() {
       intensidad: Number($('rp-intensidad').value || 4),
       estilo_visual: $('rp-estilo')?.value || 'animado_3d',
       modelo_generacion: $('rp-modelo-img')?.value || 'auto',
+      marco_estilo: $('rp-marco')?.value || 'streamer_pro',
       descripcion_visual: $('rp-desc-visual')?.value.trim() || '',
       muletillas: $('rp-muletillas').value.trim(),
       prompt_extra: $('rp-prompt').value.trim(),
@@ -4533,6 +4704,7 @@ async function generarImagenBasePersonaje() {
     const j = await api(`/api/reacciones/personajes/${encodeURIComponent(_reaccEditandoId)}/generar_imagen`, {
       estilo_visual: $('rp-estilo')?.value || 'animado_3d',
       modelo_generacion: $('rp-modelo-img')?.value || 'auto',
+      marco_estilo: $('rp-marco')?.value || 'streamer_pro',
       descripcion_visual: $('rp-desc-visual')?.value.trim() || '',
     });
     await cargarReaccionesIA();
@@ -4585,7 +4757,17 @@ async function analizarVideoReaccion() {
   if (!pid) { toast('Crea o elige un personaje primero.', true); return; }
   const btn = $('rr-btn-analizar');
   if (btn) btn.disabled = true;
-  if ($('rr-analisis-estado')) $('rr-analisis-estado').textContent = 'Analizando audio y fotogramas con IA…';
+  const esLive = Boolean($('rr-es-live')?.checked);
+  const liveDur = Number($('rr-live-dur')?.value || 45);
+  const modoRecorte = $('rr-recorte-modo')?.value || 'auto_viral';
+  const durClip = obtenerDuracionClipSegundos();
+  const inicioTramo = $('rr-inicio-tramo')?.value?.trim() || '00:00';
+  const cantClips = Number($('rr-num-clips')?.value || 1);
+  if ($('rr-analisis-estado')) $('rr-analisis-estado').textContent = esLive
+    ? `Capturando ${liveDur}s del Live y analizando audio/fotogramas con IA…`
+    : (modoRecorte === 'auto_viral'
+      ? `Buscando ${cantClips > 1 ? cantClips + ' clips virales' : 'el mejor clip viral'} de ~${durClip}s y creando guion IA…`
+      : 'Recortando y analizando audio/fotogramas con IA…');
   try {
     const file = $('rr-archivo')?.files?.[0];
     let j;
@@ -4596,6 +4778,10 @@ async function analizarVideoReaccion() {
       fd.append('modo_interaccion', $('rr-modo').value);
       fd.append('frecuencia', $('rr-frecuencia').value);
       fd.append('usar_vision', $('rr-vision').checked ? 'true' : 'false');
+      fd.append('modo_recorte', modoRecorte);
+      fd.append('duracion_clip', String(durClip));
+      fd.append('inicio_tramo', inicioTramo);
+      fd.append('cantidad_clips', String(cantClips));
       const r = await fetch('/api/reacciones/analizar', {method:'POST', body:fd});
       j = await r.json();
       if (!j.success) throw new Error(j.error || 'Error al analizar el video.');
@@ -4604,68 +4790,118 @@ async function analizarVideoReaccion() {
         personaje_id: pid,
         subida_id: $('rr-clip-cola')?.value || '',
         url: $('rr-url')?.value.trim() || '',
+        es_live: esLive,
+        live_duracion: liveDur,
+        modo_recorte: modoRecorte,
+        duracion_clip: durClip,
+        inicio_tramo: inicioTramo,
+        cantidad_clips: cantClips,
+        calidad: $('rr-calidad')?.value || '720p',
         modo_interaccion: $('rr-modo').value,
         frecuencia: $('rr-frecuencia').value,
         usar_vision: Boolean($('rr-vision')?.checked),
       });
     }
-    _reaccVideoToken = j.video_token;
-    _reaccGuion = j.intervenciones || [];
+    _reaccClips = Array.isArray(j.clips) && j.clips.length ? j.clips : [{
+      indice: 1, video_token: j.video_token, etiqueta_tramo: j.etiqueta_tramo || '',
+      titulo_sugerido: j.titulo_sugerido || '', resumen_video: j.resumen_video || '',
+      vision_usada: j.vision_usada, duracion_video: j.duracion_video, intervenciones: j.intervenciones || [],
+    }];
+    _reaccClipIdx = 0;
     $('rr-guion-wrap').hidden = false;
-    $('rr-titulo').value = j.titulo_sugerido || '';
-    $('rr-resumen').textContent = (j.vision_usada ? '👁 Visión + Audio · ' : '🎙 Audio · ') + (j.resumen_video || '');
-    pintarTimelineReaccion();
-    $('rr-analisis-estado').textContent = `Guion listo (${_reaccGuion.length} reacciones). Edita lo que quieras y pulsa Generar.`;
-    toast('Guion de reacción generado.', false, 'Audio + Visión IA');
+    $('rr-resultado-wrap').hidden = true;
+    seleccionarClipReaccion(0);
+    const nC = _reaccClips.length;
+    $('rr-analisis-estado').textContent = nC > 1
+      ? `Listos ${nC} clips virales con sus guiones. Revísalos o pulsa «Generar TODOS los clips».`
+      : `Guion listo (${_reaccGuion.length} reacciones · ${_reaccClips[0].etiqueta_tramo || ''}). Edita lo que quieras y pulsa Generar.`;
+    toast(nC > 1 ? `${nC} clips virales listos para reaccionar.` : 'Guion de reacción generado.', false, 'Audio + Visión IA');
   } catch (e) {
     if ($('rr-analisis-estado')) $('rr-analisis-estado').textContent = e.message;
     toast(e.message, true);
   } finally { if (btn) btn.disabled = false; }
 }
-async function renderizarVideoReaccion() {
-  const pid = $('rr-personaje')?.value;
-  if (!pid || !_reaccVideoToken) { toast('Analiza un video primero.', true); return; }
-  const btn = $('rr-btn-render');
-  if (btn) btn.disabled = true;
-  $('rr-resultado-wrap').hidden = true;
-  $('rr-render-estado').textContent = 'Iniciando render…';
-  try {
-    const j = await api('/api/reacciones/render', {
-      personaje_id: pid,
-      video_token: _reaccVideoToken,
-      intervenciones: _reaccGuion,
-      layout: $('rr-layout')?.value || 'split',
-      motor_animacion: $('rr-motor')?.value || 'expresivo',
-      calidad: $('rr-calidad')?.value || '720p',
-      subtitulos: Boolean($('rr-subs')?.checked),
-      usar_colab: Boolean($('rr-colab')?.checked),
-      titulo: $('rr-titulo')?.value.trim() || '',
-    });
-    _reaccJobId = j.job_id;
+function _esperarRenderReaccion(jobId, onProgreso) {
+  return new Promise((resolve, reject) => {
     clearInterval(_reaccPoll);
     _reaccPoll = setInterval(async () => {
       try {
-        const st = await api(`/api/reacciones/trabajos/${encodeURIComponent(_reaccJobId)}`);
-        $('rr-render-estado').textContent = `${st.progreso || 0}% · ${st.mensaje || ''}`;
-        if (st.estado === 'listo') {
-          clearInterval(_reaccPoll);
-          if (btn) btn.disabled = false;
-          $('rr-resultado-wrap').hidden = false;
-          $('rr-video-preview').src = st.video_url + '?t=' + Date.now();
-          $('rr-descargar-link').href = st.video_url + '?download=1';
-          $('rr-resultado-meta').textContent = `Duración: ${st.duracion || 0}s · Motor: ${st.motor_usado || 'expresivo'}`;
-          if ($('rr-cuentas-chips') && E?.cuentas) chips('rr-cuentas-chips', _reaccSelCuentas, E.cuentas);
-          toast('Video-reacción listo para previsualizar o enviar a cola.', false, 'Reacciones IA');
-        } else if (st.estado === 'error') {
-          clearInterval(_reaccPoll);
-          if (btn) btn.disabled = false;
-          toast(st.error || 'Error al renderizar la reacción.', true);
-        }
-      } catch (e) { clearInterval(_reaccPoll); if (btn) btn.disabled = false; }
+        const st = await api(`/api/reacciones/trabajos/${encodeURIComponent(jobId)}`);
+        if (onProgreso) onProgreso(st);
+        if (st.estado === 'listo') { clearInterval(_reaccPoll); resolve(st); }
+        else if (st.estado === 'error') { clearInterval(_reaccPoll); reject(new Error(st.error || 'Error al renderizar la reacción.')); }
+      } catch (e) { clearInterval(_reaccPoll); reject(e); }
     }, 1500);
+  });
+}
+async function renderizarVideoReaccion(idxForzado = null) {
+  const pid = $('rr-personaje')?.value;
+  guardarEdicionClipActual();
+  const idx = idxForzado !== null ? idxForzado : _reaccClipIdx;
+  const clip = _reaccClips[idx];
+  const token = clip ? clip.video_token : _reaccVideoToken;
+  const guion = clip ? (clip.intervenciones || []) : _reaccGuion;
+  const titulo = clip ? (clip.titulo_sugerido || '') : ($('rr-titulo')?.value.trim() || '');
+  if (!pid || !token) { toast('Analiza un video primero.', true); return null; }
+  const btn = $('rr-btn-render'), btnTodos = $('rr-btn-render-todos');
+  if (btn) btn.disabled = true;
+  if (btnTodos) btnTodos.disabled = true;
+  if (idxForzado === null) $('rr-resultado-wrap').hidden = true;
+  $('rr-render-estado').textContent = _reaccClips.length > 1 ? `Iniciando clip ${idx + 1}/${_reaccClips.length}…` : 'Iniciando render…';
+  try {
+    const j = await api('/api/reacciones/render', {
+      personaje_id: pid,
+      video_token: token,
+      intervenciones: guion,
+      layout: $('rr-layout')?.value || 'split',
+      motor_animacion: $('rr-motor')?.value || 'expresivo',
+      marco_estilo: $('rr-marco')?.value || 'streamer_pro',
+      calidad: $('rr-calidad')?.value || '720p',
+      subtitulos: Boolean($('rr-subs')?.checked),
+      usar_colab: Boolean($('rr-colab')?.checked),
+      titulo,
+    });
+    _reaccJobId = j.job_id;
+    const st = await _esperarRenderReaccion(j.job_id, s => {
+      const pref = _reaccClips.length > 1 ? `Clip ${idx + 1}/${_reaccClips.length} · ` : '';
+      $('rr-render-estado').textContent = `${pref}${s.progreso || 0}% · ${s.mensaje || ''}`;
+    });
+    if (clip) {
+      clip.job_id = j.job_id;
+      clip.video_url = st.video_url;
+      clip.duracion_render = st.duracion || 0;
+      clip.motor_usado = st.motor_usado || 'expresivo';
+    }
+    pintarTabsClipsReaccion();
+    if (idx === _reaccClipIdx || idxForzado === null) {
+      $('rr-resultado-wrap').hidden = false;
+      $('rr-video-preview').src = st.video_url + '?t=' + Date.now();
+      $('rr-descargar-link').href = st.video_url + '?download=1';
+      $('rr-resultado-meta').textContent = `Duración: ${st.duracion || 0}s · Motor: ${st.motor_usado || 'expresivo'}`;
+      if ($('rr-cuentas-chips') && E?.cuentas) chips('rr-cuentas-chips', _reaccSelCuentas, E.cuentas);
+    }
+    if (idxForzado === null) toast('Video-reacción listo para previsualizar o enviar a cola.', false, 'Reacciones IA');
+    return st;
   } catch (e) {
-    if (btn) btn.disabled = false;
     $('rr-render-estado').textContent = e.message;
+    toast(e.message, true);
+    return null;
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnTodos) btnTodos.disabled = false;
+  }
+}
+async function renderizarTodosClipsReaccion() {
+  if (!_reaccClips.length) { toast('Analiza un video primero.', true); return; }
+  guardarEdicionClipActual();
+  let ok = 0;
+  for (let i = 0; i < _reaccClips.length; i++) {
+    const st = await renderizarVideoReaccion(i);
+    if (st) ok++;
+  }
+  if (ok > 0) {
+    seleccionarClipReaccion(0);
+    toast(`${ok}/${_reaccClips.length} video-reacciones listas. Cambia entre las pestañas Clip 1..${_reaccClips.length} para ver cada una.`, false, 'Reacciones IA');
   }
 }
 async function enviarReaccionACola() {
