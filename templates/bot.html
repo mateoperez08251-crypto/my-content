@@ -819,10 +819,12 @@ body.tema-kinetik .chip.on{background:var(--tinta);color:var(--volt);border-colo
 body.tema-kinetik .est{
   border-radius:4px;border:1px solid var(--tinta);font:700 10.5px var(--mono);letter-spacing:.05em;text-transform:uppercase
 }
-body.tema-kinetik .e-ok{background:#DCFCE7;color:#0F5132;border-color:#0F8A47}
-body.tema-kinetik .e-mal{background:#FEE2E2;color:#991B1B;border-color:#D92D20}
-body.tema-kinetik .e-aviso{background:var(--volt);color:var(--tinta);border-color:var(--tinta)}
-body.tema-kinetik .e-info{background:var(--panel-elev);color:var(--tinta);border-color:var(--tinta)}
+body.tema-kinetik .e-ok,body.tema-kinetik .e-listo,body.tema-kinetik .e-publicada{background:#DCFCE7;color:#0F5132;border-color:#0F8A47}
+body.tema-kinetik .e-mal,body.tema-kinetik .e-error,body.tema-kinetik .e-sin_login,body.tema-kinetik .e-sin_destino{background:#FEE2E2;color:#991B1B;border-color:#D92D20}
+body.tema-kinetik .e-aviso,body.tema-kinetik .e-revisar,body.tema-kinetik .e-sin_comprobar,body.tema-kinetik .e-cancelando{background:var(--volt);color:var(--tinta);border-color:var(--tinta)}
+body.tema-kinetik .e-info,body.tema-kinetik .e-pendiente,body.tema-kinetik .e-omitido{background:var(--panel-elev);color:var(--tinta);border-color:var(--tinta)}
+body.tema-kinetik .e-subiendo,body.tema-kinetik .e-cortando,body.tema-kinetik .e-descargando{background:#FFE4D6;color:#9A2B00;border-color:var(--acento)}
+body.tema-kinetik .live-toolbar,body.tema-kinetik .trabajos-toolbar{background:var(--panel-solid);border:1.5px solid var(--tinta);border-radius:8px;color:var(--tinta)}
 body.tema-kinetik th{font:700 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tinta);border-bottom:1.5px solid var(--tinta)}
 body.tema-kinetik td{border-bottom:1px solid var(--fino);color:var(--tinta)}
 body.tema-kinetik tr:hover td{background:var(--panel)}
@@ -1056,8 +1058,23 @@ body.tema-kinetik #lado-bot #registro{
 }
 body.tema-kinetik .regla-pasos li{border-radius:6px;background:var(--panel-solid);border:1px solid var(--tinta);color:var(--tinta)}
 body.tema-kinetik .regla-pasos i{border-radius:4px;background:var(--tinta);color:var(--volt)}
-body.tema-kinetik dialog{background:var(--bg);color:var(--tinta);border:2px solid var(--tinta);border-radius:10px;box-shadow:8px 8px 0 rgba(17,18,20,.88)}
-body.tema-kinetik dialog::backdrop{background:rgba(17,18,20,.56);backdrop-filter:none}
+body.tema-kinetik dialog,
+body.tema-kinetik dialog.card.cookies-dialog,
+body.tema-kinetik dialog#cookies-descarga-modal,
+body.tema-kinetik dialog#texto-dialog,
+body.tema-kinetik dialog#vista-rapida-dialog{
+  background:var(--bg)!important;color:var(--tinta)!important;
+  border:2px solid var(--tinta)!important;border-radius:10px!important;
+  box-shadow:8px 8px 0 rgba(17,18,20,.88)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important
+}
+body.tema-kinetik dialog.cookies-dialog{padding:22px 24px!important}
+body.tema-kinetik dialog h2,body.tema-kinetik dialog b,body.tema-kinetik dialog p,body.tema-kinetik dialog label,body.tema-kinetik dialog span,body.tema-kinetik dialog .ayuda{color:var(--tinta)}
+body.tema-kinetik dialog .muted{color:#3F3D38}
+body.tema-kinetik dialog .err{color:var(--mal)}
+body.tema-kinetik dialog #yt-auto{background:var(--panel-solid);border:1.5px solid var(--tinta);border-radius:8px;padding:14px 16px;margin:10px 0 14px;color:var(--tinta)}
+body.tema-kinetik dialog #cookies-descarga-estado,body.tema-kinetik dialog #yt-auto-estado,body.tema-kinetik dialog #texto-estado{color:var(--tinta);font:600 12.5px var(--mono)}
+body.tema-kinetik dialog::backdrop{background:rgba(17,18,20,.62);backdrop-filter:none}
 body.tema-kinetik #vista-rapida-titulo{color:var(--tinta)!important;font-family:var(--titulo)!important;font-weight:800!important}
 body.tema-kinetik #toast{background:var(--tinta);color:var(--volt);border:1.5px solid var(--tinta);border-radius:6px;font:600 12.5px var(--mono)}
 body.tema-kinetik ::-webkit-scrollbar{width:9px;height:9px}
