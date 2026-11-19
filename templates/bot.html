@@ -2184,9 +2184,10 @@ function tarjetaCuenta(c) {
     : c.comprobando
       ? '<p class="muted" style="color:var(--aviso);margin:4px 0 8px">⏳ Comprobando inicio de sesión en segundo plano…</p>'
       : (c.detalle_sesion && c.estado !== 'ok' ? `<p class="muted" style="margin:4px 0 8px">${esc(c.detalle_sesion)}</p>` : '');
+  const manualActivo = Boolean(c.subida_manual || E?.config?.subida_manual);
   return `<article class="cuenta-panel" id="cuenta-${c.id}">
     <div class="cuenta-cabecera"><h3>${plat(c.plataforma)} ${esc(c.nombre)}</h3>${est(c.comprobando ? 'sin_comprobar' : c.estado)}</div>
-    <p class="muted">${c.activa ? 'Cuenta activa' : 'Cuenta pausada'}${c.subida_manual ? ' · ✋ Subida manual' : ''} · ${c.hoy}/${c.limite_dia} hoy · ${c.pendientes || 0} pendientes</p>
+    <p class="muted">${c.activa ? 'Cuenta activa' : 'Cuenta pausada'}${manualActivo ? ' · ✋ Subida manual' : ''} · ${c.hoy}/${c.limite_dia} hoy · ${c.pendientes || 0} pendientes</p>
     ${avisoSesion}
     <div class="proximo"><b>${faltan === null ? 'Sin hora estimada' : faltan ? 'Turno estimado en '+Math.floor(faltan/60)+' h '+faltan%60+' min' : 'Turno disponible'}</b>
       ${proxima ? '<div class="muted">'+fechaSubida(proxima)+'</div>' : ''}<p>${esc(c.espera || '')}</p>
@@ -2194,7 +2195,7 @@ function tarjetaCuenta(c) {
     </div>
     <div class="acc">
       <button onclick="pausarCuenta(${c.id},${!c.activa})">${c.activa ? 'Pausar cuenta' : 'Activar cuenta'}</button>
-      <button class="${c.subida_manual ? 'prim' : ''}" data-manual-cuenta="${c.id}" onclick="cambiarSubidaManualCuenta(${c.id},${!c.subida_manual})" title="Si está activa, esta cuenta guarda sus clips y solo publica cuando pulses ↑ Subir ahora">${c.subida_manual ? '✋ Manual: ON' : '✋ Subida manual'}</button>
+      <button type="button" class="${manualActivo ? 'prim' : ''}" data-manual-cuenta="${c.id}" aria-pressed="${manualActivo ? 'true' : 'false'}" onclick="cambiarSubidaManualCuenta(${c.id},${!manualActivo},this)" title="${manualActivo ? 'Subida manual activa en esta cuenta. Pulsa para desactivar y volver a subida automática.' : 'Si está activa, esta cuenta guarda sus clips y solo publica cuando pulses ↑ Subir ahora'}">${manualActivo ? '✋ Desactivar manual' : '✋ Subida manual'}</button>
       <button onclick="verColaCuenta(${c.id})">Ver cola</button>
       ${siguiente ? `<button class="prim" onclick="adelantarClip(${Number(siguiente.id)})">Subir siguiente ahora</button>` : ''}
       ${c.login_abierto
@@ -2252,10 +2253,13 @@ async function guardarBuzon(id, input) {
   input.blur();
   cargarBuzon().catch(() => {});
 }
-function pintarCuentas() {
+function pintarCuentas(forzar = false) {
   if (Date.now() - buzonRevisado > 15000) cargarBuzon().catch(() => {});
   const panel = $('cuentas');
-  if (panel.contains(document.activeElement) || [...panel.querySelectorAll('video')].some(v=>!v.paused)) return;
+  if (!panel) return;
+  const activo = typeof document !== 'undefined' ? document.activeElement : null;
+  const editandoCampo = Boolean(activo && panel.contains(activo) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activo.tagName));
+  if (!forzar && (editandoCampo || [...panel.querySelectorAll('video')].some(v=>!v.paused))) return;
   panel.innerHTML = E.cuentas.map(tarjetaCuenta).join('') || '<p class="muted">Añade tu primera cuenta para empezar.</p>';
 }
 function pintar() {
@@ -2495,7 +2499,7 @@ function pintarLado() {
   }
   const htmlCuentas = (E.cuentas || []).map(c => {
     const limite = Number(c.limite_dia) || 0, hoy = Number(c.hoy) || 0;
-    return `<div class="lado-medidor"><span>${esc(c.nombre)}${c.subida_manual ? ' ✋' : ''}</span><span>${c.activa ? `${hoy} de ${limite}` : 'Pausada'}</span><i><b style="width:${limite ? Math.min(100, hoy / limite * 100) : 0}%"></b></i></div>`;
+    return `<div class="lado-medidor"><span>${esc(c.nombre)}${(c.subida_manual || E?.config?.subida_manual) ? ' ✋' : ''}</span><span>${c.activa ? `${hoy} de ${limite}` : 'Pausada'}</span><i><b style="width:${limite ? Math.min(100, hoy / limite * 100) : 0}%"></b></i></div>`;
   }).join('') || '<p class="muted">Sin cuentas.</p>';
   if (cuentas.dataset.firma !== htmlCuentas) { cuentas.innerHTML = htmlCuentas; cuentas.dataset.firma = htmlCuentas; }
 }
@@ -2967,12 +2971,39 @@ async function probar(id) {
   finally { pruebasPendientes.delete(id); await cargar(); }
 }
 async function pausarCuenta(id, activa) { await api(`/api/bot/cuentas/${id}`, {activa}); cargar(); }
-async function cambiarSubidaManualCuenta(id, on) {
+async function cambiarSubidaManualCuenta(id, on, btn) {
+  const cuenta = E?.cuentas?.find(c => c.id === id);
+  const manualGlobal = Boolean(E?.config?.subida_manual);
+  const manualActual = Boolean(cuenta?.subida_manual || manualGlobal);
+  const activar = typeof on === 'boolean' ? on : !manualActual;
+  if (btn) { btn.disabled = true; btn.blur?.(); }
   try {
-    await api(`/api/bot/cuentas/${id}`, {subida_manual: Boolean(on)});
+    if (!activar && manualGlobal) {
+      for (const otra of (E?.cuentas || [])) {
+        if (otra.id !== id && !otra.subida_manual) {
+          await api(`/api/bot/cuentas/${otra.id}`, {subida_manual: true});
+        }
+      }
+      await api(`/api/bot/cuentas/${id}`, {subida_manual: false});
+      await api('/api/bot/config', {subida_manual: false});
+      if (E?.config) E.config.subida_manual = false;
+    } else {
+      await api(`/api/bot/cuentas/${id}`, {subida_manual: activar});
+    }
+    if (cuenta) cuenta.subida_manual = activar;
+    if (typeof pintarCuentas === 'function') pintarCuentas(true);
     await cargar();
-    toast(on ? '✋ Subida manual activada en esta cuenta: publicará solo cuando pulses ↑ Subir ahora.' : 'Subida automática reactivada en esta cuenta.');
-  } catch (e) { toast(e.message, true); }
+    toast(
+      activar
+        ? '✋ Subida manual activada en esta cuenta: publicará solo cuando pulses ↑ Subir ahora.'
+        : 'Subida manual desactivada en esta cuenta: vuelve a subida automática.',
+      false,
+      cuenta ? cuenta.nombre : 'Subida por cuenta'
+    );
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast(e.message, true);
+  }
 }
 async function cerrarSesionCuenta(id) {
   const cuenta = E?.cuentas?.find(c => c.id === id);

@@ -208,6 +208,7 @@ class DB:
         if 'subida_manual' in sets:
             if type(sets['subida_manual']) is not bool:
                 raise ValueError('Elige si activar la subida manual en esta cuenta.')
+            sets['subida_manual'] = 1 if sets['subida_manual'] else 0
         sets = validar(sets)
         # Un cambio de intervalo se cuenta desde la última publicación, sin borrar su historial.
         if 'intervalo_horas' in sets and 'proxima_libre' not in sets:

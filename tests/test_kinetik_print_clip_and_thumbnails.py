@@ -99,6 +99,8 @@ class MyContentClipKinetikUiAndColabTests(unittest.TestCase):
         self.assertIn('tema-kinetik-oscuro', html)
         self.assertIn('cambiarSubidaManualCuenta', html)
         self.assertIn('data-manual-cuenta=', html)
+        self.assertIn('Desactivar manual', html)
+        self.assertIn("['INPUT', 'TEXTAREA', 'SELECT']", html)
 
         # La vista incrustada (?embed=1) mantiene su tema original sin tema-kinetik
         r_embed = client.get('/bot?embed=1')
@@ -121,6 +123,9 @@ class MyContentClipKinetikUiAndColabTests(unittest.TestCase):
                 por_id = {c['id']: c for c in est['cuentas']}
                 self.assertIs(por_id[cid1]['subida_manual'], True)
                 self.assertIs(por_id[cid2]['subida_manual'], False)
+                m.guardar_cuenta(cid1, {'subida_manual': False})
+                por_id2 = {c['id']: c for c in m.estado()['cuentas']}
+                self.assertIs(por_id2[cid1]['subida_manual'], False)
             finally:
                 m.db._con.close()
 
