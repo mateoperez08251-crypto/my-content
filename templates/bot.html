@@ -1244,10 +1244,159 @@ body.tema-kinetik.tema-kinetik-oscuro ::-webkit-scrollbar-thumb{background:rgba(
 
 body.app-clip .volver-app{display:none}
 
+/* ===== Animación de Entrada Stop-Motion · My Content Clip ===== */
+.kinetik-intro{
+  position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:22px;background:var(--bg);color:var(--tinta);user-select:none;cursor:pointer;overflow:hidden;
+  transition:opacity .26s steps(4,end),transform .26s steps(4,end)
+}
+.kinetik-intro.ki-salida{opacity:0;transform:scale(1.04);pointer-events:none}
+.kinetik-intro.ki-oculto{display:none!important}
+.kinetik-intro::before{
+  content:"";position:absolute;inset:18px;border:1.5px solid var(--fino);pointer-events:none
+}
+.kinetik-intro .ki-meta-top{
+  position:absolute;top:28px;left:32px;right:32px;display:flex;justify-content:space-between;align-items:center;
+  font:700 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--suave);pointer-events:none
+}
+.kinetik-intro .ki-badge-fps{
+  padding:4px 8px;background:var(--volt);color:#111214;border:1.5px solid var(--tinta);font-weight:700
+}
+.kinetik-intro .ki-stage{
+  position:relative;width:196px;height:196px;display:flex;align-items:center;justify-content:center
+}
+.kinetik-intro .ki-svg{
+  width:184px;height:184px;overflow:visible;
+  filter:drop-shadow(8px 8px 0 rgba(17,18,20,.9))
+}
+body.tema-kinetik.tema-kinetik-oscuro .kinetik-intro .ki-svg{
+  filter:drop-shadow(8px 8px 0 rgba(0,0,0,.85))
+}
+body.tema-kinetik.tema-kinetik-oscuro .kinetik-intro .ki-badge-fps{border-color:#0E0F11}
+.kinetik-intro .ki-rig{transform-box:view-box;transform-origin:64px 64px}
+.kinetik-intro .ki-tile{transform-box:view-box;transform-origin:64px 64px;opacity:0}
+.kinetik-intro .ki-volt{transform-box:view-box;transform-origin:46px 29px;opacity:0}
+.kinetik-intro .ki-dot{transform-box:view-box;transform-origin:96px 29px;opacity:0}
+.kinetik-intro .ki-bar{transform-box:view-box;transform-origin:33px 77px;opacity:0}
+.kinetik-intro .ki-play{transform-box:view-box;transform-origin:72px 77px;opacity:0}
+
+@keyframes kiTileStop{
+  0%{opacity:1;transform:scale(.20) rotate(-10deg)}
+  20%{opacity:1;transform:scale(.44) rotate(6deg)}
+  44%{opacity:1;transform:scale(.76) rotate(-4deg)}
+  68%{opacity:1;transform:scale(1.08) rotate(2deg)}
+  86%{opacity:1;transform:scale(.97) rotate(-1deg)}
+  100%{opacity:1;transform:scale(1) rotate(0deg)}
+}
+@keyframes kiVoltStop{
+  0%{opacity:0;transform:translate(-38px,-8px) scaleX(.22) rotate(-14deg)}
+  22%{opacity:1;transform:translate(-18px,4px) scaleX(.68) rotate(7deg)}
+  54%{opacity:1;transform:translate(6px,-3px) scaleX(1.14) rotate(-3.5deg)}
+  80%{opacity:1;transform:translate(-2px,1px) scaleX(.96) rotate(1.5deg)}
+  100%{opacity:1;transform:translate(0,0) scaleX(1) rotate(0deg)}
+}
+@keyframes kiDotStop{
+  0%{opacity:0;transform:translate(0,-38px) scale(.48,1.38)}
+  24%{opacity:1;transform:translate(0,-14px) scale(.76,1.26)}
+  48%{opacity:1;transform:translate(0,5px) scale(1.36,.68)}
+  72%{opacity:1;transform:translate(0,-9px) scale(.86,1.18)}
+  88%{opacity:1;transform:translate(0,2px) scale(1.08,.92)}
+  100%{opacity:1;transform:translate(0,0) scale(1,1)}
+}
+@keyframes kiBarStop{
+  0%{opacity:0;transform:translate(0,48px) scaleY(.30) rotate(8deg)}
+  26%{opacity:1;transform:translate(0,18px) scaleY(.76) rotate(-5deg)}
+  56%{opacity:1;transform:translate(0,-6px) scaleY(1.10) rotate(2.5deg)}
+  82%{opacity:1;transform:translate(0,2px) scaleY(.96) rotate(-1deg)}
+  100%{opacity:1;transform:translate(0,0) scaleY(1) rotate(0deg)}
+}
+@keyframes kiPlayStop{
+  0%{opacity:0;transform:translate(40px,0) scale(.28) rotate(14deg)}
+  26%{opacity:1;transform:translate(10px,-5px) scale(1.20) rotate(-6deg)}
+  54%{opacity:1;transform:translate(-4px,3px) scale(.92) rotate(3deg)}
+  80%{opacity:1;transform:translate(2px,-1px) scale(1.05) rotate(-1.5deg)}
+  100%{opacity:1;transform:translate(0,0) scale(1) rotate(0deg)}
+}
+@keyframes kiRigRecoil{
+  0%{transform:translate(0,0) rotate(0deg)}
+  25%{transform:translate(-3px,2px) rotate(-2deg)}
+  55%{transform:translate(2px,-1px) rotate(1.2deg)}
+  82%{transform:translate(-1px,0) rotate(-.5deg)}
+  100%{transform:translate(0,0) rotate(0deg)}
+}
+@keyframes kiLockupStop{
+  0%{opacity:0;transform:translateY(14px) scale(.92)}
+  45%{opacity:1;transform:translateY(-3px) scale(1.03)}
+  75%{opacity:1;transform:translateY(1px) scale(.99)}
+  100%{opacity:1;transform:translateY(0) scale(1)}
+}
+@keyframes kiLineWipe{
+  0%{transform:scaleX(0)}
+  35%{transform:scaleX(.42)}
+  70%{transform:scaleX(.84)}
+  100%{transform:scaleX(1)}
+}
+
+.kinetik-intro.ki-play-anim .ki-tile{animation:kiTileStop .36s steps(1,end) 0s both}
+.kinetik-intro.ki-play-anim .ki-volt{animation:kiVoltStop .32s steps(1,end) .36s both}
+.kinetik-intro.ki-play-anim .ki-dot{animation:kiDotStop .34s steps(1,end) .64s both}
+.kinetik-intro.ki-play-anim .ki-bar{animation:kiBarStop .32s steps(1,end) .92s both}
+.kinetik-intro.ki-play-anim .ki-play{animation:kiPlayStop .34s steps(1,end) 1.20s both}
+.kinetik-intro.ki-play-anim .ki-rig{animation:kiRigRecoil .22s steps(1,end) 1.26s both}
+.kinetik-intro.ki-play-anim .ki-lockup{animation:kiLockupStop .28s steps(1,end) 1.50s both}
+.kinetik-intro.ki-play-anim .ki-subbar{animation:kiLineWipe .24s steps(1,end) 1.58s both}
+
+.kinetik-intro .ki-lockup{
+  display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0
+}
+.kinetik-intro .ki-titulo{
+  font:900 28px/1 var(--titulo);letter-spacing:-.04em;text-transform:uppercase;color:var(--tinta)
+}
+.kinetik-intro .ki-subbar{
+  width:154px;height:5px;background:var(--acento);transform-origin:left center;transform:scaleX(0)
+}
+.kinetik-intro .ki-sub{
+  font:600 11px/1.2 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--suave)
+}
+.kinetik-intro .ki-meta-bot{
+  position:absolute;bottom:28px;left:32px;right:32px;display:flex;justify-content:space-between;align-items:center;
+  font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--suave);pointer-events:none
+}
+body.tema-kinetik .marca-bot img{cursor:pointer;transition:transform .14s steps(2,end)}
+body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
+@media (prefers-reduced-motion:reduce){
+  .kinetik-intro:not(.ki-manual) .ki-tile,
+  .kinetik-intro:not(.ki-manual) .ki-volt,
+  .kinetik-intro:not(.ki-manual) .ki-dot,
+  .kinetik-intro:not(.ki-manual) .ki-bar,
+  .kinetik-intro:not(.ki-manual) .ki-play,
+  .kinetik-intro:not(.ki-manual) .ki-lockup{animation:none!important;opacity:1!important;transform:none!important}
+}
+
 </style>
 </head>
 <body class="{{ 'app-clip tema-kinetik' if app_clip else '' }}">
-{% if app_clip %}<script>(function(){try{if(localStorage.getItem("kinetik_tema")==="oscuro"){document.body.classList.add("tema-kinetik-oscuro");var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content","#0E0F11");}}catch(_){}})();</script>{% endif %}
+{% if app_clip %}<script>(function(){try{if(localStorage.getItem("kinetik_tema")==="oscuro"){document.body.classList.add("tema-kinetik-oscuro");var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content","#0E0F11");}}catch(_){}})();</script>
+<div id="kinetik-intro" class="kinetik-intro" role="presentation" onclick="cerrarIntroKinetik()" title="Haz clic para entrar inmediatamente">
+  <div class="ki-meta-top"><span>KINETIK PRINT · STUDIO</span><span class="ki-badge-fps">12 FPS · STOP MOTION</span></div>
+  <div class="ki-stage">
+    <svg class="ki-svg" viewBox="0 0 128 128" aria-label="My Content Clip">
+      <g class="ki-rig">
+        <g class="ki-tile"><rect x="4" y="4" width="120" height="120" rx="28" fill="#111214" stroke="#EAE5D9" stroke-width="4"/></g>
+        <g class="ki-volt"><rect x="24" y="22" width="44" height="14" rx="4" fill="#E8FF00"/></g>
+        <g class="ki-dot"><circle cx="96" cy="29" r="7" fill="#F4F1EA"/></g>
+        <g class="ki-bar"><rect x="24" y="48" width="18" height="58" rx="5" fill="#F4F1EA"/></g>
+        <g class="ki-play"><path d="M52 48 L104 77 L52 106 Z" fill="#FF4D00" stroke="#FF4D00" stroke-width="5" stroke-linejoin="round"/></g>
+      </g>
+    </svg>
+  </div>
+  <div class="ki-lockup">
+    <div class="ki-titulo">MY CONTENT CLIP</div>
+    <div class="ki-subbar"></div>
+    <div class="ki-sub">CLIPS · LIVES · SUBIDA</div>
+  </div>
+  <div class="ki-meta-bot"><span class="ki-tc">FRAME 01 / 24</span><span>CLICK O ESC PARA SALTAR</span></div>
+</div>{% endif %}
 <div class="kinetik-marks" aria-hidden="true"><i class="kinetik-mark m-top"></i><i class="kinetik-mark m-bot"></i><i class="kinetik-mark m-left"></i><i class="kinetik-mark m-right"></i></div>
 <header>
   <h2 id="titulo-vista">Cola y actividad</h2>
@@ -1262,7 +1411,7 @@ body.app-clip .volver-app{display:none}
 </header>
 
 <div class="bot-nav-wrap">
-  <div class="marca-bot"><img src="/static/icons/{{ 'my-content-clip.svg' if app_clip else 'bot.svg' }}" width="32" height="32" alt=""><div><h1>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</h1><small>{{ 'Clips · Lives · Subida' if app_clip else 'My Content' }}</small></div></div>
+  <div class="marca-bot"><img src="/static/icons/{{ 'my-content-clip.svg' if app_clip else 'bot.svg' }}" width="32" height="32" alt=""{% if app_clip %} onclick="reproducirIntroKinetik(true)" title="Repetir animación de entrada con sonido"{% endif %}><div><h1>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</h1><small>{{ 'Clips · Lives · Subida' if app_clip else 'My Content' }}</small></div></div>
   <nav class="bot-tabs" aria-label="Secciones del bot">
     <button type="button" class="bot-tab activa" data-num="01" data-vista="cola" onclick="cambiarPestanaBot('cola')">
       <i class="ph-duotone ph-queue"></i> Cola y actividad <span class="tab-badge" id="badge-cola">0</span>
@@ -3713,6 +3862,127 @@ function alternarModoOscuroKinetik() {
 }
 if (typeof document !== 'undefined' && document.body?.classList?.contains('tema-kinetik')) {
   sincronizarTemaKinetik(document.body.classList.contains('tema-kinetik-oscuro') ? 'oscuro' : 'claro');
+}
+let _kinetikAudioCtx = null, _kinetikIntroTimer = null, _kinetikIntroFade = null, _kinetikIntroTc = null;
+function _kinetikSfx() {
+  try {
+    const AC = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
+    if (!AC) return false;
+    const ctx = _kinetikAudioCtx || (_kinetikAudioCtx = new AC());
+    if (ctx.state === 'suspended' && typeof ctx.resume === 'function') ctx.resume().catch(() => {});
+    const t0 = ctx.currentTime + 0.02;
+
+    const clickRuido = (when, dur, freq, q, gainVal) => {
+      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.28));
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const flt = ctx.createBiquadFilter();
+      flt.type = 'bandpass'; flt.frequency.setValueAtTime(freq, when); flt.Q.setValueAtTime(q, when);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(gainVal, when);
+      g.gain.exponentialRampToValueAtTime(0.0008, when + dur);
+      src.connect(flt); flt.connect(g); g.connect(ctx.destination);
+      src.start(when); src.stop(when + dur + 0.01);
+    };
+
+    const tono = (when, fIni, fFin, dur, tipo, gainVal) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = tipo;
+      osc.frequency.setValueAtTime(fIni, when);
+      if (fFin && fFin !== fIni) osc.frequency.exponentialRampToValueAtTime(fFin, when + dur);
+      g.gain.setValueAtTime(0.0008, when);
+      g.gain.linearRampToValueAtTime(gainVal, when + 0.009);
+      g.gain.exponentialRampToValueAtTime(0.0008, when + dur);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(when); osc.stop(when + dur + 0.02);
+    };
+
+    // 1. Base cuadrada pequeña -> crece en pasos stop-motion (golpe de papel + 2 ticks de paso)
+    tono(t0, 125, 56, 0.11, 'sine', 0.22);
+    clickRuido(t0, 0.032, 950, 1.4, 0.12);
+    clickRuido(t0 + 0.12, 0.016, 1750, 2.5, 0.07);
+    clickRuido(t0 + 0.23, 0.018, 2050, 2.6, 0.08);
+
+    // 2. Palo verde/volt (#E8FF00): interruptor mecánico + blip brillante
+    clickRuido(t0 + 0.36, 0.022, 3200, 3.0, 0.16);
+    tono(t0 + 0.36, 587, 880, 0.085, 'triangle', 0.16);
+    tono(t0 + 0.43, 880, 932, 0.045, 'square', 0.045);
+
+    // 3. Punto blanco (#F4F1EA): rebote stop-motion madera/pop doble
+    tono(t0 + 0.64, 920, 1260, 0.065, 'sine', 0.17);
+    clickRuido(t0 + 0.64, 0.014, 2600, 3.2, 0.08);
+    tono(t0 + 0.77, 1340, 1520, 0.055, 'sine', 0.13);
+
+    // 4. Palo vertical al lado del botón naranja (#F4F1EA): encaje mecánico de cinta / sello
+    tono(t0 + 0.92, 240, 96, 0.095, 'triangle', 0.22);
+    clickRuido(t0 + 0.92, 0.028, 1850, 2.0, 0.18);
+    clickRuido(t0 + 1.03, 0.016, 2400, 2.4, 0.08);
+
+    // 5. Botón naranja Play (#FF4D00): golpe obturador + acorde analógico Kinetik
+    clickRuido(t0 + 1.20, 0.036, 1500, 1.3, 0.22);
+    tono(t0 + 1.20, 196, 82, 0.11, 'sine', 0.20);
+    tono(t0 + 1.22, 523.25, 523.25, 0.34, 'triangle', 0.13); // C5
+    tono(t0 + 1.24, 659.25, 659.25, 0.32, 'triangle', 0.11); // E5
+    tono(t0 + 1.26, 783.99, 783.99, 0.30, 'sine', 0.11);     // G5
+    tono(t0 + 1.26, 1046.5, 1046.5, 0.22, 'sine', 0.055);    // C6 brillo
+
+    // 6. Estampado final del título MY CONTENT CLIP
+    clickRuido(t0 + 1.52, 0.02, 2900, 3.0, 0.10);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+function cerrarIntroKinetik(inmediato) {
+  const el = $('kinetik-intro');
+  if (!el) return;
+  clearTimeout(_kinetikIntroTimer);
+  clearTimeout(_kinetikIntroFade);
+  clearInterval(_kinetikIntroTc);
+  if (inmediato) {
+    el.classList.add('ki-oculto');
+    el.classList.remove('ki-play-anim', 'ki-salida', 'ki-manual');
+    return;
+  }
+  el.classList.add('ki-salida');
+  _kinetikIntroFade = setTimeout(() => {
+    el.classList.add('ki-oculto');
+    el.classList.remove('ki-play-anim', 'ki-salida', 'ki-manual');
+  }, 270);
+}
+function reproducirIntroKinetik(manual) {
+  const el = $('kinetik-intro');
+  if (!el || typeof window === 'undefined') return;
+  const params = new URLSearchParams(window.location?.search || '');
+  if (!manual && params.get('nointro') === '1') { cerrarIntroKinetik(true); return; }
+  clearTimeout(_kinetikIntroTimer);
+  clearTimeout(_kinetikIntroFade);
+  clearInterval(_kinetikIntroTc);
+  el.classList.remove('ki-oculto', 'ki-salida', 'ki-play-anim');
+  el.classList.toggle('ki-manual', Boolean(manual));
+  void el.offsetWidth;
+  el.classList.add('ki-play-anim');
+  const tc = el.querySelector?.('.ki-tc');
+  let frame = 1;
+  if (tc) tc.textContent = 'FRAME 01 / 24';
+  _kinetikIntroTc = setInterval(() => {
+    frame = Math.min(24, frame + 1);
+    if (tc) tc.textContent = `FRAME ${String(frame).padStart(2, '0')} / 24`;
+    if (frame >= 24) clearInterval(_kinetikIntroTc);
+  }, 83);
+  _kinetikSfx();
+  const reducido = !manual && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  _kinetikIntroTimer = setTimeout(() => cerrarIntroKinetik(false), reducido ? 550 : 2150);
+}
+if (typeof document !== 'undefined' && $('kinetik-intro')) {
+  document.addEventListener?.('keydown', ev => {
+    if (ev.key === 'Escape' && !$('kinetik-intro')?.classList?.contains('ki-oculto')) cerrarIntroKinetik(false);
+  });
+  reproducirIntroKinetik(false);
 }
 const muestrasVoz = new Map();
 let audioMuestra = null;

@@ -9,6 +9,7 @@ from unittest.mock import patch
 import zipfile
 
 import numpy as np
+from PIL import Image
 
 from bot import presets
 import content
@@ -249,8 +250,17 @@ class MyContentClipKinetikUiAndColabTests(unittest.TestCase):
             'probarNotificacionKinetik()',
             'sincronizarTemaKinetik(',
             '_procesarNotificacionesServidor(',
+            'id="kinetik-intro"',
+            'kiTileStop',
+            'kiVoltStop',
+            'kiDotStop',
+            'kiBarStop',
+            'kiPlayStop',
+            '_kinetikSfx()',
+            'reproducirIntroKinetik(',
         ):
             self.assertIn(marcador, bot_html)
+        self.assertIn('--autoplay-policy=no-user-gesture-required', content_src)
 
 
 if __name__ == '__main__':

@@ -3604,11 +3604,16 @@ if __name__ == "__main__":
     # Job y mueren con la app, incluso si crashea.
     winproc.activar_job_object()
 
-    if winproc.ES_WINDOWS and winproc.es_equipo_baja_ram() and not os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"):
-        os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
-            "--disable-features=msVisualSearch,msEdgeSidebarV2,Translate "
-            "--renderer-process-limit=2 --disk-cache-size=33554432 --media-cache-size=16777216"
-        )
+    if winproc.ES_WINDOWS:
+        wv_args = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "").strip()
+        if winproc.es_equipo_baja_ram() and "--renderer-process-limit" not in wv_args:
+            wv_args = (
+                f"{wv_args} --disable-features=msVisualSearch,msEdgeSidebarV2,Translate "
+                "--renderer-process-limit=2 --disk-cache-size=33554432 --media-cache-size=16777216"
+            ).strip()
+        if "--autoplay-policy=" not in wv_args:
+            wv_args = f"{wv_args} --autoplay-policy=no-user-gesture-required".strip()
+        os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = wv_args
 
     if _DASHBOARD_ACTIVO:
         threading.Thread(target=_hilo_dashboard, daemon=True, name="dashboard").start()
