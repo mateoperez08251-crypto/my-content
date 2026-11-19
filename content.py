@@ -1971,6 +1971,7 @@ def run_smart_split_thread(data):
             "clean_vocals": bool(data.get("clean_vocals", False)),
             "auto_thumbnail": str(data.get("auto_thumbnail", "off") or "off"),
             "thumbnail_engine": "qwen" if data.get("thumbnail_engine") == "qwen" else "clasico",
+            "thumbnail_style": "clasico" if data.get("thumbnail_style") == "clasico" else "kinetik",
             "auto_hashtags": data.get("auto_hashtags", True) is not False,
             "politicas_tiktok": str(data.get("politicas_tiktok", "alto") or "off"),
             "strip_metadata": bool(data.get("strip_metadata", True)),
@@ -3356,7 +3357,7 @@ def abrir_my_content_clip():
 # Una ventana por app; el servidor, el bot y los datos son los mismos.
 VENTANAS_APP = {
     "main": {"titulo": "Content App Premium", "ruta": "/", "fondo": "#09111e"},
-    "clip": {"titulo": "My Content Clip", "ruta": "/clip", "fondo": "#0C0C0B"},
+    "clip": {"titulo": "My Content Clip", "ruta": "/clip", "fondo": "#F4F1EA"},
 }
 _ventanas = {}
 _url_base_app = f"http://127.0.0.1:{PUERTO_PREFERIDO}"

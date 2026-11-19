@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</title>
 {% if app_clip %}<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">{% endif %}
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Barlow+Condensed:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">{% endif %}
 <link rel="icon" type="image/svg+xml" href="/static/icons/my-content.svg">
 <link rel="alternate icon" href="/static/icons/my-content.ico">
-<meta name="theme-color" content="#0B1525">
+<meta name="theme-color" content="{{ '#F4F1EA' if app_clip else '#0B1525' }}">
 <script async src="https://unpkg.com/@phosphor-icons/web"></script>
 <style>
 :root{
@@ -665,79 +665,422 @@ body:has(#vista-cuentas.activa){grid-template-columns:248px minmax(0,1fr) 332px;
 /* Rendimiento: las animaciones continuas son lo que más frena el desplazamiento en esta GPU. */
 body.desplazando *,body.desplazando *::before,body.desplazando *::after{animation-play-state:paused!important}
 .publicacion{content-visibility:auto;contain-intrinsic-size:auto 110px}
-/* ===== My Content Clip · Editorial oscuro (solo en /clip) ===== */
-body.tema-editorial{
-  --fuente:Archivo,"Segoe UI",system-ui,sans-serif;--titulo:Archivo,"Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",Consolas,monospace;
-  --bg:#0C0C0B;--lateral:#0C0C0B;--panel:#121211;--panel-solid:#121211;--panel-elev:#1A1A18;--relleno:#24231F;
-  --borde:#2B2A27;--borde-luz:#3A3935;--fino:#2B2A27;
-  --texto:#EDEAE2;--suave:#B4B0A6;--tenue:#8F8C84;
-  --acento:#F0643C;--acento-azul:#F0643C;--acento-suave:rgba(240,100,60,.13);--azul:#F28B6A;
-  --ok:#7FC79A;--mal:#F07A66;--aviso:#E6B65C;
+/* ===== My Content Clip · Kinetik Print (Editorial Suizo + Estudio Industrial, solo en /clip) ===== */
+body.tema-kinetik{
+  color-scheme:light;
+  --fuente:"Archivo","Segoe UI",system-ui,sans-serif;
+  --titulo:"Archivo","Segoe UI",system-ui,sans-serif;
+  --display:"Barlow Condensed","Archivo",sans-serif;
+  --mono:"IBM Plex Mono",Consolas,monospace;
+  --bg:#F4F1EA;--lateral:#F4F1EA;--panel:#EFECE3;--panel-solid:#F9F7F1;--panel-elev:#E6E2D6;--relleno:#DFDACB;
+  --borde:rgba(17,18,20,.22);--borde-luz:#111214;--fino:rgba(17,18,20,.18);
+  --texto:#111214;--suave:#4E4C46;--tenue:#6E6B62;
+  --acento:#FF4D00;--acento-azul:#FF4D00;--acento-suave:rgba(255,77,0,.11);--azul:#D94200;
+  --volt:#E8FF00;--tinta:#111214;
+  --ok:#0F8A47;--mal:#D92D20;--aviso:#C25E00;
   background:var(--bg);color:var(--texto);font-variant-numeric:tabular-nums
 }
-body.tema-editorial ::selection{background:var(--acento);color:#0C0C0B}
-body.tema-editorial .bot-nav-wrap{border-right:1px solid var(--texto)}
-body.tema-editorial .marca-bot{padding:0 8px 14px;border-bottom:1px solid var(--texto);box-shadow:0 4px 0 -3px var(--bg),0 5px 0 -3px var(--fino)}
-body.tema-editorial .marca-bot img{display:none}
-body.tema-editorial .marca-bot h1{font:800 19px/1.05 var(--titulo);text-transform:uppercase;letter-spacing:-.4px}
-body.tema-editorial .marca-bot h1::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;background:var(--acento);vertical-align:2px}
-body.tema-editorial .marca-bot small{font:500 10.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase;margin-top:4px}
-body.tema-editorial .bot-tab{border-radius:0;text-transform:uppercase;font-size:12.5px;letter-spacing:.7px;border-left:2px solid transparent;color:var(--tenue)}
-body.tema-editorial .bot-tab:hover{background:transparent;color:var(--texto)}
-body.tema-editorial .bot-tab.activa{background:transparent;border-left-color:var(--acento);color:var(--texto)}
-body.tema-editorial .bot-tab .tab-badge{border-radius:0;font-family:var(--mono);background:transparent;border:1px solid var(--borde-luz)}
-body.tema-editorial .bot-tab.activa .tab-badge{background:var(--acento);border-color:var(--acento);color:#0C0C0B}
-body.tema-editorial .salud::before{font:500 10.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase}
-body.tema-editorial .salud-item{border-radius:0}
-body.tema-editorial .bot-encendido{border-top:1px solid var(--texto);display:flex;flex-direction:column;gap:10px}
-body.tema-editorial #titulo-vista{font:800 30px/1.05 var(--titulo);text-transform:uppercase;letter-spacing:-.8px}
-body.tema-editorial header{border-bottom:1px solid var(--fino)}
-body.tema-editorial .card,body.tema-editorial .metricas{background:transparent;border:0;border-top:1px solid var(--texto);border-radius:0;box-shadow:none;padding-left:0;padding-right:0}
-body.tema-editorial .card h2{font:700 13px var(--titulo);text-transform:uppercase;letter-spacing:1.3px}
-body.tema-editorial .card h2::before{content:"§";color:var(--acento);font-family:var(--mono);font-weight:500}
-body.tema-editorial .card h2 i{display:none}
-body.tema-editorial .metrica{border-left:1px solid var(--fino)}
-body.tema-editorial .metrica b{font-family:var(--mono);font-weight:500}
-body.tema-editorial th{font:500 10.5px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--tenue);border-bottom:1px solid var(--texto)}
-body.tema-editorial td{border-bottom-color:var(--fino)}
-body.tema-editorial tr:hover td{background:var(--panel)}
-body.tema-editorial input,body.tema-editorial select,body.tema-editorial textarea{background:transparent;border:0;border-bottom:1px solid var(--borde-luz);border-radius:0;box-shadow:none}
-body.tema-editorial input:focus,body.tema-editorial select:focus,body.tema-editorial textarea:focus{background:transparent;border-bottom-color:var(--acento);box-shadow:0 1px 0 0 var(--acento)}
-body.tema-editorial select option{background:#161614;color:var(--texto)}
-body.tema-editorial .switch input[type=checkbox]{border-radius:0}
-body.tema-editorial .switch input[type=checkbox]::after{border-radius:0}
-body.tema-editorial .switch input[type=checkbox]:checked{background:var(--acento)}
-body.tema-editorial button{border-radius:0;border:1px solid var(--texto);background:transparent;color:var(--texto);text-transform:uppercase;letter-spacing:.7px;font-size:12px;font-weight:600}
-body.tema-editorial button:hover:not(:disabled){background:var(--texto);color:var(--bg)}
-body.tema-editorial button.prim{background:var(--acento);border-color:var(--acento);color:#0C0C0B;box-shadow:none}
-body.tema-editorial button.prim:hover:not(:disabled){background:#FF7A55;border-color:#FF7A55;color:#0C0C0B}
-body.tema-editorial button:focus-visible,body.tema-editorial .bot-tab:focus-visible{outline:1px solid var(--acento);outline-offset:3px}
-body.tema-editorial .chip,body.tema-editorial .est,body.tema-editorial .tab-badge{border-radius:0;font-family:var(--mono);font-size:10.5px;letter-spacing:.5px;text-transform:uppercase}
-body.tema-editorial .chip.on{background:var(--acento-suave);border-color:var(--acento);color:var(--texto)}
-body.tema-editorial .vaso-clip{border-radius:0;border:1px solid var(--borde-luz);box-shadow:none}
-body.tema-editorial .vaso-clip:hover{border-color:var(--texto);transform:none}
-body.tema-editorial .vaso-clip.es-preparado{border-color:var(--acento);box-shadow:none}
-body.tema-editorial .vaso-clip.es-subiendo{border-color:var(--ok);box-shadow:none}
-body.tema-editorial .ahora-bot>img,body.tema-editorial .lado-visor img{border-radius:0;box-shadow:none;border:1px solid var(--borde-luz)}
-body.tema-editorial .ahora-etapas i,body.tema-editorial .ahora-etapas i b,body.tema-editorial .lado-medidor i{border-radius:0}
-body.tema-editorial #lado-bot,body.tema-editorial #lado-regla{border-left:1px solid var(--texto)}
-body.tema-editorial #lado-bot h3,body.tema-editorial #lado-regla h3{font:500 10.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase}
-body.tema-editorial #lado-bot #registro{background:#080807;border-radius:0;border:1px solid var(--fino);color:#CFCABE;font-family:var(--mono)}
-body.tema-editorial .regla-pasos li{border-radius:0;background:transparent;border-top:1px solid var(--fino)}
-body.tema-editorial .regla-pasos i{border-radius:0}
-body.tema-editorial dialog{background:var(--bg);color:var(--texto);border:1px solid var(--texto);border-radius:0;box-shadow:8px 8px 0 var(--fino)}
-body.tema-editorial dialog::backdrop{background:rgba(0,0,0,.72);backdrop-filter:none}
-body.tema-editorial ::-webkit-scrollbar{width:10px;height:10px}
-body.tema-editorial ::-webkit-scrollbar-thumb{background:var(--borde-luz)}
-body.tema-editorial ::-webkit-scrollbar-track{background:var(--bg)}
+body.tema-kinetik ::selection{background:var(--volt);color:var(--tinta)}
+body.tema-kinetik::before,body.tema-kinetik::after{display:none!important}
+/* Marcas técnicas de registro de imprenta en los 4 bordes exteriores */
+.kinetik-marks{display:none}
+body.tema-kinetik .kinetik-marks{display:block;position:fixed;inset:0;pointer-events:none;z-index:45}
+.kinetik-mark{position:fixed;width:20px;height:20px;opacity:.48;background:no-repeat center/22px 22px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111214' stroke-width='1.2'%3E%3Ccircle cx='12' cy='12' r='4.2'/%3E%3Cline x1='12' y1='1' x2='12' y2='23'/%3E%3Cline x1='1' y1='12' x2='23' y2='12'/%3E%3C/svg%3E")}
+.kinetik-mark.m-top{top:3px;left:50%;transform:translateX(-50%)}
+.kinetik-mark.m-bot{bottom:3px;left:50%;transform:translateX(-50%)}
+.kinetik-mark.m-left{left:2px;top:76%;transform:translateY(-50%)}
+.kinetik-mark.m-right{right:3px;top:50%;transform:translateY(-50%)}
+
+/* Navegación izquierda numerada estilo Teenage Engineering / Swiss Grid */
+body.tema-kinetik .bot-nav-wrap{
+  background:var(--bg);border-right:1.5px solid var(--tinta);padding:20px 16px 14px;gap:14px
+}
+body.tema-kinetik .marca-bot{
+  padding:0 2px 14px;border-bottom:1.5px solid var(--tinta);display:block
+}
+body.tema-kinetik .marca-bot img{display:none}
+body.tema-kinetik .marca-bot h1{
+  font:900 22px/1 var(--titulo);text-transform:uppercase;letter-spacing:-.04em;color:var(--tinta)
+}
+body.tema-kinetik .marca-bot small{
+  font:600 10.5px/1.3 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--suave);margin-top:5px
+}
+body.tema-kinetik .bot-tabs{gap:0}
+body.tema-kinetik .bot-tab{
+  position:relative;border-radius:0;border:0;border-bottom:1px solid var(--tinta);
+  padding:11px 8px 11px 14px;min-height:54px;background:transparent;color:var(--suave);
+  flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;text-transform:uppercase;
+  font:700 12.5px/1.15 var(--titulo);letter-spacing:.04em
+}
+body.tema-kinetik .bot-tab::before{
+  content:attr(data-num);font:700 15px/1 var(--mono);color:var(--tinta);letter-spacing:-.02em;display:block
+}
+body.tema-kinetik .bot-tab::after{
+  content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;background:var(--tinta);transition:background .18s ease
+}
+body.tema-kinetik .bot-tab i{display:none}
+body.tema-kinetik .bot-tab:hover{background:rgba(17,18,20,.05);color:var(--tinta)}
+body.tema-kinetik .bot-tab.activa{background:rgba(255,77,0,.08);color:var(--tinta);font-weight:800}
+body.tema-kinetik .bot-tab.activa::before{color:var(--acento)}
+body.tema-kinetik .bot-tab.activa::after{background:var(--acento)}
+body.tema-kinetik .bot-tab .tab-badge{
+  position:absolute;right:6px;top:10px;border-radius:3px;padding:2px 6px;
+  font:600 10.5px var(--mono);background:var(--panel-solid);border:1px solid var(--tinta);color:var(--tinta)
+}
+body.tema-kinetik .bot-tab.activa .tab-badge{background:var(--acento);border-color:var(--acento);color:#FFF}
+body.tema-kinetik .salud::before{font:600 10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--suave);padding-left:2px}
+body.tema-kinetik .salud-item{border:0;border-bottom:1px solid var(--fino);border-radius:0;background:transparent;font:600 11.5px var(--mono);color:var(--tinta);padding:0 4px;min-height:28px}
+body.tema-kinetik .salud-item:hover:not(:disabled){background:rgba(17,18,20,.06);color:var(--tinta)}
+body.tema-kinetik .salud-item b{font:600 11px var(--mono);color:var(--suave)}
+body.tema-kinetik .salud-item.mal b{color:var(--mal)}
+body.tema-kinetik .bot-encendido{border-top:1.5px solid var(--tinta);padding:12px 2px 4px;display:flex;flex-direction:column;gap:9px}
+body.tema-kinetik .bot-encendido .switch{font:600 12.5px var(--mono);text-transform:uppercase;color:var(--tinta)}
+.kinetik-emblema{display:none}
+body.tema-kinetik .kinetik-emblema{display:flex;align-items:center;gap:8px;padding-top:6px;color:var(--tinta);font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;opacity:.72}
+
+/* Cabecera superior estilo plano de estudio */
+body.tema-kinetik header{
+  background:var(--bg);border-bottom:1.5px solid var(--tinta);padding:16px 26px 14px;
+  display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:4px 12px
+}
+body.tema-kinetik #titulo-vista{
+  font:900 30px/1 var(--titulo);text-transform:uppercase;letter-spacing:-.035em;color:var(--tinta)
+}
+body.tema-kinetik #actividad,body.tema-kinetik #actividad b{
+  font:500 12.5px var(--mono);color:var(--suave);background:none;border:0;padding:0
+}
+.kinetik-header-meta{display:none}
+body.tema-kinetik .kinetik-header-meta{
+  display:inline-flex;align-items:center;gap:12px;grid-row:1 / span 2;align-self:center
+}
+.kinetik-readout{
+  font:600 13px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--tinta);
+  white-space:nowrap
+}
+body.tema-kinetik .kinetik-cta-top{
+  background:var(--acento);border:1.5px solid var(--acento);color:#FFF;border-radius:6px;
+  padding:0 18px;min-height:40px;font:700 13.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  box-shadow:none
+}
+body.tema-kinetik .kinetik-cta-top:hover:not(:disabled){background:#E04300;border-color:#E04300;color:#FFF}
+
+/* Contenedores, tarjetas y métricas */
+body.tema-kinetik main{background:var(--bg);padding:16px 26px 28px}
+body.tema-kinetik .card{
+  background:transparent;border:0;border-top:1.5px solid var(--tinta);border-radius:0;box-shadow:none;
+  padding:16px 0 6px
+}
+body.tema-kinetik .card h2{
+  font:800 13.5px/1.2 var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--tinta);margin-bottom:12px
+}
+body.tema-kinetik .card h2 small{font:500 11.5px var(--mono);color:var(--suave);text-transform:none;letter-spacing:0}
+body.tema-kinetik .card h2 i{color:var(--acento)}
+body.tema-kinetik .metricas{
+  background:var(--panel-solid);border:1.5px solid var(--tinta);border-radius:8px;box-shadow:none
+}
+body.tema-kinetik .metrica{border-left:1px solid var(--tinta);background:transparent}
+body.tema-kinetik .metrica:first-child{border-left:0}
+body.tema-kinetik .metrica b{font:700 22px var(--mono);color:var(--tinta)}
+body.tema-kinetik .metrica span{font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--suave)}
+
+/* Botones, campos, tablas, switches y chips */
+body.tema-kinetik button{
+  border-radius:6px;border:1.5px solid var(--tinta);background:var(--panel-solid);color:var(--tinta);
+  font:700 12px var(--mono);letter-spacing:.05em;text-transform:uppercase;box-shadow:none
+}
+body.tema-kinetik button:hover:not(:disabled){background:var(--tinta);color:var(--bg)}
+body.tema-kinetik button.prim{
+  background:var(--acento);border-color:var(--acento);color:#FFF;box-shadow:none
+}
+body.tema-kinetik button.prim:hover:not(:disabled){background:#E04300;border-color:#E04300;color:#FFF}
+body.tema-kinetik button.peligro{border-color:var(--mal);color:var(--mal);background:transparent}
+body.tema-kinetik button.peligro:hover:not(:disabled){background:var(--mal);color:#FFF}
+body.tema-kinetik input,body.tema-kinetik select,body.tema-kinetik textarea{
+  background:var(--panel-solid);border:1.5px solid var(--tinta);border-radius:6px;color:var(--tinta);
+  font-family:var(--fuente);box-shadow:none
+}
+body.tema-kinetik input::placeholder,body.tema-kinetik textarea::placeholder{color:var(--tenue)}
+body.tema-kinetik input:focus,body.tema-kinetik select:focus,body.tema-kinetik textarea:focus{
+  border-color:var(--acento);box-shadow:0 0 0 2px rgba(255,77,0,.22);outline:none
+}
+body.tema-kinetik select option{background:var(--panel-solid);color:var(--tinta)}
+body.tema-kinetik label{color:var(--tinta);font:600 12px var(--mono);text-transform:uppercase;letter-spacing:.04em}
+body.tema-kinetik .muted,body.tema-kinetik .ayuda{color:var(--suave)}
+body.tema-kinetik a{color:#C83B00}
+body.tema-kinetik .switch input[type=checkbox]{background:var(--relleno);border:1.5px solid var(--tinta);border-radius:4px}
+body.tema-kinetik .switch input[type=checkbox]::after{background:var(--tinta);border-radius:2px}
+body.tema-kinetik .switch input[type=checkbox]:checked{background:var(--acento);border-color:var(--acento)}
+body.tema-kinetik .switch input[type=checkbox]:checked::after{background:#FFF}
+body.tema-kinetik .chip{
+  border-radius:4px;border:1.5px solid var(--tinta);background:var(--panel-solid);color:var(--tinta);
+  font:600 11.5px var(--mono);text-transform:uppercase
+}
+body.tema-kinetik .chip.on{background:var(--tinta);color:var(--volt);border-color:var(--tinta)}
+body.tema-kinetik .est{
+  border-radius:4px;border:1px solid var(--tinta);font:700 10.5px var(--mono);letter-spacing:.05em;text-transform:uppercase
+}
+body.tema-kinetik .e-ok{background:#DCFCE7;color:#0F5132;border-color:#0F8A47}
+body.tema-kinetik .e-mal{background:#FEE2E2;color:#991B1B;border-color:#D92D20}
+body.tema-kinetik .e-aviso{background:var(--volt);color:var(--tinta);border-color:var(--tinta)}
+body.tema-kinetik .e-info{background:var(--panel-elev);color:var(--tinta);border-color:var(--tinta)}
+body.tema-kinetik th{font:700 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tinta);border-bottom:1.5px solid var(--tinta)}
+body.tema-kinetik td{border-bottom:1px solid var(--fino);color:var(--tinta)}
+body.tema-kinetik tr:hover td{background:var(--panel)}
+body.tema-kinetik .grupo-edicion{border:1.5px solid var(--tinta);border-radius:8px;background:var(--panel-solid)}
+body.tema-kinetik .grupo-edicion>summary{background:var(--panel);color:var(--tinta);font:700 12.5px var(--mono);text-transform:uppercase;border-bottom:1px solid var(--fino)}
+body.tema-kinetik .grupo-edicion>summary .sub{color:var(--suave);font-weight:500;text-transform:none}
+body.tema-kinetik .ayuda-plegable{border:1px dashed var(--tinta);border-radius:6px;background:var(--panel)}
+body.tema-kinetik .ayuda-plegable>summary{color:var(--tinta)}
+body.tema-kinetik .cuenta-panel{background:var(--panel-solid);border:1.5px solid var(--tinta);border-radius:10px;box-shadow:none}
+body.tema-kinetik .cuenta-panel h3{color:var(--tinta)}
+body.tema-kinetik .cuenta-panel .proximo{background:var(--bg);border:1.5px solid var(--tinta);border-radius:8px}
+body.tema-kinetik .regla-fila{border-top:1px solid var(--tinta)}
+body.tema-kinetik .regla-fila:hover{background:var(--panel)}
+body.tema-kinetik .regla-fila.sel{background:rgba(255,77,0,.10)}
+body.tema-kinetik .regla-abrir{color:var(--tinta)}
+body.tema-kinetik .regla-abrir b{color:var(--tinta)}
+body.tema-kinetik .regla-abrir small{color:var(--suave)}
+body.tema-kinetik .atencion-item{background:var(--panel-solid);border:1.5px solid var(--tinta);border-radius:8px}
+body.tema-kinetik .ahora-bot{background:var(--panel-solid);border:1.5px solid var(--tinta);border-radius:10px;padding:16px}
+body.tema-kinetik .ahora-bot h3{color:var(--tinta)}
+body.tema-kinetik .ahora-bot>img{border-radius:6px;border:1.5px solid var(--tinta);box-shadow:none}
+body.tema-kinetik .ahora-etapas i,body.tema-kinetik .ahora-etapas i b{border-radius:2px}
+body.tema-kinetik .ahora-etapas i{background:var(--relleno);border:1px solid var(--tinta)}
+body.tema-kinetik .ahora-etapas i b{background:var(--acento)}
+
+/* === TARJETAS DE CLIPS 9:16 KINETIK PRINT (exactas a Tarjeta 1 y 2 de la maqueta) === */
+body.tema-kinetik .vasos-grid{gap:18px;padding-top:16px}
+body.tema-kinetik .vasos-cola-grid{gap:16px;padding:18px 6px 10px 2px}
+body.tema-kinetik .vasos-cola-grid>*{flex:0 0 206px}
+body.tema-kinetik .vaso-clip{
+  position:relative;aspect-ratio:auto;display:flex;flex-direction:column;
+  background:var(--bg);border:1.5px solid var(--tinta);border-radius:10px;
+  padding:10px 10px 9px;overflow:visible;box-shadow:none;cursor:pointer;
+  transition:transform .16s ease,box-shadow .16s ease
+}
+body.tema-kinetik .vaso-clip:hover{transform:translateY(-2px);box-shadow:4px 4px 0 var(--tinta)}
+body.tema-kinetik .vaso-clip.es-seleccionado{box-shadow:4px 4px 0 var(--acento);border-color:var(--acento)}
+body.tema-kinetik .vaso-clip.es-subiendo,body.tema-kinetik .vaso-clip.es-preparado{border-color:var(--tinta);box-shadow:none}
+body.tema-kinetik .vaso-clip.es-subiendo:hover,body.tema-kinetik .vaso-clip.es-preparado:hover{box-shadow:4px 4px 0 var(--tinta)}
+.vaso-kinetik-idx,.vaso-kinetik-head,.vaso-kinetik-foot,.vaso-kinetik-sticker,.kinetik-stairs{display:none}
+.vaso-kinetik-stage{display:contents}
+body.tema-kinetik .vaso-kinetik-idx{
+  display:block;position:absolute;top:-19px;left:2px;font:600 11px var(--mono);color:var(--tinta)
+}
+body.tema-kinetik .vaso-kinetik-head{
+  display:flex;align-items:center;justify-content:space-between;gap:6px;
+  padding:0 2px 7px;margin-bottom:8px;border-bottom:1px solid var(--tinta);
+  font:700 13.5px/1.1 var(--mono);letter-spacing:.03em;text-transform:uppercase;color:var(--tinta)
+}
+body.tema-kinetik .vaso-kinetik-head .k-arr{color:var(--acento);font-weight:800}
+body.tema-kinetik .vaso-clip.es-preparado .vaso-kinetik-head .k-arr{color:var(--tinta)}
+body.tema-kinetik .vaso-kinetik-stage{
+  display:block;position:relative;aspect-ratio:9/14.2;width:100%;border-radius:6px;overflow:hidden;
+  background:#1A1B1E;border:1px solid rgba(17,18,20,.28)
+}
+body.tema-kinetik .vaso-kinetik-stage .vaso-poster,
+body.tema-kinetik .vaso-kinetik-stage .vaso-video-local{
+  position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:0
+}
+/* Onda escalonada naranja internacional (#FF4D00) estilo medidor cinético */
+body.tema-kinetik .vaso-brillo{display:none}
+body.tema-kinetik .vaso-burbujas{display:none!important}
+body.tema-kinetik .vaso-flujo-subida{
+  z-index:2;
+  background:linear-gradient(0deg,rgba(255,77,0,.22) 0%,rgba(255,77,0,0) 45%);
+  animation:flujoSubidaKinetik 2.6s ease-in-out infinite
+}
+@keyframes flujoSubidaKinetik{0%,100%{opacity:.45;transform:translateY(6%)}50%{opacity:.9;transform:translateY(-4%)}}
+body.tema-kinetik .vaso-liquido{
+  background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  border-top:0;z-index:2;overflow:visible;pointer-events:none;
+  display:flex;align-items:flex-end
+}
+body.tema-kinetik .vaso-liquido .vaso-olas{display:none}
+.kinetik-stairs{display:none}
+body.tema-kinetik .kinetik-stairs{
+  display:block;width:100%;height:100%;opacity:.96;
+  animation:pasoKinetik 2.2s ease-in-out infinite
+}
+body.tema-kinetik .vaso-clip.es-preparado .kinetik-stairs{opacity:.88;animation:pasoKinetikSuave 3.0s ease-in-out infinite}
+@keyframes pasoKinetik{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes pasoKinetikSuave{0%,100%{transform:translateY(2px);opacity:.78}50%{transform:translateY(-2px);opacity:.95}}
+/* Sticker de calificación troquelado e inclinado rompiendo la esquina superior derecha */
+body.tema-kinetik .vaso-kinetik-sticker{
+  display:block;position:absolute;top:36px;right:-6px;z-index:6;transform:rotate(7deg);pointer-events:auto
+}
+body.tema-kinetik .vaso-centro button.mini.prim{display:none}
+body.tema-kinetik .nota-video{
+  border-radius:5px;font:800 12px/1.1 var(--mono);letter-spacing:.03em;padding:5px 9px;
+  text-transform:uppercase;box-shadow:2px 2px 0 rgba(17,18,20,.55)
+}
+body.tema-kinetik .nota-video.nivel-viral{
+  background:var(--tinta);color:var(--volt);border:1.5px solid var(--tinta)
+}
+body.tema-kinetik .nota-video.nivel-alta{
+  background:var(--tinta);color:var(--volt);border:2px solid var(--volt);
+  box-shadow:0 0 0 1px var(--tinta),3px 3px 0 rgba(17,18,20,.45)
+}
+body.tema-kinetik .nota-video.nivel-media{
+  background:var(--volt);color:var(--tinta);border:1.5px solid var(--tinta)
+}
+body.tema-kinetik .nota-video.nivel-baja{
+  background:var(--panel-solid);color:var(--acento);border:1.5px solid var(--tinta)
+}
+body.tema-kinetik .vaso-capa{
+  position:absolute;inset:0;z-index:4;padding:8px;justify-content:flex-end;pointer-events:none;background:none!important
+}
+body.tema-kinetik .vaso-clip.es-preparado .vaso-liquido{height:12%!important;background:transparent!important}
+body.tema-kinetik .vaso-clip.es-subiendo .vaso-flujo-subida{background:linear-gradient(0deg,rgba(255,77,0,.12) 0%,rgba(255,77,0,0) 35%)}
+body.tema-kinetik .vaso-capa button{pointer-events:auto}
+body.tema-kinetik .vaso-kinetik-top-orig{display:none!important}
+body.tema-kinetik .vaso-centro{
+  margin:auto 0;gap:6px
+}
+body.tema-kinetik .vaso-play{
+  width:38px;height:38px;border-radius:6px;background:rgba(17,18,20,.82);color:var(--volt);
+  border:1.5px solid var(--volt);backdrop-filter:none;font-size:15px
+}
+body.tema-kinetik .vaso-play:hover:not(:disabled){background:var(--acento);color:#FFF;border-color:var(--tinta)}
+body.tema-kinetik .vaso-pct{
+  font:800 22px var(--mono);color:#FFF;text-shadow:0 2px 6px rgba(0,0,0,.85)
+}
+body.tema-kinetik .vaso-etapa{
+  display:inline-block;background:rgba(17,18,20,.78);color:#F4F1EA;padding:2px 7px;border-radius:3px;
+  font:600 10px var(--mono);letter-spacing:.03em;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+body.tema-kinetik .vaso-pie{display:none}
+.vaso-kinetik-foot{display:none}
+body.tema-kinetik .vaso-kinetik-foot{
+  display:flex;flex-direction:column;gap:5px;padding-top:8px;color:var(--tinta)
+}
+body.tema-kinetik .vaso-kinetik-specs{
+  display:flex;align-items:center;justify-content:space-between;gap:6px;
+  font:600 11px/1.2 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--tinta)
+}
+body.tema-kinetik .vaso-kinetik-title{
+  font:700 12px/1.25 var(--fuente);color:var(--tinta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+body.tema-kinetik .vaso-kinetik-foot .k-btn-up{
+  width:100%;min-height:28px;padding:3px 8px;font:700 10.5px var(--mono);border-radius:4px
+}
+body.tema-kinetik .vaso-cerrar{
+  position:static;width:20px;height:20px;min-height:20px;padding:0;
+  border-radius:4px;background:var(--tinta);color:#FFF;border:1px solid var(--tinta);font-size:10px;
+  display:inline-flex;align-items:center;justify-content:center
+}
+
+/* Filas de publicaciones detalladas y miniaturas compactas en Kinetik Print */
+body.tema-kinetik #subidas .publicacion,body.tema-kinetik #subidas-publicadas .publicacion{
+  border-top:1px solid var(--tinta);background:transparent
+}
+body.tema-kinetik .publicacion-resumen:hover{background:var(--panel)}
+body.tema-kinetik .publicacion-resumen h3{color:var(--tinta);font-weight:700}
+body.tema-kinetik .publicacion-resumen-meta{color:var(--suave);font-family:var(--mono);font-size:11.5px}
+body.tema-kinetik .publicacion-cuerpo{background:var(--panel-solid);border-top:1px solid var(--tinta)}
+body.tema-kinetik .publicacion-barra-subida{background:var(--relleno);height:4px;border-radius:0}
+body.tema-kinetik .publicacion-barra-subida>i{background:var(--acento)}
+body.tema-kinetik .clip-thumb-box{
+  border-radius:6px;border:1.5px solid var(--tinta);box-shadow:2px 2px 0 rgba(17,18,20,.25);background:#18191B
+}
+body.tema-kinetik .clip-thumb-liquido{background:rgba(255,77,0,.78)!important}
+body.tema-kinetik .clip-thumb-estado{background:var(--tinta);color:var(--volt);border-color:var(--tinta);border-radius:3px;font-family:var(--mono)}
+body.tema-kinetik .live-seg-card{border:1.5px solid var(--tinta);border-radius:6px;background:#1A1B1E}
+body.tema-kinetik .live-seg-badge{background:var(--tinta);color:var(--volt);border-radius:3px;font-family:var(--mono)}
+
+/* === PANEL DERECHO (TARJETA 3: VISOR 9:16 + REGLA DE TIEMPO + SCRUBBER) === */
+body.tema-kinetik #lado-bot,body.tema-kinetik #lado-regla{
+  background:var(--bg);border-left:1.5px solid var(--tinta);padding:18px 18px 20px
+}
+body.tema-kinetik #lado-bot h3,body.tema-kinetik #lado-regla h3{
+  font:700 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--suave);margin-bottom:10px
+}
+body.tema-kinetik .lado-kinetik-frame{
+  position:relative;border:1.5px solid var(--tinta);border-radius:10px;padding:12px 14px 12px;
+  background:var(--bg);margin-bottom:10px
+}
+body.tema-kinetik .lado-kinetik-frame .lado-k-idx{
+  position:absolute;top:6px;left:9px;font:600 11px var(--mono);color:var(--tinta)
+}
+body.tema-kinetik .lado-visor{
+  position:relative;width:100%;max-width:244px;margin:6px auto 0;border-radius:8px;overflow:hidden;
+  border:2px solid var(--tinta);background:#111214;aspect-ratio:9/16
+}
+body.tema-kinetik .lado-visor video,body.tema-kinetik .lado-visor img{
+  display:block;width:100%;height:100%;object-fit:cover;border-radius:0;box-shadow:none;border:0
+}
+body.tema-kinetik .lado-visor-play{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(17,18,20,.16);border:0;border-radius:0;color:var(--volt);cursor:pointer;
+  transition:opacity .18s ease,background .18s ease
+}
+body.tema-kinetik .lado-visor-play span{
+  width:46px;height:46px;border-radius:8px;background:rgba(17,18,20,.84);border:1.5px solid var(--volt);
+  display:inline-flex;align-items:center;justify-content:center;font-size:19px
+}
+body.tema-kinetik .lado-visor-play:hover{background:rgba(255,77,0,.22)}
+body.tema-kinetik .lado-visor-play.oculto{opacity:0;pointer-events:none}
+/* Regla calibrada + timecodes + scrubber táctil igual a Tarjeta 3 de la maqueta */
+.lado-ruler{margin:10px 0 8px}
+.lado-ruler-ticks{
+  height:10px;width:100%;
+  background:repeating-linear-gradient(90deg,var(--tinta) 0 1px,transparent 1px 10%),
+             repeating-linear-gradient(90deg,var(--tinta) 0 1px,transparent 1px 2.5%);
+  background-size:100% 10px,100% 5px;background-repeat:no-repeat;background-position:top left,top left
+}
+.lado-ruler-times{
+  display:flex;justify-content:space-between;font:600 10.5px var(--mono);color:var(--tinta);margin-top:4px
+}
+.lado-scrubber-row{
+  display:flex;align-items:center;gap:8px;margin-top:6px
+}
+body.tema-kinetik .lado-scrubber-row button{
+  width:24px;height:24px;min-height:24px;padding:0;border-radius:4px;font-size:10px;
+  display:inline-flex;align-items:center;justify-content:center;flex:none
+}
+.lado-scrubber-row input[type=range]{
+  flex:1;appearance:none;-webkit-appearance:none;height:2px;background:var(--tinta);border:0;padding:0;margin:0;cursor:pointer
+}
+.lado-scrubber-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:10px;height:16px;border-radius:3px;background:var(--tinta);border:1.5px solid var(--bg);cursor:pointer
+}
+body.tema-kinetik .lado-titulo{color:var(--tinta);font:700 13.5px/1.3 var(--fuente);margin:8px 0 6px}
+body.tema-kinetik .lado-datos dt{font:600 11px var(--mono);text-transform:uppercase;color:var(--suave)}
+body.tema-kinetik .lado-datos dd{font:600 12px var(--mono);color:var(--tinta)}
+body.tema-kinetik .lado-medidor span{font:600 11.5px var(--mono);color:var(--tinta)}
+body.tema-kinetik .lado-medidor i{border-radius:2px;background:var(--relleno);border:1px solid var(--tinta);height:6px}
+body.tema-kinetik .lado-medidor i b{background:var(--acento)}
+body.tema-kinetik #lado-bot #registro{
+  background:var(--tinta);border-radius:6px;border:1.5px solid var(--tinta);color:#E9E5D8;
+  font:500 11.5px/1.45 var(--mono);padding:10px
+}
+body.tema-kinetik .regla-pasos li{border-radius:6px;background:var(--panel-solid);border:1px solid var(--tinta);color:var(--tinta)}
+body.tema-kinetik .regla-pasos i{border-radius:4px;background:var(--tinta);color:var(--volt)}
+body.tema-kinetik dialog{background:var(--bg);color:var(--tinta);border:2px solid var(--tinta);border-radius:10px;box-shadow:8px 8px 0 rgba(17,18,20,.88)}
+body.tema-kinetik dialog::backdrop{background:rgba(17,18,20,.56);backdrop-filter:none}
+body.tema-kinetik #vista-rapida-titulo{color:var(--tinta)!important;font-family:var(--titulo)!important;font-weight:800!important}
+body.tema-kinetik #toast{background:var(--tinta);color:var(--volt);border:1.5px solid var(--tinta);border-radius:6px;font:600 12.5px var(--mono)}
+body.tema-kinetik ::-webkit-scrollbar{width:9px;height:9px}
+body.tema-kinetik ::-webkit-scrollbar-thumb{background:rgba(17,18,20,.32);border-radius:4px}
+body.tema-kinetik ::-webkit-scrollbar-track{background:var(--panel)}
+/* Compatibilidad total con modo ligero 4 GB RAM sin oscurecer el papel marfil */
+body.tema-kinetik.modo-ligero-ram header,
+body.tema-kinetik.modo-ligero-ram .bot-nav-wrap,
+body.tema-kinetik.modo-ligero-ram #lado-bot,
+body.tema-kinetik.modo-ligero-ram #lado-regla{background:var(--bg)!important}
+body.tema-kinetik.modo-ligero-ram .card{background:transparent!important;box-shadow:none!important}
+body.tema-kinetik.modo-ligero-ram .metrica{background:transparent!important;box-shadow:none!important}
 body.app-clip .volver-app{display:none}
+
 </style>
 </head>
-<body class="{{ 'app-clip tema-editorial' if app_clip else '' }}">
+<body class="{{ 'app-clip tema-kinetik' if app_clip else '' }}">
+<div class="kinetik-marks" aria-hidden="true"><i class="kinetik-mark m-top"></i><i class="kinetik-mark m-bot"></i><i class="kinetik-mark m-left"></i><i class="kinetik-mark m-right"></i></div>
 <header>
   <h2 id="titulo-vista">Cola y actividad</h2>
   <span id="badge-ram-ligero" class="est e-ok" hidden title="Modo optimizado para 4 GB de RAM: menos uso de GPU, navegador ligero y miniaturas secuenciales">⚡ Modo ligero 4 GB</span>
   <div id="actividad">Cargando…</div>
+  <div class="kinetik-header-meta"><span class="kinetik-readout" id="kinetik-readout">COLA 00 · 1080P · LISTO</span><button type="button" class="kinetik-cta-top" onclick="lanzarSubidasGuardadas()">PUBLICAR</button></div>
   <button type="button" id="btn-bot-inmersivo" class="solo-embed" onclick="alternarModoInmersivoBot()" title="Ocultar o mostrar la barra lateral del programa">
     <i class="ph ph-corners-out"></i> <span id="lbl-bot-inmersivo">Ampliar vista</span>
   </button>
@@ -748,25 +1091,26 @@ body.app-clip .volver-app{display:none}
 <div class="bot-nav-wrap">
   <div class="marca-bot"><img src="/static/icons/bot.svg" width="32" height="32" alt=""><div><h1>{{ 'My Content Clip' if app_clip else 'Bot de subida' }}</h1><small>{{ 'Clips · Lives · Subida' if app_clip else 'My Content' }}</small></div></div>
   <nav class="bot-tabs" aria-label="Secciones del bot">
-    <button type="button" class="bot-tab activa" data-vista="cola" onclick="cambiarPestanaBot('cola')">
+    <button type="button" class="bot-tab activa" data-num="01" data-vista="cola" onclick="cambiarPestanaBot('cola')">
       <i class="ph-duotone ph-queue"></i> Cola y actividad <span class="tab-badge" id="badge-cola">0</span>
     </button>
-    <button type="button" class="bot-tab" data-vista="anadir" onclick="cambiarPestanaBot('anadir')">
+    <button type="button" class="bot-tab" data-num="02" data-vista="anadir" onclick="cambiarPestanaBot('anadir')">
       <i class="ph-duotone ph-plus-circle"></i> Añadir videos
     </button>
-    <button type="button" class="bot-tab" data-vista="cuentas" onclick="cambiarPestanaBot('cuentas')">
+    <button type="button" class="bot-tab" data-num="03" data-vista="cuentas" onclick="cambiarPestanaBot('cuentas')">
       <i class="ph-duotone ph-users-three"></i> Cuentas y reglas <span class="tab-badge" id="badge-cuentas">0</span>
     </button>
-    <button type="button" class="bot-tab" data-vista="edicion" onclick="cambiarPestanaBot('edicion')">
+    <button type="button" class="bot-tab" data-num="04" data-vista="edicion" onclick="cambiarPestanaBot('edicion')">
       <i class="ph-duotone ph-magic-wand"></i> Edición IA
     </button>
-    <button type="button" class="bot-tab" data-vista="sistema" onclick="cambiarPestanaBot('sistema')">
+    <button type="button" class="bot-tab" data-num="05" data-vista="sistema" onclick="cambiarPestanaBot('sistema')">
       <i class="ph-duotone ph-cpu"></i> Ritmo, Colab y avisos
     </button>
   </nav>
   <div class="salud" id="salud" aria-label="Estado del bot"></div>
   <div class="bot-encendido"><label class="switch"><input type="checkbox" id="activo" onchange="cfg({activo:this.checked})"> Bot encendido</label>
-    <label class="switch" title="El bot edita y guarda los clips, pero no publica solo. Cada clip sale cuando pulses ↑ Subir ahora."><input type="checkbox" id="subida_manual" onchange="cambiarSubidaManual(this.checked)"> ✋ Subida manual</label></div>
+    <label class="switch" title="El bot edita y guarda los clips, pero no publica solo. Cada clip sale cuando pulses ↑ Subir ahora."><input type="checkbox" id="subida_manual" onchange="cambiarSubidaManual(this.checked)"> ✋ Subida manual</label>
+    <div class="kinetik-emblema"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 19L11 5h4l-3 7 7 3v4l-9-3-1.5 3H5z"/></svg><span>KINETIK STUDIO</span></div></div>
 </div>
 
 <main>
@@ -855,13 +1199,14 @@ body.app-clip .volver-app{display:none}
               <div><label for="ed-upscale">Nitidez / escalado</label><select id="ed-upscale"><option value="off">Automático limpio</option><option value="sharpen">Nitidez suave</option><option value="hd">Realzado HD</option><option value="ia">Real-ESRGAN IA (GPU)</option></select></div>
               <div><label for="ed-miniatura">Miniatura 9:16 editada con frase</label><select id="ed-miniatura"><option value="off">Sin miniatura extra</option><option value="cover_and_jpg">Portada en video + JPG con frase</option><option value="jpg_only">Solo imagen JPG con frase</option></select></div>
               <div><label for="ed-miniatura-motor">Cómo crear la portada</label><select id="ed-miniatura-motor"><option value="clasico">Clásica · fotograma del clip con fondo suave</option><option value="qwen">IA nueva · escena con los mismos personajes (Colab GPU)</option></select></div>
+              <div><label for="ed-miniatura-estilo">Estilo visual de miniatura</label><select id="ed-miniatura-estilo"><option value="kinetik">Kinetik Print · cinta ácida editorial</option><option value="clasico">Clásico · texto amarillo con borde</option></select></div>
               <div><label for="ed-borrar-meta">Limpieza de metadatos</label><select id="ed-borrar-meta"><option value="si">Borrar metadatos del MP4 (activo)</option><option value="no">Conservar metadatos</option></select></div>
               <div><label for="ed-hashtags">Hashtags automáticos</label><select id="ed-hashtags"><option value="si">Añadir hashtags de la IA</option><option value="no">Sin hashtags</option></select></div>
               <div><label for="ed-subs">Subtítulos</label><select id="ed-subs" onchange="vistaSubtitulos()"><option value="si">Activados</option><option value="no">Desactivados</option></select></div>
               <div><label for="ed-estilo">Estilo de subtítulos</label><select id="ed-estilo" onchange="vistaSubtitulos()">
-                <option value="karaoke">Karaoke</option><option value="una_palabra">Una palabra</option><option value="pop_art">Pop Art</option><option value="resaltador">Resaltador</option><option value="bubblegum">Bubblegum</option><option value="caja_frase">Frase con fondo</option><option value="neon">Neón</option><option value="terror">Terror</option><option value="cuento">Cuento</option><option value="documental">Documental</option><option value="noticias">Noticias</option><option value="minimal">Minimal</option>
+                <option value="kinetik">Kinetik Editorial (cinta ácida)</option><option value="karaoke">Karaoke</option><option value="una_palabra">Una palabra</option><option value="pop_art">Pop Art</option><option value="resaltador">Resaltador</option><option value="bubblegum">Bubblegum</option><option value="caja_frase">Frase con fondo</option><option value="neon">Neón</option><option value="terror">Terror</option><option value="cuento">Cuento</option><option value="documental">Documental</option><option value="noticias">Noticias</option><option value="minimal">Minimal</option>
               </select></div>
-              <div><label for="ed-fuente">Fuente</label><select id="ed-fuente"><option value="">La del estilo</option><option value="montserrat">Montserrat</option><option value="anton">Anton</option><option value="bebas">Bebas Neue</option><option value="poppins">Poppins</option><option value="bangers">Bangers</option><option value="playfair">Playfair Display</option><option value="nunito">Nunito</option></select></div>
+              <div><label for="ed-fuente">Fuente</label><select id="ed-fuente"><option value="">La del estilo</option><option value="barlow_cond">Barlow Condensed (Kinetik)</option><option value="archivo_black">Archivo Black (editorial)</option><option value="montserrat">Montserrat</option><option value="anton">Anton</option><option value="bebas">Bebas Neue</option><option value="poppins">Poppins</option><option value="bangers">Bangers</option><option value="playfair">Playfair Display</option><option value="nunito">Nunito</option></select></div>
               <div><label for="ed-escala">Tamaño subtítulos (%)</label><input id="ed-escala" type="number" min="50" max="150" value="100"></div>
             </div>
             <div class="fila" style="margin-top:10px">
@@ -1582,6 +1927,11 @@ function pintar() {
   const rt = E.resumen.trabajos || {};
   if (typeof pintarTrabajos === 'function') pintarTrabajos(E.trabajos || [], rt);
   if ($('badge-cola')) $('badge-cola').textContent = String((rs.pendiente || 0) + (rt.pendiente || 0));
+  if ($('kinetik-readout')) {
+    const qn = String((rs.pendiente || 0) + (rs.subiendo || 0)).padStart(2, '0');
+    const estTop = (rs.subiendo || 0) ? 'SUBIENDO' : (c.activo ? 'LISTO' : 'PAUSA');
+    $('kinetik-readout').textContent = `COLA ${qn} · 1080P · ${estTop}`;
+  }
   if ($('badge-cuentas')) $('badge-cuentas').textContent = String((E.cuentas || []).length);
   const reg = $('registro'), abajo = reg.scrollTop + reg.clientHeight >= reg.scrollHeight - 20;
   reg.textContent = E.registro.join('\n');
@@ -1667,17 +2017,96 @@ function pintarAhora() {
     <p class="ahora-nota">${etapa === 2 ? 'Esperando que ' + esc({tiktok:'TikTok',youtube:'YouTube',facebook:'Facebook'}[s.plataforma] || 'la plataforma') + ' confirme. ' : ''}Todavía no está publicado.</p></div>`;
   if (el.dataset.firma !== html) { el.innerHTML = html; el.dataset.firma = html; }
 }
+let clipLadoSeleccionado = null;
+function seleccionarClipLado(id) {
+  clipLadoSeleccionado = Number(id) || null;
+  pintarLado();
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('#vasos-preparados .vaso-clip[data-subida]').forEach(el => {
+      el.classList.toggle('es-seleccionado', Number(el.dataset.subida) === clipLadoSeleccionado);
+    });
+  }
+}
+function fmtTimecodeKinetik(seg) {
+  const s = Math.max(0, Math.floor(Number(seg) || 0));
+  const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+function controlarVideoLado(op, val) {
+  const vid = $('lado-video'), playBtn = $('lado-play-btn'), scrub = $('lado-scrubber'), tNow = $('lado-t-now');
+  if (!vid) return;
+  if (op === 'toggle') {
+    if (vid.paused) { vid.play().catch(() => {}); if (playBtn) playBtn.classList.add('oculto'); }
+    else { vid.pause(); if (playBtn) playBtn.classList.remove('oculto'); }
+  } else if (op === 'step') {
+    const dur = Number.isFinite(vid.duration) && vid.duration > 0 ? vid.duration : 60;
+    vid.currentTime = Math.max(0, Math.min(dur, (vid.currentTime || 0) + Number(val || 0)));
+  } else if (op === 'seek') {
+    const dur = Number.isFinite(vid.duration) && vid.duration > 0 ? vid.duration : Number(scrub?.max || 60);
+    vid.currentTime = Math.max(0, Math.min(dur, Number(val || 0)));
+    if (tNow) tNow.textContent = fmtTimecodeKinetik(vid.currentTime);
+  }
+}
+function enlazarVideoLado() {
+  const vid = $('lado-video'), scrub = $('lado-scrubber'), tNow = $('lado-t-now'), tMid = $('lado-t-mid'), tEnd = $('lado-t-end'), playBtn = $('lado-play-btn');
+  if (!vid || vid.dataset.bound === '1') return;
+  vid.dataset.bound = '1';
+  vid.addEventListener('loadedmetadata', () => {
+    const dur = Number.isFinite(vid.duration) && vid.duration > 0 ? vid.duration : 60;
+    if (scrub) scrub.max = String(Math.max(1, Math.round(dur)));
+    if (tMid) tMid.textContent = fmtTimecodeKinetik(dur / 2);
+    if (tEnd) tEnd.textContent = fmtTimecodeKinetik(dur);
+  });
+  vid.addEventListener('timeupdate', () => {
+    if (scrub) scrub.value = String(Math.floor(vid.currentTime || 0));
+    if (tNow) tNow.textContent = fmtTimecodeKinetik(vid.currentTime || 0);
+  });
+  vid.addEventListener('pause', () => { if (playBtn) playBtn.classList.remove('oculto'); });
+  vid.addEventListener('play', () => { if (playBtn) playBtn.classList.add('oculto'); });
+}
 function pintarLado() {
   const clip = $('lado-clip'), cuentas = $('lado-cuentas');
   if (!clip || !cuentas || !E) return;
-  const s = (E.subidas || []).find(x => x.estado === 'pendiente');
+  const subidas = E.subidas || [];
+  const s = (clipLadoSeleccionado && subidas.find(x => Number(x.id) === clipLadoSeleccionado && x.archivo_existe !== false))
+    || subidas.find(x => x.estado === 'subiendo')
+    || subidas.find(x => x.estado === 'pendiente');
   const nombre = id => (E.cuentas || []).find(c => c.id === id)?.nombre || '';
-  const htmlClip = s ? `<h3>Próximo clip</h3><div class="lado-visor"><img src="/api/bot/miniatura/${Number(s.id)}" alt="Portada del próximo clip"></div>
-    <b class="lado-titulo">${esc(String(s.texto || '').split('\n')[0] || `Clip #${s.id}`)}</b>
-    ${typeof insigniaCalificacion === 'function' ? insigniaCalificacion(s) : ''}
-    <dl class="lado-datos"><dt>Cuenta</dt><dd>${esc(s.cuenta_nombre || nombre(s.cuenta_id))}</dd><dt>Preset</dt><dd>${esc(s.preset || 'Sin registrar')}</dd><dt>Turno</dt><dd>${esc(s.espera || 'Sin hora estimada')}</dd></dl>`
-    : '<h3>Próximo clip</h3><p class="muted">No hay clips pendientes.</p>';
-  if (clip.dataset.firma !== htmlClip) { clip.innerHTML = htmlClip; clip.dataset.firma = htmlClip; }
+  const vidActivo = typeof document !== 'undefined' ? $('lado-video') : null;
+  if (vidActivo && !vidActivo.paused && Number(vidActivo.dataset.subida) === Number(s?.id)) {
+    // No interrumpir reproducción activa en el visor lateral.
+  } else {
+    const durEst = s && s.clip_inicio != null && s.clip_fin != null ? Math.max(1, Math.round(Number(s.clip_fin) - Number(s.clip_inicio))) : Math.max(1, Math.round(Number(s?.calidad?.duracion || 60)));
+    const esKinetik = typeof document !== 'undefined' && document.body?.classList?.contains('tema-kinetik');
+    const htmlClip = s ? (esKinetik ? `<h3>Vista previa de estudio</h3>
+      <div class="lado-kinetik-frame"><span class="lado-k-idx">3</span>
+        <div class="lado-visor">
+          <video id="lado-video" data-subida="${Number(s.id)}" playsinline preload="none" poster="/api/bot/miniatura/${Number(s.id)}" src="/api/bot/clip/${Number(s.id)}" onclick="controlarVideoLado('toggle')"></video>
+          <button type="button" id="lado-play-btn" class="lado-visor-play" aria-label="Reproducir vista previa" onclick="controlarVideoLado('toggle')"><span>▶</span></button>
+        </div>
+      </div>
+      <div class="lado-ruler">
+        <div class="lado-ruler-ticks"></div>
+        <div class="lado-ruler-times"><span id="lado-t-now">00:00:00</span><span id="lado-t-mid">${fmtTimecodeKinetik(durEst / 2)}</span><span id="lado-t-end">${fmtTimecodeKinetik(durEst)}</span></div>
+        <div class="lado-scrubber-row">
+          <button type="button" title="Retroceder 5 s" onclick="controlarVideoLado('step', -5)">◀</button>
+          <input type="range" id="lado-scrubber" min="0" max="${durEst}" value="0" oninput="controlarVideoLado('seek', this.value)" aria-label="Posición de reproducción">
+          <button type="button" title="Reproducir / Pausar" onclick="controlarVideoLado('toggle')">▶</button>
+        </div>
+      </div>
+      <b class="lado-titulo">${esc(String(s.texto || '').split('\n')[0] || `Clip #${s.id}`)}</b>
+      <div style="margin-bottom:8px">${typeof insigniaCalificacion === 'function' ? insigniaCalificacion(s) : ''}</div>
+      <dl class="lado-datos"><dt>Cuenta</dt><dd>${esc(s.cuenta_nombre || nombre(s.cuenta_id))}</dd><dt>Preset</dt><dd>${esc(s.preset || 'Sin registrar')}</dd><dt>Turno</dt><dd>${esc(s.espera || 'Sin hora estimada')}</dd></dl>
+      ${s.estado === 'pendiente' ? `<div style="margin-top:10px"><button type="button" class="prim" style="width:100%" onclick="if(typeof adelantarClip==='function')adelantarClip(${Number(s.id)})">↑ Publicar este clip</button></div>` : ''}`
+      : `<h3>Próximo clip</h3><div class="lado-visor"><img src="/api/bot/miniatura/${Number(s.id)}" alt="Portada del próximo clip"></div>
+      <b class="lado-titulo">${esc(String(s.texto || '').split('\n')[0] || `Clip #${s.id}`)}</b>
+      ${typeof insigniaCalificacion === 'function' ? insigniaCalificacion(s) : ''}
+      <dl class="lado-datos"><dt>Cuenta</dt><dd>${esc(s.cuenta_nombre || nombre(s.cuenta_id))}</dd><dt>Preset</dt><dd>${esc(s.preset || 'Sin registrar')}</dd><dt>Turno</dt><dd>${esc(s.espera || 'Sin hora estimada')}</dd></dl>`)
+      : '<h3>Próximo clip</h3><p class="muted">No hay clips pendientes.</p>';
+    if (clip.dataset.firma !== htmlClip) { clip.innerHTML = htmlClip; clip.dataset.firma = htmlClip; if (esKinetik && s) enlazarVideoLado(); }
+  }
   const htmlCuentas = (E.cuentas || []).map(c => {
     const limite = Number(c.limite_dia) || 0, hoy = Number(c.hoy) || 0;
     return `<div class="lado-medidor"><span>${esc(c.nombre)}</span><span>${c.activa ? `${hoy} de ${limite}` : 'Pausada'}</span><i><b style="width:${limite ? Math.min(100, hoy / limite * 100) : 0}%"></b></i></div>`;
@@ -1995,16 +2424,25 @@ function pintarLocales() {
     const chipCal = `<span class="nota-video compacta nivel-${calL.nivel}" title="${esc(calL.resumen)}">${calL.icono} ${calL.nota.toFixed(1)}/10</span>`;
     const media = a.previewUrl ? `<video class="vaso-video-local" src="${esc(a.previewUrl)}#t=0.2" muted playsinline preload="metadata"></video>` : '';
     const chipEstado = enviando ? `<span class="vaso-chip"><span class="flecha-subiendo">↑</span> ${pct}%</span>` : `<span class="vaso-chip">${listo ? '↑ En cola' : a.estado === 'error' ? 'Error' : '↑ Preparado'}</span>`;
+    const specsLoc = `${a.ancho && a.alto ? Math.min(a.ancho, a.alto) + 'P' : 'MP4'}${a.duracion > 0 ? ' · ' + Math.round(a.duracion) + 'S' : ''}`;
+    const headLoc = enviando ? 'SUBIENDO' : (listo ? 'EN COLA' : a.estado === 'error' ? 'ERROR' : 'PREPARADO');
+    const stairsLoc = '<svg class="kinetik-stairs" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon fill="#FF4D00" points="0,100 0,84 12,84 12,72 25,72 25,60 38,60 38,48 51,48 51,36 64,36 64,24 77,24 77,12 90,12 90,0 100,0 100,100"/></svg>';
     return `<div class="vaso-clip${claseVaso}">
-      ${media}
-      <div class="vaso-flujo-subida"></div>
-      <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
-      <div class="vaso-brillo"></div>
-      <div class="vaso-capa">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap">${chipCal}${chipEstado}</div>
-        <div class="vaso-centro"><div class="vaso-pct">${enviando ? pct + '%' : calL.nota.toFixed(1)}</div><div class="vaso-etapa">${esc(a.mensaje)}</div></div>
-        <div class="vaso-pie"><b>${esc(a.file.name)}</b> · ${esc(calL.resumen)}</div>
+      <span class="vaso-kinetik-idx">${idx + 1}</span>
+      <div class="vaso-kinetik-head"><span><span class="k-arr">↑</span> ${headLoc}</span><span>${enviando ? pct + '%' : ''}</span></div>
+      <div class="vaso-kinetik-sticker">${chipCal}</div>
+      <div class="vaso-kinetik-stage">
+        ${media}
+        <div class="vaso-flujo-subida"></div>
+        <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div>${stairsLoc}<div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
+        <div class="vaso-brillo"></div>
+        <div class="vaso-capa">
+          <div class="vaso-kinetik-top-orig" style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap">${chipCal}${chipEstado}</div>
+          <div class="vaso-centro"><div class="vaso-pct">${enviando ? pct + '%' : calL.nota.toFixed(1)}</div><div class="vaso-etapa">${esc(a.mensaje)}</div></div>
+          <div class="vaso-pie"><b>${esc(a.file.name)}</b> · ${esc(calL.resumen)}</div>
+        </div>
       </div>
+      <div class="vaso-kinetik-foot"><div class="vaso-kinetik-specs"><span>${esc(specsLoc)}</span><span>${esc(calL.etiqueta)}</span></div><div class="vaso-kinetik-title" title="${esc(a.file.name)}">${esc(a.file.name)}</div></div>
     </div>`;
   }).join('')}</div>` : '';
   $('local-enviar').disabled = enviandoLocales || !archivosLocales.some(a => a.estado !== 'guardado');
@@ -2399,7 +2837,7 @@ function seleccionarPreset() {
     'ed-cantidad':['num_clips',1], 'ed-motor':['motor_ia','pro'], 'ed-transcripcion':['transcripcion','groq'],
     'ed-whisper':['whisper_local','large-v3'], 'ed-formato':['video_format','vertical'],
     'ed-calidad':['export_profile','quality'], 'ed-upscale':['upscale','off'],
-    'ed-miniatura':['auto_thumbnail','off'], 'ed-miniatura-motor':['thumbnail_engine','clasico'],
+    'ed-miniatura':['auto_thumbnail','off'], 'ed-miniatura-motor':['thumbnail_engine','clasico'], 'ed-miniatura-estilo':['thumbnail_style','kinetik'],
     'ed-estilo':['style','karaoke'], 'ed-fuente':['sub_fuente',''], 'ed-escala':['subtitle_scale',100],
     'ed-comentario':['commentary_mode','off'], 'ed-comentario-estilo':['commentary_style','gancho'],
     'ed-comentario-voz':['commentary_voice','male'], 'ed-ambiente':['ambient_music','off']};
@@ -2476,6 +2914,7 @@ function ajustesEdicion() {
     ambient_music:['off','auto','suave','alegre','epico','energica','terror','misterio','noticias'].includes(rawAmbient) ? rawAmbient : 'off',
     auto_thumbnail:['off','cover_and_jpg','jpg_only'].includes(rawThumb) ? rawThumb : 'off',
     thumbnail_engine:$('ed-miniatura-motor')?.value === 'qwen' ? 'qwen' : 'clasico',
+    thumbnail_style:$('ed-miniatura-estilo')?.value === 'clasico' ? 'clasico' : 'kinetik',
     strip_metadata:($('ed-borrar-meta')?.value || 'si') !== 'no',
     auto_hashtags:($('ed-hashtags')?.value || 'si') !== 'no',
     politicas_tiktok:$('ed-politicas')?.value || 'alto',
@@ -2715,7 +3154,15 @@ function chipNotaVaso(cal) {
   if (!cal || !Number.isFinite(Number(cal.nota))) return '';
   const nivel = ['viral','alta','media','baja'].includes(cal.nivel) ? cal.nivel : 'media';
   const tip = [cal.etiqueta, cal.resumen, cal.gancho ? `Gancho: ${cal.gancho}` : ''].filter(Boolean).join(' · ');
-  return `<span class="nota-video compacta nivel-${nivel}" title="${esc(tip)}">${esc(cal.icono || '⭐')} ${Number(cal.nota).toFixed(1)}</span>`;
+  const sufijo = nivel === 'viral' ? ' / VIRAL' : '';
+  return `<span class="nota-video compacta nivel-${nivel}" title="${esc(tip)}">${esc(cal.icono || '★')} ${Number(cal.nota).toFixed(1)}${sufijo}</span>`;
+}
+const KINETIK_STAIRS_SVG = '<svg class="kinetik-stairs" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon fill="#FF4D00" points="0,100 0,84 12,84 12,72 25,72 25,60 38,60 38,48 51,48 51,36 64,36 64,24 77,24 77,12 90,12 90,0 100,0 100,100"/></svg>';
+function specsTecnicosClip(s) {
+  const c = (s && s.calidad) || {}, ed = (s && s.edicion) || {};
+  const lado = (Number(c.ancho) > 0 && Number(c.alto) > 0) ? Math.min(Number(c.ancho), Number(c.alto)) : (ed.export_profile === 'fast' ? 720 : 1080);
+  const dur = (s && s.clip_inicio != null && s.clip_fin != null) ? Math.round(Number(s.clip_fin) - Number(s.clip_inicio)) : Math.round(Number(c.duracion || 0));
+  return `${lado}P${dur > 0 ? ' · ' + dur + 'S' : ''}`;
 }
 function pintarVasosActivos(vasos) {
   const sec = $('vasos-activos-seccion'), grid = $('vasos-activos'), res = $('vasos-activos-resumen');
@@ -2739,15 +3186,21 @@ function pintarVasosActivos(vasos) {
     const notaHtml = chipNotaVaso(v.calificacion);
     const claseEstado = subiendo ? ' es-subiendo' : listo ? ' es-preparado' : '';
     return `<div class="vaso-clip${claseEstado}">
-      ${poster}
-      <div class="vaso-flujo-subida"></div>
-      <div class="vaso-liquido" style="height:${listo ? 30 : pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
-      <div class="vaso-brillo"></div>
-      <div class="vaso-capa">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap"><span class="vaso-chip">${esc(etiqueta)}</span><div style="display:inline-flex;align-items:center;gap:4px">${notaHtml}<span class="vaso-chip">${pct}%</span>${closeBtn}</div></div>
-        <div class="vaso-centro">${playBtn || `<div class="vaso-pct">${pct}%</div>`}<div class="vaso-etapa" title="${esc(v.etapa || '')}">${esc(v.etapa || 'Procesando…')}</div></div>
-        <div class="vaso-pie" title="${esc(v.titulo || '')}">${esc(v.titulo || 'Clip')}<div class="muted" style="font-weight:400;font-size:10.5px">${esc(v.subtitulo || '')}</div></div>
+      <span class="vaso-kinetik-idx">${idx + 1}</span>
+      <div class="vaso-kinetik-head"><span><span class="k-arr">↑</span> ${esc(etiqueta.replace(/^↑\s*/, ''))}</span><span style="display:inline-flex;align-items:center;gap:5px">${pct}%${closeBtn}</span></div>
+      ${notaHtml ? `<div class="vaso-kinetik-sticker">${notaHtml}</div>` : ''}
+      <div class="vaso-kinetik-stage">
+        ${poster}
+        <div class="vaso-flujo-subida"></div>
+        <div class="vaso-liquido" style="height:${listo ? 30 : pct}%"><div class="vaso-olas">${waveSvg}</div>${KINETIK_STAIRS_SVG}<div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
+        <div class="vaso-brillo"></div>
+        <div class="vaso-capa">
+          <div class="vaso-kinetik-top-orig" style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap"><span class="vaso-chip">${esc(etiqueta)}</span><div style="display:inline-flex;align-items:center;gap:4px">${notaHtml}<span class="vaso-chip">${pct}%</span>${closeBtn}</div></div>
+          <div class="vaso-centro">${playBtn || `<div class="vaso-pct">${pct}%</div>`}<div class="vaso-etapa" title="${esc(v.etapa || '')}">${esc(v.etapa || 'Procesando…')}</div></div>
+          <div class="vaso-pie" title="${esc(v.titulo || '')}">${esc(v.titulo || 'Clip')}<div class="muted" style="font-weight:400;font-size:10.5px">${esc(v.subtitulo || '')}</div></div>
+        </div>
       </div>
+      <div class="vaso-kinetik-foot"><div class="vaso-kinetik-specs"><span>${esc(v.tipo === 'live' ? 'LIVE' : '1080P')}</span><span>${pct}%</span></div><div class="vaso-kinetik-title" title="${esc(v.titulo || '')}">${esc(v.titulo || 'Clip')}</div></div>
     </div>`;
   }).join('');
 }
@@ -2762,26 +3215,35 @@ function pintarVasosPreparados(subidas) {
   const resumenFirma = lista.map(s => [s.id, s.estado, s.pct_subida, s.espera, s.calificacion?.nota]).join('|');
   if (grid.dataset.firma === resumenFirma) return;
   grid.dataset.firma = resumenFirma;
-  grid.innerHTML = lista.map(s => {
+  grid.innerHTML = lista.map((s, idx) => {
     const id = Number(s.id);
     const subiendo = s.estado === 'subiendo', pendiente = s.estado === 'pendiente';
-    const pct = subiendo ? Math.max(14, Math.min(96, Number(s.pct_subida) || 28)) : (pendiente ? 28 : 18);
+    const pct = subiendo ? Math.max(14, Math.min(96, Number(s.pct_subida) || 28)) : (pendiente ? 26 : 18);
     const titulo = s.video_titulo || String(s.texto || '').split('\n')[0] || `Clip #${id}`;
     const cal = (typeof calificacionSegunObjeto === 'function') ? calificacionSegunObjeto(s) : s.calificacion;
     const notaHtml = chipNotaVaso(cal);
     const estadoChip = subiendo ? `↑ Subiendo ${pct}%` : pendiente ? '↑ En cola' : (s.estado === 'error' ? 'Con error' : 'Revisar');
+    const headLbl = subiendo ? 'SUBIENDO' : pendiente ? 'PREPARADO' : (s.estado === 'error' ? 'ERROR' : 'REVISAR');
     const etapaTxt = subiendo ? 'Publicando en plataforma…' : (pendiente ? (s.espera || 'Preparado · listo para subir') : (s.error || 'Revisa detalles abajo'));
+    const specs = specsTecnicosClip(s);
+    const selCls = (typeof clipLadoSeleccionado !== 'undefined' && clipLadoSeleccionado === id) ? ' es-seleccionado' : '';
     const btnSubirAhora = pendiente ? `<button type="button" class="mini prim" style="padding:3px 8px;font-size:10.5px;min-height:24px" onclick="event.stopPropagation();if(typeof adelantarClip==='function')adelantarClip(${id})">↑ Subir ahora</button>` : '';
-    return `<div class="vaso-clip${subiendo ? ' es-subiendo' : pendiente ? ' es-preparado' : ''}">
-      ${htmlPosterVaso('subida_' + id, `/api/bot/miniatura/${id}`, titulo)}
-      <div class="vaso-flujo-subida"></div>
-      <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div><div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
-      <div class="vaso-brillo"></div>
-      <div class="vaso-capa">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap"><span class="vaso-chip">${esc(estadoChip)}</span>${notaHtml}</div>
-        <div class="vaso-centro"><button type="button" class="vaso-play" title="Vista previa rápida" onclick="if(typeof abrirVistaRapidaBot==='function')abrirVistaRapidaBot(${id})">▶</button><div class="vaso-etapa" title="${esc(etapaTxt)}">${esc(etapaTxt)}</div>${btnSubirAhora}</div>
-        <div class="vaso-pie" title="${esc(titulo)}">${esc(titulo)}<div class="muted" style="font-weight:400;font-size:10.5px">${esc(s.cuenta_nombre || 'Cuenta')} · ${esc(s.plataforma || '')}</div></div>
+    return `<div class="vaso-clip${subiendo ? ' es-subiendo' : pendiente ? ' es-preparado' : ''}${selCls}" data-subida="${id}" onclick="if(typeof seleccionarClipLado==='function')seleccionarClipLado(${id})">
+      <span class="vaso-kinetik-idx">${idx + 1}</span>
+      <div class="vaso-kinetik-head"><span><span class="k-arr">↑</span> ${headLbl}</span><span>${subiendo ? pct + '%' : ''}</span></div>
+      ${notaHtml ? `<div class="vaso-kinetik-sticker">${notaHtml}</div>` : ''}
+      <div class="vaso-kinetik-stage">
+        ${htmlPosterVaso('subida_' + id, `/api/bot/miniatura/${id}`, titulo)}
+        <div class="vaso-flujo-subida"></div>
+        <div class="vaso-liquido" style="height:${pct}%"><div class="vaso-olas">${waveSvg}</div>${KINETIK_STAIRS_SVG}<div class="vaso-burbujas"><i></i><i></i><i></i></div></div>
+        <div class="vaso-brillo"></div>
+        <div class="vaso-capa">
+          <div class="vaso-kinetik-top-orig" style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap"><span class="vaso-chip">${esc(estadoChip)}</span>${notaHtml}</div>
+          <div class="vaso-centro"><button type="button" class="vaso-play" title="Vista previa rápida" onclick="event.stopPropagation();if(typeof abrirVistaRapidaBot==='function')abrirVistaRapidaBot(${id})">▶</button><div class="vaso-etapa" title="${esc(etapaTxt)}">${esc(etapaTxt)}</div>${btnSubirAhora}</div>
+          <div class="vaso-pie" title="${esc(titulo)}">${esc(titulo)}<div class="muted" style="font-weight:400;font-size:10.5px">${esc(s.cuenta_nombre || 'Cuenta')} · ${esc(s.plataforma || '')}</div></div>
+        </div>
       </div>
+      <div class="vaso-kinetik-foot"><div class="vaso-kinetik-specs"><span>${esc(specs)}</span><span>${esc(s.plataforma || '')}</span></div><div class="vaso-kinetik-title" title="${esc(titulo)}">${esc(titulo)}</div>${pendiente ? `<button type="button" class="prim k-btn-up" onclick="event.stopPropagation();if(typeof adelantarClip==='function')adelantarClip(${id})">↑ Subir ahora</button>` : ''}</div>
     </div>`;
   }).join('');
 }

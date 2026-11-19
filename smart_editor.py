@@ -474,7 +474,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         commentary_mode="off", commentary_style="gancho", commentary_voice="male", voice_config=None,
                         cold_open=False, jump_cuts=False, auto_split=False, ambient_music="off", clean_vocals=False,
                         auto_thumbnail="off", strip_metadata=True, auto_hashtags=True, politicas_tiktok="off",
-                        thumbnail_engine="clasico"):
+                        thumbnail_engine="clasico", thumbnail_style="kinetik"):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import bisect
@@ -507,6 +507,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         render_viral_thumbnail,
         select_best_thumbnail_frame,
         validate_thumbnail_options,
+        validate_thumbnail_style,
     )
 
     dubbing_language, dubbing_voice, original_volume = validate_options(
@@ -524,6 +525,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
     cold_open, jump_cuts, auto_split, ambient_music, clean_vocals = validate_remix_options(
         cold_open, jump_cuts, auto_split, ambient_music, clean_vocals)
     auto_thumbnail = validate_thumbnail_options(auto_thumbnail)
+    thumbnail_style = validate_thumbnail_style(thumbnail_style)
     from portada_generativa import validate_engine as _validar_motor_portada
     thumbnail_engine = _validar_motor_portada(thumbnail_engine)
     if not isinstance(strip_metadata, bool):
@@ -1165,7 +1167,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                 print("Portada IA: sin GPU de 14 GB o más; se usa la portada clásica.")
                         thumb_rgb, saved_jpg = render_viral_thumbnail(
                             portada_base if portada_base is not None else editar_portada_9_16(best_thumb_frame), quote_meta,
-                            out_w=PORTADA_W, out_h=PORTADA_H, jpg_path=thumb_candidate_path
+                            out_w=PORTADA_W, out_h=PORTADA_H, jpg_path=thumb_candidate_path,
+                            style=thumbnail_style,
                         )
                         thumb_jpg_path = saved_jpg or ""
                         thumb_quote = str(quote_meta.get("quote") or "")
@@ -1423,7 +1426,8 @@ def main(argv):
                 strip_metadata=cfg.get("strip_metadata", True),
                 auto_hashtags=cfg.get("auto_hashtags", True),
                 politicas_tiktok=cfg.get("politicas_tiktok", "alto"),
-                thumbnail_engine=cfg.get("thumbnail_engine", "clasico"))
+                thumbnail_engine=cfg.get("thumbnail_engine", "clasico"),
+                thumbnail_style=cfg.get("thumbnail_style", "kinetik"))
         except InicioFueraDeVideo as e:
             print("RESULT_ERROR:" + json.dumps({"code": "inicio_fuera_video"}))
             write_progress(f"Error: {e}", -1)

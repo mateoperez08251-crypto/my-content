@@ -37,6 +37,9 @@ FUENTES = {
     "oswald": ("Oswald", "oswald", "700", "normal"),
     "roboto": ("Roboto Black", "roboto", "900", "normal"),
     "marker": ("Permanent Marker (a mano)", "permanent-marker", "400", "normal"),
+    "barlow_cond": ("Barlow Condensed ExtraBold (Kinetik)", "barlow-condensed", "800", "normal"),
+    "archivo_black": ("Archivo Black (editorial)", "archivo-black", "400", "normal"),
+    "space_grotesk": ("Space Grotesk Bold (técnica)", "space-grotesk", "700", "normal"),
 }
 
 # Estilos. tam: alto de letra (fracción del alto del video). pos: centro vertical (0 arriba, 1 abajo).
@@ -77,6 +80,9 @@ ESTILOS = {
     "minimal": {"nombre": "Minimal", "fuente": "poppins", "mayus": False, "color": "#FFFFFF", "activo": None,
                 "contorno": None, "grosor": 0.0, "sombra": True, "modo": "frase", "anim": "fade", "pos": 0.86,
                 "tam": 0.034},
+    "kinetik": {"nombre": "Kinetik Editorial (cinta ácida)", "fuente": "barlow_cond", "mayus": True,
+                "color": "#111214", "activo": "#FF4D00", "contorno": None, "grosor": 0.0,
+                "kinetik_cintas": True, "max_palabras": 4, "anim": "pop", "pos": 0.72, "tam": 0.056},
     "ninguno": {"nombre": "Sin subtítulos"},
 }
 
@@ -353,7 +359,80 @@ class Subtitulos:
         y = int(round(cy - capa.height / 2))
         return capa, x, max(0, min(self.H - capa.height, y))
 
+    def _dibujar_kinetik(self, s, activa):
+        e, W, H = self.e, self.W, self.H
+        tam = int(H * float(e.get("tam", 0.056)) * float(e.get("escala", 1.0)))
+        mayus = bool(e.get("mayus", True))
+        textos = [(w["word"].upper() if mayus else w["word"]) for w in s["palabras"]]
+        ancho_max = int(W * 0.84)
+        fid = e.get("fuente", "barlow_cond")
+        while True:
+            f = fuente(fid, tam)
+            esp = max(6.0, f.getlength(" ") * 0.95)
+            lineas, linea, ancho = [], [], 0.0
+            for k, tx in enumerate(textos):
+                aw = f.getlength(tx)
+                if linea and (ancho + esp + aw > ancho_max * 0.82 or len(linea) >= 2):
+                    lineas.append(linea)
+                    linea, ancho = [], 0.0
+                linea.append((k, tx, aw))
+                ancho += (esp if len(linea) > 1 else 0) + aw
+            if linea:
+                lineas.append(linea)
+            mas_ancha = max(sum(a for _, _, a in ln) + esp * (len(ln) - 1) for ln in lineas)
+            if (mas_ancha + tam * 0.8 <= ancho_max and len(lineas) <= 3) or tam <= 18:
+                break
+            tam = int(tam * 0.9)
+        amarillo_volt = (232, 255, 0, 255)
+        papel_marfil = (244, 241, 234, 255)
+        tinta_carbon = _rgb(e.get("color", "#111214"))
+        naranja_int = _rgb(e.get("activo", "#FF4D00"))
+        angulos = (1.9, -1.1, 1.3)
+        pad_x = max(14, int(tam * 0.28))
+        pad_y = max(8, int(tam * 0.16))
+        sdx, sdy = max(3, int(tam * 0.06)), max(4, int(tam * 0.075))
+        tmp_d = ImageDraw.Draw(Image.new("RGBA", (8, 8), (0, 0, 0, 0)))
+        bb_ref = tmp_d.textbbox((0, 0), "ÁÉÑQ¿", font=f, anchor="ls")
+        sobre_base = -bb_ref[1]
+        alto_txt = bb_ref[3] - bb_ref[1]
+        cintas = []
+        for n, ln in enumerate(lineas):
+            bg = amarillo_volt if (n % 2 == 0) else papel_marfil
+            ancho_ln = int(round(sum(a for _, _, a in ln) + esp * (len(ln) - 1)))
+            rw, rh = ancho_ln + pad_x * 2, alto_txt + pad_y * 2
+            strip = Image.new("RGBA", (rw + sdx + 4, rh + sdy + 4), (0, 0, 0, 0))
+            sd = ImageDraw.Draw(strip)
+            sd.rectangle((sdx, sdy, sdx + rw, sdy + rh), fill=(17, 18, 20, 165))
+            sd.rectangle((0, 0, rw, rh), fill=bg, outline=(17, 18, 20, 235), width=max(2, tam // 44))
+            cx = float(pad_x)
+            for k, tx, aw in ln:
+                col = naranja_int if k == activa else tinta_carbon
+                sd.text((cx, pad_y + sobre_base), tx, font=f, fill=col, anchor="ls")
+                cx += aw + esp
+            rot = strip.rotate(angulos[n % len(angulos)], resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0, 0))
+            cb = rot.getbbox()
+            cintas.append(rot.crop(cb) if cb else rot)
+        gap = max(6, int(tam * 0.10))
+        emoji = s.get("emoji") if e.get("emojis", True) is not False else None
+        tam_emoji = int(tam * 1.45)
+        extra_emoji = tam_emoji + int(tam * 0.16) if emoji else 0
+        total_w = max((c.width for c in cintas), default=1) + 8
+        total_h = extra_emoji + sum(c.height for c in cintas) + gap * max(0, len(cintas) - 1) + 8
+        lienzo = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
+        y_cur = extra_emoji + 4
+        for c in cintas:
+            lienzo.alpha_composite(c, ((total_w - c.width) // 2, y_cur))
+            y_cur += c.height + gap
+        if emoji:
+            ei = emoji_img(emoji, tam_emoji)
+            if ei is not None:
+                lienzo.alpha_composite(ei, (int((total_w - tam_emoji) / 2), 0))
+        caja_final = lienzo.getbbox()
+        return lienzo.crop(caja_final) if caja_final else lienzo
+
     def _dibujar(self, s, activa):
+        if self.e.get("kinetik_cintas"):
+            return self._dibujar_kinetik(s, activa)
         e, W, H = self.e, self.W, self.H
         tam = int(H * float(e.get("tam", 0.05)) * float(e.get("escala", 1.0)))
         mayus = bool(e.get("mayus", True))

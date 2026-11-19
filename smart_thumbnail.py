@@ -19,6 +19,7 @@ import os
 import re
 
 THUMBNAIL_MODES = ("off", "cover_and_jpg", "jpg_only")
+THUMBNAIL_STYLES = ("kinetik", "clasico")
 PORTADA_W, PORTADA_H = 1080, 1920  # Siempre 9:16, aunque el clip se exporte en 16:9.
 
 _STOPWORDS_BORDE = {
@@ -49,6 +50,14 @@ def validate_thumbnail_options(auto_thumbnail: str = "off") -> str:
     if modo not in THUMBNAIL_MODES:
         raise ValueError(f"Modo de miniatura no válido ({modo}). Usa off, cover_and_jpg o jpg_only.")
     return modo
+
+
+def validate_thumbnail_style(thumbnail_style: str = "kinetik") -> str:
+    """Valida el estilo visual de las miniaturas generadas."""
+    est = str(thumbnail_style or "kinetik").strip().lower()
+    if est not in THUMBNAIL_STYLES:
+        raise ValueError(f"Estilo de miniatura no válido ({est}). Usa kinetik o clasico.")
+    return est
 
 
 def _normalizar_token(palabra: str) -> str:
@@ -558,8 +567,245 @@ def _alto_linea(draw, fuente, borde: int) -> tuple[int, int]:
     return -caja[1], caja[3] - caja[1] + borde
 
 
+_FUENTES_KINETIK = {
+    "barlow_cond": ("barlow-condensed", "800", "normal"),
+    "archivo_black": ("archivo-black", "400", "normal"),
+    "space_grotesk": ("space-grotesk", "700", "normal"),
+}
+
+
+def _fuente_kinetik(fid: str, tam: int):
+    """Carga fuente editorial Kinetik (también en Colab aunque subtitulos.py aún no tenga el id)."""
+    import subtitulos
+    from PIL import ImageFont
+
+    if fid in getattr(subtitulos, "FUENTES", {}):
+        return subtitulos.fuente(fid, tam)
+    spec = _FUENTES_KINETIK.get(fid)
+    if spec:
+        paquete, peso, estilo = spec
+        carpeta = subtitulos._carpeta("fuentes") if hasattr(subtitulos, "_carpeta") else os.path.join(os.path.expanduser("~"), ".contentapp", "fuentes")
+        os.makedirs(carpeta, exist_ok=True)
+        ruta = os.path.join(carpeta, f"{fid}.ttf")
+        if not (os.path.exists(ruta) and os.path.getsize(ruta) > 1000):
+            try:
+                import requests
+                url = f"https://cdn.jsdelivr.net/fontsource/fonts/{paquete}@latest/latin-{peso}-{estilo}.ttf"
+                r = requests.get(url, timeout=20)
+                if r.status_code == 200 and len(r.content) > 1000:
+                    with open(ruta + ".part", "wb") as f:
+                        f.write(r.content)
+                    os.replace(ruta + ".part", ruta)
+            except Exception:
+                pass
+        if os.path.exists(ruta) and os.path.getsize(ruta) > 1000:
+            try:
+                return ImageFont.truetype(ruta, max(8, int(tam)))
+            except OSError:
+                pass
+    return subtitulos.fuente("oswald" if fid == "barlow_cond" else "montserrat", tam)
+
+
+def _dibujar_cinta_kinetik(
+    toks: list[str],
+    font_main,
+    tam_font: int,
+    bg_rgba: tuple[int, int, int, int],
+    ink_rgba: tuple[int, int, int, int],
+    accent_rgba: tuple[int, int, int, int],
+    resaltar_indices: set[int],
+    angulo: float,
+):
+    """Dibuja una cinta editorial recortada estilo Kinetik Print (inclinada y con sombra de tinta)."""
+    from PIL import Image, ImageDraw
+
+    espacio_w = max(8, int(round(tam_font * 0.24)))
+    pad_x = max(18, int(round(tam_font * 0.30)))
+    pad_y = max(10, int(round(tam_font * 0.16)))
+    sombra_dx = max(4, int(round(tam_font * 0.065)))
+    sombra_dy = max(5, int(round(tam_font * 0.08)))
+
+    tmp_img = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tmp_img)
+    sobre_base, alto_txt = _alto_linea(td, font_main, 0)
+
+    medidas = []
+    total_w = 0
+    for tk in toks:
+        bb = td.textbbox((0, 0), tk, font=font_main, anchor="ls")
+        tw = max(1, bb[2] - bb[0])
+        medidas.append((tk, tw, bb))
+        total_w += tw
+    total_w += espacio_w * max(0, len(toks) - 1)
+
+    rect_w = total_w + pad_x * 2
+    rect_h = alto_txt + pad_y * 2
+    strip = Image.new("RGBA", (rect_w + sombra_dx + 4, rect_h + sombra_dy + 4), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(strip)
+
+    # Sombra dura de imprenta desplazada + bloque editorial con filo nítido
+    sd.rectangle((sombra_dx, sombra_dy, sombra_dx + rect_w, sombra_dy + rect_h), fill=(17, 18, 20, 165))
+    sd.rectangle((0, 0, rect_w, rect_h), fill=bg_rgba, outline=(17, 18, 20, 235), width=max(2, tam_font // 48))
+
+    cx = pad_x
+    base_y = pad_y + sobre_base
+    for idx_t, (tk, tw, bb) in enumerate(medidas):
+        color = accent_rgba if idx_t in resaltar_indices else ink_rgba
+        sd.text((cx - bb[0], base_y), tk, font=font_main, fill=color, anchor="ls")
+        cx += tw + espacio_w
+
+    if abs(angulo) > 0.05:
+        rotada = strip.rotate(angulo, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0, 0))
+        caja = rotada.getbbox()
+        return rotada.crop(caja) if caja else rotada
+    return strip
+
+
+def _render_kinetik_thumbnail(img, frase: str, resaltadas: set[str], kicker: str):
+    """Compone una portada 9:16 estilo Kinetik Print (cintas ácidas #E8FF00, papel #F4F1EA y acento #FF4D00)."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    import subtitulos
+
+    h, w = img.shape[:2]
+    es_vertical = h >= w
+
+    # Sombra editorial sutil solo en el tercio inferior para que el rostro siga nítido y luminoso
+    ys = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None, None]
+    grad_inf = np.clip((ys - 0.56) / 0.44, 0.0, 1.0) ** 1.35
+    factor = np.clip(1.0 - 0.42 * grad_inf, 0.52, 1.0)
+    img_base = np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
+
+    max_chars = 13 if es_vertical else 20
+    lineas = _partir_lineas_portada(frase, max_chars_linea=max_chars, max_lineas=3)
+    # Equilibrar líneas para evitar una última cinta huérfana de una sola palabra corta (ej. "NADIE TE / DIJO ESTO")
+    if len(lineas) == 2:
+        p0, p1 = lineas[0].split(), lineas[1].split()
+        if len(p0) >= 3 and len(p1) == 1:
+            cand0 = " ".join(p0[:-1])
+            cand1 = " ".join([p0[-1]] + p1)
+            if len(cand1) <= max_chars + 2:
+                lineas = [cand0, cand1]
+
+    pil = Image.fromarray(img_base).convert("RGBA")
+
+    # Paleta Kinetik Print
+    amarillo_volt = (232, 255, 0, 255)      # #E8FF00
+    papel_marfil = (244, 241, 234, 255)     # #F4F1EA
+    tinta_carbon = (17, 18, 20, 255)        # #111214
+    naranja_int = (255, 77, 0, 255)         # #FF4D00
+    angulos = (2.0, -1.1, 1.3)
+
+    # Elegir índices resaltados en naranja (siempre en la cinta de papel #F4F1EA, o en la única línea)
+    resaltar_por_linea: list[set[int]] = []
+    for idx_l, ln in enumerate(lineas):
+        toks = ln.split()
+        es_papel = (idx_l % 2 == 1)
+        idxs: set[int] = set()
+        if es_papel or len(lineas) == 1:
+            for ti, tk in enumerate(toks):
+                if _normalizar_token(tk) in resaltadas:
+                    idxs.add(ti)
+            if not idxs and toks:
+                # Dar siempre el acento naranja a la palabra de mayor peso en la cinta crema (ej. "DIJO ESTO")
+                candidatos = [
+                    (len(_normalizar_token(tk)) + (6 if _normalizar_token(tk) in _PALABRAS_IMPACTO else 0), ti)
+                    for ti, tk in enumerate(toks)
+                    if _normalizar_token(tk) not in _STOPWORDS_BORDE
+                ]
+                idxs.add(max(candidatos)[1] if candidatos else len(toks) - 1)
+        resaltar_por_linea.append(idxs)
+
+    tam_font = max(26, int(round((w * 0.118) if es_vertical else (h * 0.135))))
+    margen_max_w = int(round(w * 0.88))
+    base_inferior = int(round(h * (0.86 if es_vertical else 0.89)))
+    techo_texto = int(round(h * 0.45))
+    margen_max_h = base_inferior - techo_texto
+
+    cintas = []
+    gap_y = 14
+    while tam_font >= 22:
+        font_main = _fuente_kinetik("barlow_cond", tam_font)
+        gap_y = max(12, int(round(tam_font * 0.14)))
+        cintas = []
+        for idx_l, ln in enumerate(lineas):
+            bg = amarillo_volt if (idx_l % 2 == 0) else papel_marfil
+            ang = angulos[idx_l % len(angulos)]
+            cinta = _dibujar_cinta_kinetik(
+                ln.split(), font_main, tam_font, bg, tinta_carbon, naranja_int,
+                resaltar_por_linea[idx_l], ang,
+            )
+            cintas.append(cinta)
+        max_w_cintas = max((c.width for c in cintas), default=0)
+        total_h_cintas = sum(c.height for c in cintas) + gap_y * max(0, len(cintas) - 1)
+        bar_h_est = max(6, int(round(tam_font * 0.10)))
+        if max_w_cintas <= margen_max_w and (total_h_cintas + gap_y + bar_h_est) <= margen_max_h:
+            break
+        tam_font = int(tam_font * 0.90)
+
+    bar_h = max(6, int(round(tam_font * 0.10)))
+    total_h_cintas = sum(c.height for c in cintas) + gap_y * max(0, len(cintas) - 1)
+    y_inicio = max(techo_texto, base_inferior - total_h_cintas - gap_y - bar_h)
+
+    # Sello contextual superior (estilo etiqueta de estudio de tinta carbón / naranja live)
+    if kicker:
+        tam_k = max(15, int(round(tam_font * 0.30)))
+        font_k = _fuente_kinetik("space_grotesk", tam_k)
+        tmp = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+        td = ImageDraw.Draw(tmp)
+        kb = td.textbbox((0, 0), kicker, font=font_k)
+        kw, kh = kb[2] - kb[0], kb[3] - kb[1]
+        px, py = max(12, int(round(tam_k * 0.68))), max(6, int(round(tam_k * 0.34)))
+        dot_r = max(4, int(round(tam_k * 0.22)))
+        pw = kw + px * 2 + dot_r * 3
+        ph = kh + py * 2
+        es_vivo = "LIVE" in kicker or "VIVO" in kicker
+        sello = Image.new("RGBA", (pw + 6, ph + 6), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(sello)
+        sd.rectangle((4, 4, pw + 4, ph + 4), fill=(17, 18, 20, 150))
+        sd.rectangle(
+            (0, 0, pw, ph),
+            fill=naranja_int if es_vivo else tinta_carbon,
+            outline=tinta_carbon if es_vivo else amarillo_volt,
+            width=max(2, tam_k // 12),
+        )
+        dcx, dcy = px + dot_r, ph // 2
+        sd.ellipse((dcx - dot_r, dcy - dot_r, dcx + dot_r, dcy + dot_r), fill=papel_marfil if es_vivo else naranja_int)
+        sd.text(
+            (dcx + dot_r * 2 - kb[0], (ph - kh) // 2 - kb[1]),
+            kicker,
+            font=font_k,
+            fill=papel_marfil if es_vivo else amarillo_volt,
+        )
+        sello_rot = sello.rotate(-1.4, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0, 0))
+        scaja = sello_rot.getbbox()
+        if scaja:
+            sello_rot = sello_rot.crop(scaja)
+        ky = max(16, y_inicio - sello_rot.height - max(12, int(round(tam_font * 0.16))))
+        kx = (w - sello_rot.width) // 2
+        pil.alpha_composite(sello_rot, (kx, ky))
+
+    # Pegar cada cinta con separación vertical garantizada (nunca se pisan las esquinas rotadas)
+    y_cur = y_inicio
+    for cinta in cintas:
+        cx = max(0, (w - cinta.width) // 2)
+        pil.alpha_composite(cinta, (cx, y_cur))
+        y_cur += cinta.height + gap_y
+
+    # Barra editorial inferior en naranja internacional #FF4D00
+    draw = ImageDraw.Draw(pil, "RGBA")
+    bar_w = min(int(round(w * 0.28)), max(56, int(round(tam_font * 2.3))))
+    bar_y = min(h - bar_h - 14, y_cur + 2)
+    bx0 = (w - bar_w) // 2
+    draw.rectangle((bx0 + 3, bar_y + 3, bx0 + bar_w + 3, bar_y + bar_h + 3), fill=(17, 18, 20, 165))
+    draw.rectangle((bx0, bar_y, bx0 + bar_w, bar_y + bar_h), fill=naranja_int)
+
+    return np.array(pil.convert("RGB"))
+
+
 def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None,
-                           out_h: int | None = None, jpg_path: str | None = None):
+                           out_h: int | None = None, jpg_path: str | None = None,
+                           style: str | None = None):
     """Dibuja la portada de alto impacto sobre `frame_rgb` y opcionalmente guarda un JPEG limpio."""
     import cv2
     import numpy as np
@@ -584,18 +830,33 @@ def render_viral_thumbnail(frame_rgb, quote_meta: dict, out_w: int | None = None
     l_sharp = cv2.addWeighted(l_ch, 0.75, l_eq, 0.25, 0)
     img = cv2.cvtColor(cv2.merge((l_sharp, a_ch, b_ch)), cv2.COLOR_LAB2RGB)
 
-    # 2. Degradado oscuro cinematográfico inferior (y sutil superior) para contraste perfecto del texto
+    qm = quote_meta if isinstance(quote_meta, dict) else {}
+    frase = str(qm.get("quote") or "MOMENTO CLAVE").strip().upper()
+    resaltadas = {_normalizar_token(x) for x in (qm.get("highlight") or []) if _normalizar_token(x)}
+    if not resaltadas:
+        resaltadas = set(_elegir_palabras_resaltadas(frase))
+    if "kicker" in qm:
+        kicker = str(qm.get("kicker") or "").strip().upper()
+    else:
+        kicker = "MOMENTO CLAVE"
+
+    estilo_sel = validate_thumbnail_style(style or qm.get("style") or "kinetik")
+    if estilo_sel == "kinetik":
+        out_rgb = _render_kinetik_thumbnail(img, frase, resaltadas, kicker)
+        saved = None
+        if jpg_path:
+            os.makedirs(os.path.dirname(os.path.abspath(jpg_path)), exist_ok=True)
+            clean_pil = Image.fromarray(out_rgb)
+            clean_pil.save(jpg_path, format="JPEG", quality=95, subsampling=0, optimize=True)
+            saved = jpg_path
+        return out_rgb, saved
+
+    # 2. Modo clásico: degradado oscuro cinematográfico inferior (y sutil superior)
     ys = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None, None]
     grad_inf = np.clip((ys - 0.46) / 0.54, 0.0, 1.0) ** 1.25
     grad_sup = np.clip((0.16 - ys) / 0.16, 0.0, 1.0) * 0.28
     factor = np.clip(1.0 - 0.84 * grad_inf - grad_sup, 0.12, 1.0)
     img = np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
-
-    frase = str((quote_meta or {}).get("quote") or "MOMENTO CLAVE").strip().upper()
-    resaltadas = {_normalizar_token(x) for x in ((quote_meta or {}).get("highlight") or []) if _normalizar_token(x)}
-    if not resaltadas:
-        resaltadas = set(_elegir_palabras_resaltadas(frase))
-    kicker = str((quote_meta or {}).get("kicker") or "MOMENTO CLAVE").strip().upper()
 
     es_vertical = h >= w
     max_chars = 15 if es_vertical else 22
