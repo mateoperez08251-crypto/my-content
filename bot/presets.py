@@ -18,6 +18,10 @@ CALIDAD = {
     'ambient_music': 'off', 'clean_vocals': False,
     'auto_thumbnail': 'off', 'thumbnail_engine': 'clasico', 'thumbnail_style': 'kinetik', 'strip_metadata': True, 'auto_hashtags': True, 'politicas_tiktok': 'alto',
     'streamer_corner': 'auto', 'streamer_game_mode': 'cam_arriba_centro', 'streamer_cam_ratio': 0.26,
+    'reaction_character_id': '', 'reaction_mode': 'silencioso', 'reaction_layout': 'pip_arriba_centro',
+    'reaction_motor': 'auto', 'reaction_marco': 'auto', 'reaction_frecuencia': 'media',
+    'reaction_vision': True, 'reaction_stickers': True, 'reaction_frames_fps': 12,
+    'reaction_expresion_fija': '', 'reaction_duracion_gesto': 'auto',
 }
 
 
@@ -80,6 +84,54 @@ def snapshot(opciones):
             result.get('streamer_cam_ratio', 0.26),
         )
         result.update(streamer_corner=sc, streamer_game_mode=sgm, streamer_cam_ratio=scr)
+    if any(k.startswith('reaction_') for k in result):
+        pid_r = str(result.get('reaction_character_id') or '').strip()[:64]
+        result['reaction_character_id'] = pid_r
+        rmodo = str(result.get('reaction_mode') or 'silencioso').strip().lower()
+        result['reaction_mode'] = rmodo if rmodo in ('silencioso', 'continuo', 'pausar', 'mixto') else 'silencioso'
+        rlay = str(result.get('reaction_layout') or 'pip_arriba_centro').strip().lower()
+        result['reaction_layout'] = rlay if rlay in ('pip_arriba_centro', 'pip', 'split', 'split_arriba', 'pausar') else 'pip_arriba_centro'
+        rmot = str(result.get('reaction_motor') or 'auto').strip().lower()
+        result['reaction_motor'] = rmot if rmot in ('auto', 'video_ia', 'frames_secuencia', 'expresivo', 'lipsync') else 'auto'
+        rmar = str(result.get('reaction_marco') or 'auto').strip().lower()
+        result['reaction_marco'] = rmar if rmar in ('auto', 'streamer_pro', 'neon_cyber', 'kinetik_print', 'minimal') else 'auto'
+        rfreq = str(result.get('reaction_frecuencia') or 'media').strip().lower()
+        result['reaction_frecuencia'] = rfreq if rfreq in ('baja', 'media', 'alta') else 'media'
+        result['reaction_vision'] = bool(result.get('reaction_vision', True))
+        result['reaction_stickers'] = bool(result.get('reaction_stickers', True))
+        try:
+            rfps = int(result.get('reaction_frames_fps', 12))
+        except (TypeError, ValueError):
+            rfps = 12
+        result['reaction_frames_fps'] = max(4, min(24, rfps))
+        from smart_reaction import EXPRESION_A_EMOCION
+        _emo_a_exp = {
+            'neutral': 'neutral', 'excited': 'hablando', 'surprised': 'sorprendido',
+            'laughs': 'riendo', 'serious': 'serio', 'sarcastic': 'serio',
+            'curious': 'pensando', 'celebrating': 'celebrando', 'disappointed': 'negando',
+            'scared': 'asustado', 'clapping': 'aplaudiendo',
+        }
+        raw_exps = str(result.get('reaction_expresion_fija') or '').strip().lower()
+        exps_norm = []
+        for tok in raw_exps.replace(';', ',').replace('|', ',').split(','):
+            t = tok.strip()
+            if not t or t in ('auto', 'ia', 'none', 'ninguna'):
+                continue
+            exp_ok = t if t in EXPRESION_A_EMOCION else _emo_a_exp.get(t, '')
+            if exp_ok and exp_ok not in exps_norm:
+                exps_norm.append(exp_ok)
+        result['reaction_expresion_fija'] = ','.join(exps_norm)
+        rdur = str(result.get('reaction_duracion_gesto') or 'auto').strip().lower()
+        if rdur in ('', 'auto', 'ia'):
+            result['reaction_duracion_gesto'] = 'auto'
+        elif rdur in ('todo', 'clip', 'completo', 'full'):
+            result['reaction_duracion_gesto'] = 'todo'
+        else:
+            try:
+                rdur_n = float(rdur.rstrip('s'))
+                result['reaction_duracion_gesto'] = str(int(round(max(1.5, min(600.0, rdur_n)))))
+            except ValueError:
+                result['reaction_duracion_gesto'] = 'auto'
     if 'strip_metadata' in result:
         sm = result.get('strip_metadata', True)
         if not isinstance(sm, bool):

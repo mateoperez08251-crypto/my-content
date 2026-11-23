@@ -5192,6 +5192,27 @@
             if (modal) modal.style.display = 'none';
         }
 
+        async function enviarClipDrive(clave, btn) {
+            if (btn) btn.disabled = true;
+            try {
+                const r = await (await fetch('/api/drive/subir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clave }) })).json();
+                alert(r.success ? (r.mensaje || 'Enviando a Google Drive…') : (r.error || 'No se pudo enviar a Drive.'));
+                if (r.success) {
+                    const t = setInterval(async () => {
+                        try {
+                            const e = await (await fetch('/api/drive/estado')).json();
+                            const tarea = (e.tareas || []).find(x => x.id === r.id);
+                            if (!tarea) { clearInterval(t); return; }
+                            if (btn) btn.title = tarea.estado === 'subiendo' ? `Subiendo a Drive ${tarea.pct}%` : 'Enviar a mi Google Drive';
+                            if (tarea.estado === 'ok') { clearInterval(t); if (btn) btn.innerHTML = '<i class="ph-fill ph-check-circle"></i>'; }
+                            if (tarea.estado === 'error') { clearInterval(t); alert('Drive: ' + tarea.error); }
+                        } catch (err) {}
+                    }, 3000);
+                }
+            } catch (e) { alert('No se pudo enviar a Drive.'); }
+            finally { if (btn) btn.disabled = false; }
+        }
+
         async function loadClipsEnPc() {
             const grid = document.getElementById('pcClipsGrid');
             if (!grid) return;
@@ -5248,6 +5269,7 @@
                             ${cal ? `<div style="font-size:0.72rem; color:#93c5fd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(cal.resumen || '')}">${escapeHtml(cal.etiqueta || 'Calificado')} · ${escapeHtml(cal.resumen || '')}</div>` : ''}
                             <div class="pc-clip-sub">
                                 <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.cuenta_nombre ? (c.cuenta_nombre + ' · ' + c.nombre) : c.nombre)}</span>
+                                <button type="button" onclick='event.stopPropagation(); enviarClipDrive(${safeJs(c.key)}, this)' title="Enviar a mi Google Drive" style="background:none; border:none; color:#7dd3fc; cursor:pointer; padding:2px 4px; font-size:0.95rem;"><i class="ph ph-cloud-arrow-up"></i></button>
                                 <button type="button" onclick='event.stopPropagation(); openFilePreview(${ruJs})' title="Abrir archivo en PC" style="background:none; border:none; color:#7dd3fc; cursor:pointer; padding:2px 4px; font-size:0.95rem;"><i class="ph ph-folder-open"></i></button>
                             </div>
                         </div>

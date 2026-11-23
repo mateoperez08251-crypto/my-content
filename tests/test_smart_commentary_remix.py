@@ -142,6 +142,20 @@ class SmartRemixAndSplitTests(unittest.TestCase):
         self.assertLess(remapped[2]["start"] - remapped[1]["end"], 0.45)
         self.assertAlmostEqual(sr.remap_timestamp(3.1, intervals), remapped[2]["start"], places=1)
 
+    def test_jump_cuts_no_mutila_videos_visuales_con_poca_voz(self):
+        # Video visual/construcción de 60s con solo 4 palabras alucinadas por Whisper:
+        # NO debe recortar el clip a ~10s; debe conservar los 60s íntegros.
+        words = [
+            {"word": "Terima", "start": 8.0, "end": 8.6},
+            {"word": "kasih", "start": 8.7, "end": 9.2},
+            {"word": "telah", "start": 32.0, "end": 32.6},
+            {"word": "menonton", "start": 51.0, "end": 51.8},
+        ]
+        intervals, remapped, cuts = sr.plan_jump_cuts(60.0, words)
+        self.assertEqual(intervals, [(0.0, 60.0, 1.0)])
+        self.assertEqual(cuts, [])
+        self.assertEqual(len(remapped), 4)
+
     def test_select_cold_open_and_ambient_resolution(self):
         words = [
             {"word": f"palabra{i}", "start": i * 0.6, "end": i * 0.6 + 0.45}

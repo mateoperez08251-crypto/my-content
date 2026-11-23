@@ -597,7 +597,8 @@ class Motor:
         return elegidas
 
     def encolar(self, url, origen="manual", clave=None, canal="", titulo="", cuentas=None,
-                cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id='', devolver_ids=False, subir_ahora=True):
+                cortar=None, texto_fijo="", preset="", plataforma_origen=None, channel_id='', devolver_ids=False, subir_ahora=True,
+                opciones_extra=None):
         # Compatibilidad con clientes antiguos: este campo ya no añade una demora inicial.
         if type(subir_ahora) is not bool:
             raise ValueError("Elige si el primer clip debe subir al estar listo o esperar su pausa.")
@@ -622,9 +623,10 @@ class Motor:
         if not grupos:
             grupos[(preset or respaldo, None)] = []
         # Leer todos los presets actuales antes de crear ninguna fila. Si uno falla no queda un lote a medias.
+        extra_ok = dict(opciones_extra) if isinstance(opciones_extra, dict) else {}
         trabajos = [dict(url=url, origen=origen, canal=canal, titulo=titulo, cuentas=destinos,
                          preset=nombre, texto_fijo=texto_fijo, cortar=cortar, subir_ahora=subir_ahora,
-                         opciones=snapshot(self.cargar_preset(nombre) or {}) if cortar else {})
+                         opciones=snapshot({**(self.cargar_preset(nombre) or {}), **extra_ok}) if cortar else {})
                     for (nombre, _), destinos in grupos.items()]
         if not clave:
             clave = f"{origen}:{url}:{time.time_ns()}"  # lo manual se puede repetir a propósito
@@ -878,6 +880,11 @@ class Motor:
                     if os.path.commonpath([root, local]) != root or not os.path.isfile(local):
                         raise RuntimeError('No se encuentra el segmento local del live.')
                 opciones = json.loads(t.get('opciones') or '{}') or (self.cargar_preset(t['preset']) or {})
+                if local:
+                    # Lives: edición rápida salvo que se desactivara al iniciar la captura.
+                    # También acelera los segmentos que ya estaban en cola con «quality».
+                    if opciones.pop('live_rapido', True) is not False:
+                        opciones['export_profile'] = 'fast'
                 carpeta_t = self.carpeta_clips(t)
 
                 def _al_clip_local_listo(ev_clip):

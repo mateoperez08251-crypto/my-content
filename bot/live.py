@@ -250,6 +250,10 @@ def closed_segments(manifest):
         text = Path(manifest).read_text(encoding='utf-8')
     except FileNotFoundError:
         return []
+    # Si el manifiesto se reescribe mientras FFmpeg sigue capturando, FFmpeg continúa
+    # en su desplazamiento anterior y deja bytes NUL delante de la siguiente línea.
+    # Sin quitarlos, ese segmento cerrado nunca entraría en la cola (se perdía).
+    text = text.replace('\x00', '')
     text = text[:text.rfind('\n') + 1]
     result = []
     for row in csv.reader(io.StringIO(text)):
@@ -308,11 +312,27 @@ class LiveManager:
         self._audio_revisados = set()
         with self.db._lock, self.db._con:
             self.db._con.executescript(SCHEMA)
-            self.db._con.execute("UPDATE live_sesiones SET estado='interrumpido',detalle='La app se reinició. Los segmentos cerrados siguen en cola; vuelve a iniciar la URL para continuar capturando.' WHERE estado IN ('conectando','capturando','reconectando','deteniendo')")
+            # Las capturas en Colab siguen vivas allá aunque esta app se reinicie.
+            self.db._con.execute("UPDATE live_sesiones SET estado='interrumpido',detalle='La app se reinició. Los segmentos cerrados siguen en cola; vuelve a iniciar la URL para continuar capturando.' WHERE estado IN ('conectando','capturando','reconectando','deteniendo') AND config NOT LIKE '%\"colab\": {%'")
+        from .live_colab import ClienteLiveColab
+        self.colab = ClienteLiveColab(self)
         self.reconcile()  # Recupera manifiestos y entradas no encoladas antes del cierre.
         atexit.register(self.close)
         if background:
             threading.Thread(target=self._reconcile_loop, daemon=True, name='live-cola').start()
+            for fila in self.db._todos("SELECT id,config FROM live_sesiones WHERE config LIKE '%\"colab\": {%'"):
+                try:
+                    if not json.loads(fila['config'])['colab'].get('cerrado'):
+                        self.colab.seguir(fila['id'])
+                except (ValueError, KeyError, TypeError):
+                    pass
+
+    def _cfg(self, jid):
+        fila = self.db._uno('SELECT config FROM live_sesiones WHERE id=?', (jid,))
+        try:
+            return json.loads(fila['config']) if fila else {}
+        except (ValueError, TypeError):
+            return {}
 
     def _update(self, jid, state, detail=''):
         anterior = self.db._uno('SELECT estado,titulo,config FROM live_sesiones WHERE id=?', (jid,))
@@ -327,6 +347,11 @@ class LiveManager:
                       'detenido': 'Paré la captura. Lo que ya entró en la cola sigue ahí.',
                       'finalizado': 'El live terminó. Voy a dejar en la cola los segmentos que ya se cerraron.'}
             if state in textos:
+                if isinstance(cfg.get('colab'), dict):
+                    resumen = f"Clips editados en Colab y bajados a esta PC: {len(cfg['colab'].get('importados') or [])}."
+                    self.motor.avisar('lives', f'live:{jid}:{state}',
+                                      f"Live en Colab: {breve(anterior['titulo']) or 'Live'}\n{textos[state]}\n{resumen}", state == 'error')
+                    return
                 total = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=?', (jid,))['n']
                 enviados = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=? AND trabajo_id IS NOT NULL', (jid,))['n']
                 self.motor.avisar('lives', f'live:{jid}:{state}',
@@ -388,9 +413,24 @@ class LiveManager:
                     'subir_tiktok','subir_youtube','subir_facebook'):
             config.pop(key, None)
         config.update(clip_selection=mode, clip_duration=seconds, num_clips=1)
+        en_colab = str(data.get('destino') or 'pc').strip().lower() == 'colab'
+        if en_colab:
+            # Colab tiene GPU: calidad del preset (o 1080p si no hay preset). Nunca el modo 720p.
+            if config.get('export_profile') not in ('quality', 'balanced'):
+                config['export_profile'] = 'quality'
+            config['respetar_perfil_remoto'] = True
+            config['live_rapido'] = False
+        else:
+            # Edición rápida (por defecto): 720x1280, máx. 30 fps y codificación ultrarrápida.
+            # Un preset en «quality» exporta 1080x1920 a 60 fps con x264 «slow» en CPU y cada
+            # bloque tarda varias veces lo que dura: la cola del live crece sin parar.
+            rapido = data.get('rapido', True) is not False
+            config['live_rapido'] = rapido
+            if rapido:
+                config['export_profile'] = 'fast'
         from smart_selection import needs_groq
         from app_secrets import get_secret
-        if needs_groq(config) and not get_secret('groq', 'api_key', env='GROQ_API_KEY'):
+        if not en_colab and needs_groq(config) and not get_secret('groq', 'api_key', env='GROQ_API_KEY'):
             raise LiveError('Configura la clave de Groq en Smart Split para estas opciones, o elige partes sin subtítulos ni doblaje.')
         cfg = dict(mode=mode, seconds=seconds, window=window, buffer_mb=limit, accounts=accounts,
                    preset=preset, options=config, text=str(data.get('text', ''))[:2000])
@@ -400,6 +440,13 @@ class LiveManager:
             if self.stop_all.is_set():
                 raise LiveError('El capturador se está cerrando. Reinicia la app.')
             jid, now = uuid.uuid4().hex[:16], time.time()
+            if en_colab:
+                rid = self.colab.iniciar(url, cfg)  # Falla aquí (sin registro) si Colab no responde.
+                cfg['colab'] = {'rid': rid, 'tid': self.colab.crear_trabajo(jid, url, cfg), 'importados': []}
+                self.db._q("INSERT INTO live_sesiones(id,url,config,estado,detalle,creado,actualizado) VALUES(?,?,?,'conectando',?,?,?)",
+                           (jid, url, json.dumps(cfg), 'Colab está buscando la señal del live…', now, now))
+                self.colab.seguir(jid)
+                return {'id': jid, 'colab': True}
             self.db._q("INSERT INTO live_sesiones(id,url,config,estado,creado,actualizado) VALUES(?,?,?,'conectando',?,?)",
                        (jid, url, json.dumps(cfg), now, now))
             event = self.events[jid] = threading.Event()
@@ -412,6 +459,12 @@ class LiveManager:
             row = self.db._uno('SELECT estado FROM live_sesiones WHERE id=?', (jid,))
             if row is None:
                 raise LiveError('Live no encontrado.')
+            cfg = self._cfg(jid)
+            if self.colab.es_colab(cfg):
+                if row['estado'] in ACTIVE:
+                    self._update(jid, 'deteniendo', 'Pidiendo a Colab que cierre el bloque actual; termina de editar lo pendiente.')
+                    threading.Thread(target=self.colab.detener, args=(jid, cfg), daemon=True).start()
+                return {'estado': 'deteniendo' if row['estado'] in ACTIVE else row['estado']}
             event = self.events.get(jid)
             if event and row['estado'] in ACTIVE:
                 self._update(jid, 'deteniendo', 'Cerrando el segmento actual; los clips en cola se conservan.')
@@ -678,6 +731,9 @@ class LiveManager:
             row = self.db._uno('SELECT estado FROM live_sesiones WHERE id=?', (jid_str,))
             if row is None:
                 raise LiveError('Live no encontrado.')
+            cfg_s = self._cfg(jid_str)
+            if self.colab.es_colab(cfg_s):
+                threading.Thread(target=self.colab.eliminar_remoto, args=(cfg_s,), daemon=True).start()
             ev = self.events.get(jid_str)
             if ev is not None:
                 ev.set()
@@ -694,7 +750,8 @@ class LiveManager:
             }
             tids.update(
                 int(r['id'])
-                for r in self.db._todos('SELECT id FROM trabajos WHERE clave LIKE ?', (f'live:{jid_str}:%',))
+                for r in self.db._todos('SELECT id FROM trabajos WHERE clave LIKE ? OR clave=?',
+                                        (f'live:{jid_str}:%', f'livecolab:{jid_str}'))
             )
             for tid in tids:
                 self._limpiar_trabajo_live(tid)
@@ -766,6 +823,13 @@ class LiveManager:
             "SELECT id, estado FROM live_sesiones WHERE estado NOT IN ('conectando','capturando','reconectando','deteniendo')"
         )
         for ses in sesiones_inactivas:
+            cfg_s = self._cfg(ses['id'])
+            if self.colab.es_colab(cfg_s):
+                # Solo se retira el registro: los clips bajados siguen en la cola de subida.
+                if cfg_s['colab'].get('cerrado'):
+                    self.db._q('DELETE FROM live_sesiones WHERE id=?', (ses['id'],))
+                    ses_borradas += 1
+                continue
             restantes = self.db._uno('SELECT COUNT(*) AS n FROM live_segmentos WHERE sesion=?', (ses['id'],))['n']
             if restantes == 0:
                 try:
@@ -811,6 +875,18 @@ class LiveManager:
             item['segmentos'] = self.db._todos('SELECT estado,COUNT(*) AS n FROM live_segmentos WHERE sesion=? GROUP BY estado', (jid,))
             cfg = json.loads(self.db._uno('SELECT config FROM live_sesiones WHERE id=?', (jid,))['config'])
             item.update(mode=cfg['mode'], seconds=cfg['seconds'], window=cfg['window'], accounts=cfg['accounts'])
+            if self.colab.es_colab(cfg):
+                info = self.colab.info.get(jid) or {}
+                importados = len(cfg['colab'].get('importados') or [])
+                item['donde'] = 'colab'
+                item['segmentos'] = [x for x in (
+                    {'estado': 'Bloques esperando edición en Colab', 'n': info.get('bloques_pendientes') or 0},
+                    {'estado': 'Bloques editados en Colab', 'n': info.get('bloques_editados') or 0},
+                    {'estado': 'Clips bajados a esta PC', 'n': importados},
+                    {'estado': 'Bloques con error', 'n': info.get('errores') or 0}) if x['n']]
+                item['clips_recientes'] = []
+                continue
+            item['donde'] = 'pc'
             filas_seg = self.db._todos(
                 "SELECT nombre,inicio,fin,estado,trabajo_id FROM live_segmentos "
                 "WHERE sesion=? ORDER BY (estado IN ('subido','retirado')) ASC, inicio DESC LIMIT 8",

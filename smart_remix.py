@@ -131,7 +131,17 @@ def plan_jump_cuts(duration: float, words: list[dict], min_silence: float = 0.65
         merged.append(span)
 
     nuevo_total = sum(b - a for a, b in merged)
-    if len(merged) <= 1 or dur - nuevo_total < 0.35 or nuevo_total < 1.5:
+    # Protección para videos visuales o con poca voz (construcción, gameplay, música, ASMR):
+    # nunca mutilar un clip largo a pocos segundos por culpa de pausas sin diálogo o alucinaciones de Whisper.
+    min_ratio = 0.55 if dur >= 15.0 else 0.45
+    densidad_palabras = len(valid) / max(dur, 1.0)
+    if (
+        len(merged) <= 1
+        or dur - nuevo_total < 0.35
+        or nuevo_total < 1.5
+        or nuevo_total < dur * min_ratio
+        or (dur >= 15.0 and densidad_palabras < 0.55)
+    ):
         return [(0.0, dur, 1.0)], [dict(w) for w in words], []
 
     intervals: list[tuple[float, float, float]] = []

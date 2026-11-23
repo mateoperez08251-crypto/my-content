@@ -434,8 +434,8 @@ def guardar_video_expresion(
     exp = str(expresion or "neutral").strip().lower()
     if exp not in EXPRESIONES:
         raise ValueError(f"Expresión no válida. Usa: {', '.join(EXPRESIONES)}.")
-    if not raw_bytes or len(raw_bytes) > 65 * 1024 * 1024:
-        raise ValueError("El video del personaje debe pesar menos de 65 MB.")
+    if not raw_bytes or len(raw_bytes) > 180 * 1024 * 1024:
+        raise ValueError("El video del personaje debe pesar menos de 180 MB.")
     carpeta = _carpeta_segura(cid)
     if not carpeta.is_dir():
         raise ValueError("El personaje no existe.")

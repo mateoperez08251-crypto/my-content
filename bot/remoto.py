@@ -114,7 +114,25 @@ class Cliente:
             capacidades = self.probar().get('capabilities')
             if not isinstance(capacidades, list) or CAPACIDAD_ORIGINALIDAD not in capacidades:
                 raise FalloTrabajo('Actualiza la libreta y ejecuta las celdas 2, 2B, 6 y 6C de Colab. Ese servidor aún no admite comentario IA, miniatura automática, remezcla ni audio diferenciado; no se ignorarán tus ajustes.')
-        r = self._pedir("POST", "/api/bot/remoto/cortar", json={"source": url_video, "preset": preset})
+        pid_reacc = str(preset.get('reaction_character_id') or '').strip()
+        if pid_reacc:
+            self.sincronizar_personaje(pid_reacc)
+        hdrs_extra = {}
+        if str(preset.get('thumbnail_engine') or '') == 'ia_video':
+            try:
+                from app_secrets import get_secret
+                pk = get_secret('pollinations', 'api_key', env='POLLINATIONS_API_KEY') or ''
+                gk = get_secret('gemini', 'api_key', env='GEMINI_API_KEY') or ''
+                if pk:
+                    hdrs_extra['X-Pollinations-Key'] = pk
+                if gk:
+                    hdrs_extra['X-Gemini-Key'] = gk
+            except Exception:
+                pass
+        kw_post = {"json": {"source": url_video, "preset": preset}}
+        if hdrs_extra:
+            kw_post["headers"] = hdrs_extra
+        r = self._pedir("POST", "/api/bot/remoto/cortar", **kw_post)
         if r.status_code == 409:
             raise ServidorOcupado()
         if r.status_code == 404:
@@ -360,8 +378,17 @@ class Cliente:
             pass
         return video_path, None
 
-    def reaccionar(self, video_path, payload, sprites_paths, destino_mp4, progreso=None):
-        """Envía el video + personaje al servidor Colab remoto con reintentos SSL y tolerancia a cortes breves."""
+    def reaccionar(
+        self,
+        video_path,
+        payload,
+        sprites_paths,
+        destino_mp4,
+        progreso=None,
+        videos_paths=None,
+        frames_paths=None,
+    ):
+        """Envía el video + personaje (sprites, videos MP4 y frames) a Colab remoto con reintentos SSL."""
         import json as _json
         ruta_envio, tmp_opt = self._preparar_video_para_tunel(video_path, max_mb=45, progreso=progreso)
         jid = None
@@ -381,6 +408,17 @@ class Cliente:
                             fs = open(ruta, 'rb')
                             abiertos.append(fs)
                             archivos.append((f'sprite_{exp}', (f'{exp}.png', fs, 'image/png')))
+                    for exp, ruta in (videos_paths or {}).items():
+                        if ruta and os.path.isfile(ruta):
+                            fvid = open(ruta, 'rb')
+                            abiertos.append(fvid)
+                            archivos.append((f'pvideo_{exp}', (f'{exp}.mp4', fvid, 'video/mp4')))
+                    for exp, lista in (frames_paths or {}).items():
+                        for idx_f, ruta in enumerate((lista or [])[:48]):
+                            if ruta and os.path.isfile(ruta):
+                                ff = open(ruta, 'rb')
+                                abiertos.append(ff)
+                                archivos.append((f'pframe_{exp}_{idx_f:04d}', (f'{idx_f:04d}.png', ff, 'image/png')))
                     r = self._pedir(
                         'POST', '/api/bot/remoto/reaccionar',
                         data={'payload': _json.dumps(payload, ensure_ascii=False)},
@@ -464,6 +502,166 @@ class Cliente:
                 raise FalloTrabajo(st.get('error') or 'Error al renderizar la reacción en Colab.')
             time.sleep(2.5)
         raise FalloTrabajo('Tiempo agotado esperando la reacción en Colab.')
+
+    def generar_videos_personaje(self, personaje, sprites_paths, expresiones, modelo_video, destino_dir, progreso=None):
+        """Genera los clips MP4 del personaje en Colab GPU y descarga copia local a `destino_dir`."""
+        import json as _json
+        archivos = []
+        abiertos = []
+        try:
+            for exp, ruta in (sprites_paths or {}).items():
+                if ruta and os.path.isfile(ruta):
+                    fs = open(ruta, 'rb')
+                    abiertos.append(fs)
+                    archivos.append((f'sprite_{exp}', (f'{exp}.png', fs, 'image/png')))
+            payload = {
+                'personaje': personaje,
+                'expresiones': list(expresiones or []),
+                'modelo_video': modelo_video or 'ltx_video',
+            }
+            r = self._pedir(
+                'POST', '/api/bot/remoto/reaccion_generar_videos',
+                data={'payload': _json.dumps(payload, ensure_ascii=False)},
+                files=archivos, headers={'Connection': 'close'}, timeout=(20, 120),
+            )
+            if r.status_code == 404:
+                raise FalloTrabajo(
+                    'Tu servidor Colab aún no tiene generación de videos IA. '
+                    'Abre la libreta actualizada My_Content_Colab.ipynb y ejecuta las celdas 2B, 5E, 6 y 6C.'
+                )
+            d_ini = self._json(r)
+            if r.status_code >= 400 or not d_ini.get('success') or not d_ini.get('job_id'):
+                raise FalloTrabajo(d_ini.get('error') or f'Colab rechazó la generación (HTTP {r.status_code}).')
+            jid = d_ini['job_id']
+        finally:
+            for fh in abiertos:
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+
+        inicio = time.monotonic()
+        fallos_red = 0
+        while time.monotonic() - inicio < 3600:
+            try:
+                st = self._json(self._pedir('GET', f'/api/bot/remoto/reaccion_videos/{jid}', timeout=(15, 30)))
+                fallos_red = 0
+            except ServidorCaido:
+                fallos_red += 1
+                if fallos_red >= 5:
+                    raise ServidorCaido('Se perdió la conexión con Colab mientras generaba los videos del personaje.') from None
+                time.sleep(3.0)
+                continue
+            if callable(progreso):
+                progreso(st.get('mensaje') or 'Generando videos IA en Colab GPU…', int(st.get('progreso') or 0))
+            if st.get('estado') == 'listo':
+                os.makedirs(destino_dir, exist_ok=True)
+                descargados = []
+                for exp in (st.get('generados') or []):
+                    dst = os.path.join(destino_dir, f'{exp}.mp4')
+                    self._bajar(f'/api/bot/remoto/reaccion_videos/{jid}/{exp}', dst)
+                    if os.path.isfile(dst) and os.path.getsize(dst) > 1024:
+                        descargados.append(exp)
+                return {'generados': descargados, 'modelo_usado': st.get('modelo_usado') or modelo_video}
+            if st.get('estado') == 'error':
+                raise FalloTrabajo(st.get('error') or 'Error al generar videos IA en Colab.')
+            time.sleep(3.5)
+        raise FalloTrabajo('Tiempo agotado esperando los videos del personaje en Colab.')
+
+
+    def sincronizar_personaje(self, pid):
+        """Sincroniza solo los archivos compactos del personaje (~2 MB) con Colab una vez por sesión;
+        el video largo lo descarga Colab directamente en calidad máxima."""
+        import hashlib
+        import reaction_characters as rc
+
+        p = rc.obtener_personaje(pid)
+        if not p:
+            raise FalloTrabajo(f"No encontré el personaje '{pid}' en esta PC.")
+        carpeta = rc._carpeta_segura(pid)
+        archivos_subir = []
+        hasher = hashlib.sha256()
+        meta_path = carpeta / "personaje.json"
+        if meta_path.is_file():
+            st = meta_path.stat()
+            hasher.update(f"personaje.json:{st.st_size}:{int(st.st_mtime)}|".encode("utf-8"))
+        for exp, ruta in sorted(rc.rutas_expresiones_personaje(pid).items()):
+            if os.path.isfile(ruta):
+                st = os.stat(ruta)
+                hasher.update(f"img:{exp}:{st.st_size}:{int(st.st_mtime)}|".encode("utf-8"))
+                archivos_subir.append((f"pimg_{exp}", f"{exp}.png", ruta, "image/png"))
+        for exp, ruta in sorted(rc.rutas_videos_personaje(pid).items()):
+            if os.path.isfile(ruta):
+                st = os.stat(ruta)
+                hasher.update(f"vid:{exp}:{st.st_size}:{int(st.st_mtime)}|".encode("utf-8"))
+                archivos_subir.append((f"pvideo_{exp}", f"{exp}.mp4", ruta, "video/mp4"))
+        for exp, lista in sorted(rc.rutas_frames_personaje(pid).items()):
+            for idx_f, ruta in enumerate(lista[:48]):
+                if os.path.isfile(ruta):
+                    st = os.stat(ruta)
+                    hasher.update(f"frm:{exp}:{idx_f}:{st.st_size}:{int(st.st_mtime)}|".encode("utf-8"))
+                    archivos_subir.append((f"pframe_{exp}_{idx_f:03d}", f"{exp}_{idx_f:03d}.png", ruta, "image/png"))
+        firma = hasher.hexdigest()[:24]
+
+        # Comprobar si Colab ya tiene esta misma versión cacheada
+        r_chk = self._pedir("GET", f"/api/bot/remoto/personaje/{pid}/estado", params={"firma": firma}, timeout=(15, 25))
+        if r_chk.status_code == 404:
+            raise FalloTrabajo(
+                "Actualiza My_Content_Colab.ipynb en Colab y ejecuta las celdas 2, 2B, 6 y 6C "
+                "para usar personajes reaccionadores integrados en 1080p."
+            )
+        if r_chk.status_code == 200:
+            info = self._json(r_chk)
+            if info.get("sincronizado") is True:
+                return True
+
+        # Subir solo el paquete compacto del personaje (con reintentos ante cortes SSL de Cloudflare)
+        ultimo_err = None
+        for intento in range(3):
+            abiertos = []
+            try:
+                files = {}
+                for campo, nombre_f, ruta, mime in archivos_subir:
+                    fh = open(ruta, "rb")
+                    abiertos.append(fh)
+                    files[campo] = (nombre_f, fh, mime)
+                data = {
+                    "pid": pid,
+                    "firma": firma,
+                    "personaje": json.dumps(p, ensure_ascii=False),
+                }
+                r = self._pedir(
+                    "POST", "/api/bot/remoto/personaje/sincronizar",
+                    files=files if files else None,
+                    data=data,
+                    headers={"Connection": "close"},
+                    timeout=(25, 180),
+                )
+                if r.status_code == 404:
+                    raise FalloTrabajo(
+                        "Actualiza My_Content_Colab.ipynb en Colab y ejecuta las celdas 2, 2B, 6 y 6C."
+                    )
+                d = self._json(r)
+                if r.status_code >= 400 or not d.get("success"):
+                    raise FalloTrabajo(d.get("error") or f"Colab no pudo guardar el personaje (HTTP {r.status_code}).")
+                return True
+            except ServidorCaido as exc:
+                ultimo_err = exc
+                if intento < 2:
+                    time.sleep(2.5 * (intento + 1))
+                    continue
+                raise ServidorCaido(
+                    f"No se pudo enviar el personaje a Colab ({exc}). Verifica que la celda 6C siga activa."
+                ) from exc
+            finally:
+                for fh in abiertos:
+                    try:
+                        fh.close()
+                    except Exception:
+                        pass
+        if ultimo_err:
+            raise ultimo_err
+        return False
 
 
 ClienteRemoto = Cliente

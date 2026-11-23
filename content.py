@@ -1356,6 +1356,49 @@ def clave_elevenlabs():
     return jsonify({"success": True, "hay": True, "vista": clave[:4] + "…" + clave[-4:]})
 
 
+@app.route("/api/clave_miniaturas_ia", methods=["GET", "POST", "DELETE"])
+def clave_miniaturas_ia():
+    """Claves opcionales gratuitas para miniaturas IA completas desde 0 (Pollinations Edits / Gemini / HF)."""
+    from app_secrets import load_secrets, save_secrets
+    _provs = {
+        "pollinations": ("pollinations", "api_key", "POLLINATIONS_API_KEY"),
+        "gemini": ("gemini", "api_key", "GEMINI_API_KEY"),
+        "huggingface": ("huggingface", "token", "HF_TOKEN"),
+    }
+
+    def _estado_actual():
+        out = {}
+        for nom, (sec, key, env) in _provs.items():
+            val = get_secret(sec, key, env=env) or ""
+            out[nom] = {
+                "hay": bool(val),
+                "vista": (val[:4] + "…" + val[-4:]) if len(val) > 10 else ("••••" if val else ""),
+            }
+        return out
+
+    if request.method == "GET":
+        return jsonify({"success": True, "proveedores": _estado_actual()})
+
+    d = request.get_json(silent=True) or {}
+    prov = str(d.get("proveedor") or "pollinations").strip().lower()
+    if prov not in _provs:
+        return jsonify({"success": False, "error": "Proveedor no válido. Usa pollinations, gemini o huggingface."}), 400
+    sec, key, _ = _provs[prov]
+    datos = load_secrets()
+    if request.method == "DELETE":
+        if isinstance(datos.get(sec), dict):
+            datos[sec].pop(key, None)
+        save_secrets(datos)
+        return jsonify({"success": True, "proveedores": _estado_actual()})
+
+    clave = str(d.get("clave") or "").strip().strip('"\'')
+    if len(clave) < 10:
+        return jsonify({"success": False, "error": "Pega la clave completa del proveedor elegido."}), 400
+    datos.setdefault(sec, {})[key] = clave
+    save_secrets(datos)
+    return jsonify({"success": True, "proveedores": _estado_actual()})
+
+
 @app.route("/api/elevenlabs/voces", methods=["GET"])
 def elevenlabs_voces():
     """Voces de la cuenta de ElevenLabs, con las de español primero."""
@@ -2036,11 +2079,26 @@ def run_smart_split_thread(data):
             "ambient_music": str(data.get("ambient_music", "off") or "off"),
             "clean_vocals": bool(data.get("clean_vocals", False)),
             "auto_thumbnail": str(data.get("auto_thumbnail", "off") or "off"),
-            "thumbnail_engine": "qwen" if data.get("thumbnail_engine") == "qwen" else "clasico",
+            "thumbnail_engine": str(data.get("thumbnail_engine") or "clasico").strip().lower() if str(data.get("thumbnail_engine") or "").strip().lower() in ("clasico", "qwen", "ia_video") else "clasico",
             "thumbnail_style": "clasico" if data.get("thumbnail_style") == "clasico" else "kinetik",
             "auto_hashtags": data.get("auto_hashtags", True) is not False,
             "politicas_tiktok": str(data.get("politicas_tiktok", "alto") or "off"),
             "strip_metadata": bool(data.get("strip_metadata", True)),
+            "streamer_corner": str(data.get("streamer_corner", "auto") or "auto"),
+            "streamer_game_mode": str(data.get("streamer_game_mode", "cam_arriba_centro") or "cam_arriba_centro"),
+            "streamer_cam_ratio": float(data.get("streamer_cam_ratio", 0.26) or 0.26),
+            "reaction_character_id": str(data.get("reaction_character_id", "") or "").strip(),
+            "reaction_mode": str(data.get("reaction_mode", "silencioso") or "silencioso"),
+            "reaction_layout": str(data.get("reaction_layout", "pip_arriba_centro") or "pip_arriba_centro"),
+            "reaction_motor": str(data.get("reaction_motor", "auto") or "auto"),
+            "reaction_marco": str(data.get("reaction_marco", "auto") or "auto"),
+            "reaction_frecuencia": str(data.get("reaction_frecuencia", "media") or "media"),
+            "reaction_vision": bool(data.get("reaction_vision", True)),
+            "reaction_stickers": bool(data.get("reaction_stickers", True)),
+            "reaction_frames_fps": int(data.get("reaction_frames_fps", 12) or 12),
+            "reaction_intervenciones": data.get("reaction_intervenciones"),
+            "reaction_expresion_fija": str(data.get("reaction_expresion_fija", "") or "").strip(),
+            "reaction_duracion_gesto": str(data.get("reaction_duracion_gesto", "auto") or "auto").strip(),
             "_trabajo_id": data.get("_trabajo_id"),
         }
         if cfg_datos['upscale'] == 'ia':
@@ -2803,6 +2861,69 @@ def bot_clip_guardado(sid):
     return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta))
 
 
+# ── Google Drive: enviar clips con un botón ─────────────────────────────────
+def _drive_ruta_desde_peticion(datos):
+    """Resuelve la ruta en el servidor (nunca se acepta una ruta libre del navegador)."""
+    if datos.get("subida_id") not in (None, ""):
+        subida = _bot().db.subida(int(datos["subida_id"]))
+        if subida and subida.get("archivo") and os.path.isfile(subida["archivo"]):
+            titulo = (subida.get("video_titulo") or str(subida.get("texto") or "").split("\n")[0]).strip()
+            return subida["archivo"], titulo
+        return None, ""
+    if datos.get("clave"):
+        clave = str(datos["clave"])
+        with _clips_pc_lock:
+            ruta = _clips_pc_map.get(clave)
+        if not ruta:
+            _escanear_clips_pc(60)
+            with _clips_pc_lock:
+                ruta = _clips_pc_map.get(clave)
+        if ruta and _es_ruta_media_permitida(ruta):
+            return ruta, ""
+    return None, ""
+
+
+def _drive_nombre(ruta, titulo):
+    import re as _re
+    ext = os.path.splitext(ruta)[1].lower()
+    limpio = _re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", titulo or "").strip()[:90]
+    return (limpio + ext) if limpio else os.path.basename(ruta)
+
+
+@app.route("/api/drive/estado", methods=["GET"])
+def api_drive_estado():
+    import drive_uploader
+    return jsonify({"success": True, **drive_uploader.estado()})
+
+
+@app.route("/api/drive/subir", methods=["POST"])
+def api_drive_subir():
+    import drive_uploader
+    datos = request.get_json(silent=True) or {}
+    try:
+        ruta, titulo = _drive_ruta_desde_peticion(datos)
+    except (TypeError, ValueError):
+        ruta, titulo = None, ""
+    if not ruta:
+        return jsonify({"success": False, "error": "Ese clip ya no está en esta PC."}), 404
+    try:
+        res = drive_uploader.subir(ruta, _drive_nombre(ruta, titulo))
+    except drive_uploader.DriveError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    msg = ("Abrí el navegador para que inicies sesión en Google Drive; el clip se sube al terminar."
+           if res["estado"] == "esperando_login" else
+           "Ese clip ya se está enviando a Drive." if res.get("repetido") else
+           f"Enviando a Google Drive → carpeta «{drive_uploader.CARPETA_DRIVE}».")
+    return jsonify({"success": True, "mensaje": msg, **res})
+
+
+@app.route("/api/drive/desconectar", methods=["POST"])
+def api_drive_desconectar():
+    import drive_uploader
+    drive_uploader.desconectar()
+    return jsonify({"success": True, "mensaje": "Google Drive desconectado de esta PC."})
+
+
 @app.route('/api/bot/lives', methods=['GET', 'POST'])
 def bot_lives():
     def hacer():
@@ -2868,11 +2989,13 @@ def bot_encolar():
         urls = [u.strip() for u in str(data.get("url", "")).replace(",", "\n").splitlines() if u.strip()]
         if not urls:
             raise ValueError("Pega al menos un enlace.")
+        opciones_extra = data.get("opciones_extra") if isinstance(data.get("opciones_extra"), dict) else None
         ids = []
         for u in urls:
             ids.extend(_bot().encolar(u, origen="manual", cuentas=data.get("cuentas") or None,
                                      cortar=data.get("cortar", True), texto_fijo=data.get("texto_fijo", ""),
-                                     preset=data.get('preset', ''), devolver_ids=True, subir_ahora=data.get('subir_ahora', True)))
+                                     preset=data.get('preset', ''), devolver_ids=True, subir_ahora=data.get('subir_ahora', True),
+                                     opciones_extra=opciones_extra))
         return {"ids": ids}
     return _bot_respuesta(hacer)
 
@@ -3176,6 +3299,13 @@ def remoto_cortar():
     preset_remoto = dict(d.get("preset") or {})
     if not preset_remoto.get("respetar_perfil_remoto") and preset_remoto.get("export_profile") in ("fast", "balanced", "", None):
         preset_remoto["export_profile"] = "quality"
+    # Claves opcionales de miniaturas IA en memoria para el subproceso de Colab (nunca se guardan en el notebook)
+    hk_poll = (request.headers.get("X-Pollinations-Key") or "").strip()
+    if hk_poll:
+        os.environ["POLLINATIONS_API_KEY"] = hk_poll
+    hk_gem = (request.headers.get("X-Gemini-Key") or "").strip()
+    if hk_gem:
+        os.environ["GEMINI_API_KEY"] = hk_gem
     datos = {**preset_remoto, "source": source, "download_quality": "best",
              "subir_tiktok": False, "subir_youtube": False, "subir_facebook": False, "_lanzar_error": True}
     jid = uuid.uuid4().hex[:12]
@@ -3251,6 +3381,73 @@ def remoto_miniatura(jid, n):
     if not thumb or not os.path.isfile(thumb):
         return jsonify({"success": False, "error": "Miniatura no encontrada."}), 404
     return send_from_directory(os.path.dirname(thumb), os.path.basename(thumb), as_attachment=True)
+
+
+# ---- Live en Colab: este servidor graba el live y edita cada bloque; la PC baja los clips ----
+_live_colab_srv = None
+_live_colab_srv_lock = threading.Lock()
+
+
+def _servidor_live():
+    global _live_colab_srv
+    with _live_colab_srv_lock:
+        if _live_colab_srv is None:
+            from bot.live_colab import ServidorLive
+            _live_colab_srv = ServidorLive(paths.data_path("live_colab"), _intentar_iniciar_trabajo,
+                                           run_smart_split_thread)
+        return _live_colab_srv
+
+
+def _live_colab_respuesta(fn):
+    from bot.live import LiveError
+    try:
+        return jsonify({"success": True, **(fn() or {})})
+    except KeyError as e:
+        return jsonify({"success": False, "error": str(e).strip("'\"")}), 404
+    except LiveError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/bot/remoto/live", methods=["POST"])
+def remoto_live_iniciar():
+    d = request.get_json(silent=True) or {}
+    return _live_colab_respuesta(lambda: _servidor_live().iniciar(d.get("url"), d.get("cfg")))
+
+
+@app.route("/api/bot/remoto/live/<rid>", methods=["GET", "DELETE"])
+def remoto_live_estado(rid):
+    if request.method == "DELETE":
+        return _live_colab_respuesta(lambda: _servidor_live().eliminar(rid))
+    return _live_colab_respuesta(lambda: _servidor_live().estado(rid))
+
+
+@app.route("/api/bot/remoto/live/<rid>/detener", methods=["POST"])
+def remoto_live_detener(rid):
+    return _live_colab_respuesta(lambda: _servidor_live().detener(rid))
+
+
+@app.route("/api/bot/remoto/live/<rid>/clip/<int:n>", methods=["GET", "DELETE"])
+def remoto_live_clip(rid, n):
+    if request.method == "DELETE":
+        return _live_colab_respuesta(lambda: _servidor_live().borrar_clip(rid, n))
+    try:
+        ruta = _servidor_live().ruta_clip(rid, n)
+    except KeyError:
+        ruta = None
+    if not ruta:
+        return jsonify({"success": False, "error": "Clip no encontrado."}), 404
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta), as_attachment=True)
+
+
+@app.route("/api/bot/remoto/live/<rid>/miniatura/<int:n>", methods=["GET"])
+def remoto_live_miniatura(rid, n):
+    try:
+        ruta = _servidor_live().ruta_clip(rid, n, miniatura=True)
+    except KeyError:
+        ruta = None
+    if not ruta:
+        return jsonify({"success": False, "error": "Miniatura no encontrada."}), 404
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta), as_attachment=True)
 
 
 @app.route("/api/bot/remoto_probar", methods=["POST"])
@@ -3423,9 +3620,12 @@ def reacciones_personajes():
             "personalidades": rc.PERSONALIDADES,
             "estilos_personaje": rc.ESTILOS_PERSONAJE,
             "modelos_generacion": rc.MODELOS_GENERACION_PERSONAJE,
+            "modelos_video_ia": rc.MODELOS_VIDEO_IA,
             "marcos_personaje": rc.MARCOS_PERSONAJE,
             "layouts_reaccion": list(rc.LAYOUTS_REACCION),
+            "modos_interaccion": list(rc.MODOS_INTERACCION),
             "expresiones": list(rc.EXPRESIONES),
+            "expresiones_labels": rc.EXPRESIONES_LABELS,
             "lipsync": rl.estado(),
             "qwen_gpu": bool(pg.disponible()),
             "remoto_activo": bool((_bot().cfg or {}).get("remoto_url")),
@@ -3519,6 +3719,146 @@ def reacciones_personaje_generar_expresiones(cid):
         return jsonify({"success": False, "error": str(exc)}), 400
 
 
+@app.route("/api/reacciones/personajes/<cid>/video/<expresion>", methods=["GET", "POST", "DELETE"])
+def reacciones_personaje_video(cid, expresion):
+    import reaction_characters as rc
+    if request.method == "GET":
+        ruta = rc.ruta_video_expresion(cid, expresion)
+        if not ruta or not ruta.is_file():
+            return jsonify({"success": False, "error": "Video no encontrado."}), 404
+        return send_from_directory(str(ruta.parent), ruta.name, mimetype="video/mp4")
+    if request.method == "DELETE":
+        try:
+            personaje = rc.borrar_video_expresion(cid, expresion)
+            return jsonify({"success": True, "personaje": personaje})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+    try:
+        f = request.files.get("video")
+        if f is None:
+            return jsonify({"success": False, "error": "Elige un archivo de video (.mp4 / .mov / .webm)."}), 400
+        ff = FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg"
+        personaje = rc.guardar_video_expresion(cid, expresion, f.read(), filename=f.filename or "clip.mp4", ffmpeg_exe=ff)
+        return jsonify({"success": True, "personaje": personaje})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>/videos_lote", methods=["POST"])
+def reacciones_personaje_videos_lote(cid):
+    """Subida múltiple: asigna cada MP4 por su nombre (neutral.mp4, riendo.mp4, sorprendido.mp4, etc.)."""
+    import reaction_characters as rc
+    try:
+        archivos = request.files.getlist("videos")
+        if not archivos:
+            return jsonify({"success": False, "error": "Elige uno o más archivos de video."}), 400
+        ff = FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg"
+        guardados, ignorados = [], []
+        personaje = rc.obtener_personaje(cid)
+        if not personaje:
+            return jsonify({"success": False, "error": "Personaje no encontrado."}), 404
+        for f in archivos:
+            fname = f.filename or ""
+            exp = rc.detectar_expresion_por_nombre(fname)
+            if not exp:
+                ignorados.append(fname)
+                continue
+            personaje = rc.guardar_video_expresion(cid, exp, f.read(), filename=fname, ffmpeg_exe=ff)
+            guardados.append(exp)
+        return jsonify({"success": True, "personaje": personaje, "guardados": guardados, "ignorados": ignorados})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>/frames/<expresion>", methods=["POST", "DELETE"])
+def reacciones_personaje_frames(cid, expresion):
+    import reaction_characters as rc
+    if request.method == "DELETE":
+        try:
+            personaje = rc.borrar_frames_expresion(cid, expresion)
+            return jsonify({"success": True, "personaje": personaje})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+    try:
+        archivos = request.files.getlist("frames")
+        if not archivos:
+            f1 = request.files.get("frame")
+            if f1 is not None:
+                archivos = [f1]
+        if not archivos:
+            return jsonify({"success": False, "error": "Elige varias imágenes (PNG/JPG) o un GIF/WebP animado."}), 400
+        reemplazar = str(request.form.get("reemplazar", "true")).lower() not in ("false", "0", "no")
+        pares = [(f.filename or f"f_{i}.png", f.read()) for i, f in enumerate(archivos)]
+        personaje = rc.guardar_frames_expresion(cid, expresion, pares, reemplazar=reemplazar)
+        return jsonify({"success": True, "personaje": personaje})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/reacciones/personajes/<cid>/frames/<expresion>/<int:idx>", methods=["GET"])
+def reacciones_personaje_frame_get(cid, expresion, idx):
+    import reaction_characters as rc
+    rutas = rc.rutas_frames_personaje(cid).get(str(expresion or "").strip().lower()) or []
+    if idx < 0 or idx >= len(rutas) or not os.path.isfile(rutas[idx]):
+        return jsonify({"success": False, "error": "Frame no encontrado."}), 404
+    return send_from_directory(os.path.dirname(rutas[idx]), os.path.basename(rutas[idx]), mimetype="image/png")
+
+
+@app.route("/api/reacciones/personajes/<cid>/prompts_video", methods=["GET"])
+def reacciones_personaje_prompts_video(cid):
+    import reaction_characters as rc
+    p = rc.obtener_personaje(cid)
+    if not p:
+        return jsonify({"success": False, "error": "Personaje no encontrado."}), 404
+    return jsonify({"success": True, "prompts": rc.prompts_video_expresiones(cid), "labels": rc.EXPRESIONES_LABELS})
+
+
+@app.route("/api/reacciones/personajes/<cid>/generar_videos", methods=["POST"])
+def reacciones_personaje_generar_videos(cid):
+    """Genera clips MP4 con LTX-Video / Wan I2V en Colab GPU (local o vía servidor Colab conectado)."""
+    import reaction_characters as rc
+    try:
+        p = rc.obtener_personaje(cid)
+        if not p:
+            return jsonify({"success": False, "error": "Personaje no encontrado."}), 404
+        d = request.get_json(silent=True) or {}
+        expresiones = d.get("expresiones") or ["neutral", "sorprendido", "riendo", "serio", "pensando", "celebrando"]
+        modelo_video = str(d.get("modelo_video") or p.get("modelo_video_ia") or "ltx_video")
+
+        gpu_local = False
+        try:
+            import torch
+            gpu_local = bool(torch.cuda.is_available())
+        except Exception:
+            gpu_local = False
+
+        cfg_bot = _bot().cfg or {}
+        remoto_url = (cfg_bot.get("remoto_url") or "").strip()
+        remoto_clave = (cfg_bot.get("remoto_clave") or "").strip()
+
+        if (not gpu_local) and remoto_url and not MODO_SERVIDOR:
+            from bot.remoto import Cliente
+            cli = Cliente(remoto_url, remoto_clave)
+            sprites = rc.rutas_expresiones_personaje(cid)
+            dest_dir = os.path.join(str(rc._carpeta_segura(cid)), "videos")
+            try:
+                res_rem = cli.generar_videos_personaje(p, sprites, expresiones, modelo_video, dest_dir)
+            finally:
+                cli.s.close()
+            return jsonify({
+                "success": True,
+                "personaje": rc.obtener_personaje(cid),
+                "generados": res_rem.get("generados") or [],
+                "modelo_usado": res_rem.get("modelo_usado") or modelo_video,
+                "en_colab": True,
+            })
+
+        res = rc.generar_videos_ia(cid, expresiones=expresiones, modelo_video=modelo_video, log=log)
+        return jsonify({"success": True, **res, "en_colab": False})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
 @app.route("/api/reacciones/analizar", methods=["POST"])
 def reacciones_analizar():
     import reaction_characters as rc
@@ -3586,6 +3926,8 @@ def reacciones_analizar():
                 ffprobe_exe=ffprobe_exe,
                 log=log,
                 transcripcion_previa=trans_prev,
+                expresion_fija=str(data.get("expresion_fija") or data.get("reaction_expresion_fija") or ""),
+                duracion_gesto=str(data.get("duracion_gesto") or data.get("reaction_duracion_gesto") or "auto"),
             )
             if tr.get("titulo") and (not res_c.get("titulo_sugerido") or res_c["titulo_sugerido"].endswith("reacciona a esto")):
                 res_c["titulo_sugerido"] = tr["titulo"]
@@ -3616,6 +3958,106 @@ def reacciones_analizar():
         return jsonify({"success": False, "error": str(exc)}), 400
 
 
+def _render_reaccion_con_smart_editor(
+    video_path,
+    salida_mp4,
+    personaje,
+    intervenciones,
+    opciones_edicion,
+    layout="pip_arriba_centro",
+    motor_anim="auto",
+    marco_estilo="auto",
+    modo_interaccion="silencioso",
+    frames_fps=12,
+    stickers_2d=True,
+    subtitulos_activos=True,
+    progreso=None,
+):
+    """Ejecuta un archivo local con reacción usando el mismo motor `smart_editor.py` en 1 sola pasada 1080p
+    (seguimiento al hablante, fondo difuminado, subtítulos, upscale IA y miniatura)."""
+    import smart_editor as se
+    import smart_reaction as sr
+
+    op = dict(opciones_edicion or {})
+    dur_v = max(3.0, sr.duracion_video(video_path))
+    vfmt = str(op.get("video_format") or "vertical_blur").strip()
+    enc = "streamer" if vfmt == "vertical_streamer" else ("difuminado" if vfmt in ("vertical_blur", "horizontal") else "caras")
+    exp_prof = str(op.get("export_profile") or "quality").strip()
+    if exp_prof not in ("fast", "balanced", "quality"):
+        exp_prof = "quality"
+    if callable(progreso):
+        progreso("Renderizando en 1 sola pasada con Smart Split (seguimiento / difuminado)…", 18)
+
+    meta_out = []
+    rutas = se.process_smart_split(
+        video_path,
+        salida_mp4,
+        clip_duration=max(dur_v + 1.0, float(op.get("clip_duration") or dur_v)),
+        num_clips=1,
+        subtitle_scale=float(op.get("subtitle_scale", 100) or 100),
+        subtitle_style=str(op.get("style") or "kinetik"),
+        show_progress_bar=bool(op.get("show_progress_bar", True)),
+        motor_ia=str(op.get("motor_ia") or "pro"),
+        emojis=bool(op.get("emojis", False)),
+        meta_salida=meta_out,
+        transcripcion=str(op.get("transcripcion") or "groq"),
+        encuadre=enc,
+        sub_opciones={k: v for k, v in {"fuente": op.get("sub_fuente") or None}.items() if v is not None},
+        efectos=bool(op.get("efectos", False)),
+        show_subtitles=bool(op.get("show_subtitles", subtitulos_activos)),
+        normalize_audio=bool(op.get("normalize_audio", True)),
+        export_profile=exp_prof,
+        upscale=str(op.get("upscale") or "off"),
+        video_format=vfmt,
+        clip_selection="sequential",
+        cold_open=bool(op.get("cold_open", False)),
+        jump_cuts=bool(op.get("jump_cuts", False)),
+        auto_split=bool(op.get("auto_split", False)),
+        ambient_music=str(op.get("ambient_music") or "off"),
+        clean_vocals=bool(op.get("clean_vocals", False)),
+        auto_thumbnail=str(op.get("auto_thumbnail") or "jpg_only"),
+        strip_metadata=bool(op.get("strip_metadata", True)),
+        auto_hashtags=bool(op.get("auto_hashtags", True)),
+        politicas_tiktok="off",
+        thumbnail_engine=str(op.get("thumbnail_engine") or "ia_video"),
+        thumbnail_style=str(op.get("thumbnail_style") or "kinetik"),
+        streamer_corner=str(op.get("streamer_corner") or "auto"),
+        streamer_game_mode=str(op.get("streamer_game_mode") or "cam_arriba_centro"),
+        streamer_cam_ratio=float(op.get("streamer_cam_ratio") or 0.26),
+        reaction_character_id=personaje["id"],
+        reaction_mode=modo_interaccion,
+        reaction_layout=layout,
+        reaction_motor=motor_anim,
+        reaction_marco=marco_estilo,
+        reaction_frecuencia=str(op.get("reaction_frecuencia") or "media"),
+        reaction_vision=bool(op.get("reaction_vision", True)),
+        reaction_stickers=bool(stickers_2d),
+        reaction_frames_fps=int(frames_fps or 12),
+        reaction_intervenciones=intervenciones or None,
+        reaction_expresion_fija=str(op.get("reaction_expresion_fija") or ""),
+        reaction_duracion_gesto=str(op.get("reaction_duracion_gesto") or "auto"),
+    )
+    if not rutas or not os.path.isfile(rutas[0]):
+        raise RuntimeError("Smart Split no generó el video-reacción.")
+    if os.path.abspath(rutas[0]) != os.path.abspath(salida_mp4):
+        os.replace(rutas[0], salida_mp4)
+    thumb_src = (meta_out[0].get("miniatura") if meta_out else "") or (os.path.splitext(rutas[0])[0] + "_miniatura.jpg")
+    thumb_dst = os.path.splitext(salida_mp4)[0] + "_miniatura.jpg"
+    if thumb_src and os.path.isfile(thumb_src) and os.path.abspath(thumb_src) != os.path.abspath(thumb_dst):
+        try:
+            os.replace(thumb_src, thumb_dst)
+        except OSError:
+            thumb_dst = thumb_src
+    if callable(progreso):
+        progreso("Video-reacción 1080p listo.", 100)
+    return {
+        "video": salida_mp4,
+        "miniatura": thumb_dst if os.path.isfile(thumb_dst) else "",
+        "duracion": round(sr.duracion_video(salida_mp4), 2),
+        "motor_usado": f"{motor_anim} · Smart Split ({vfmt})",
+    }
+
+
 @app.route("/api/reacciones/render", methods=["POST"])
 def reacciones_render():
     import reaction_characters as rc
@@ -3631,6 +4073,9 @@ def reacciones_render():
         layout = str(d.get("layout") or personaje.get("layout_defecto") or "split")
         motor_anim = str(d.get("motor_animacion") or personaje.get("motor_animacion") or "expresivo")
         marco_estilo = str(d.get("marco_estilo") or personaje.get("marco_estilo") or "streamer_pro")
+        modo_interaccion = str(d.get("modo_interaccion") or "mixto")
+        frames_fps = d.get("frames_fps", personaje.get("frames_fps", 12))
+        stickers_2d = d.get("stickers_2d", personaje.get("stickers_2d", True))
         subtitulos_activos = bool(d.get("subtitulos", True))
         calidad = str(d.get("calidad") or "720p")
         res_wh = (1080, 1920) if calidad == "1080p" else (720, 1280)
@@ -3664,21 +4109,64 @@ def reacciones_render():
                     _upd("Enviando video y personaje a Colab GPU…", 10)
                     cli = Cliente(remoto_url, remoto_clave)
                     sprites = rc.rutas_expresiones_personaje(personaje["id"])
+                    vids_p = rc.rutas_videos_personaje(personaje["id"]) if motor_anim == "video_ia" else {}
+                    frs_p = rc.rutas_frames_personaje(personaje["id"]) if motor_anim in ("frames_secuencia", "video_ia") else {}
                     payload = {
                         "personaje": personaje, "intervenciones": intervenciones,
                         "layout": layout, "motor_animacion": motor_anim,
                         "marco_estilo": marco_estilo,
+                        "modo_interaccion": modo_interaccion,
+                        "frames_fps": frames_fps,
+                        "stickers_2d": bool(stickers_2d),
                         "subtitulos": subtitulos_activos, "calidad": calidad,
+                        "video_format": d.get("video_format") or "",
+                        "export_profile": d.get("export_profile") or ("quality" if calidad == "1080p" else "balanced"),
+                        "upscale": d.get("upscale") or "off",
+                        "style": d.get("style") or "kinetik",
+                        "auto_split": bool(d.get("auto_split", False)),
+                        "auto_thumbnail": d.get("auto_thumbnail") or "cover_and_jpg",
+                        "thumbnail_engine": d.get("thumbnail_engine") or "ia_video",
+                        "reaction_expresion_fija": str(d.get("reaction_expresion_fija") or ""),
+                        "reaction_duracion_gesto": str(d.get("reaction_duracion_gesto") or "auto"),
                     }
                     try:
-                        res = cli.reaccionar(video_path, payload, sprites, salida_mp4, progreso=_upd)
+                        res = cli.reaccionar(
+                            video_path, payload, sprites, salida_mp4, progreso=_upd,
+                            videos_paths=vids_p, frames_paths=frs_p,
+                        )
                     finally:
                         cli.s.close()
+                elif d.get("video_format") or d.get("usar_motor_edicion", True):
+                    res = _render_reaccion_con_smart_editor(
+                        video_path, salida_mp4, personaje, intervenciones,
+                        opciones_edicion={
+                            "video_format": d.get("video_format") or "vertical_blur",
+                            "export_profile": d.get("export_profile") or ("quality" if calidad == "1080p" else "balanced"),
+                            "upscale": d.get("upscale") or "off",
+                            "style": d.get("style") or "kinetik",
+                            "show_subtitles": subtitulos_activos,
+                            "auto_split": bool(d.get("auto_split", False)),
+                            "auto_thumbnail": d.get("auto_thumbnail") or "cover_and_jpg",
+                            "thumbnail_engine": d.get("thumbnail_engine") or "ia_video",
+                            "reaction_expresion_fija": str(d.get("reaction_expresion_fija") or ""),
+                            "reaction_duracion_gesto": str(d.get("reaction_duracion_gesto") or "auto"),
+                        },
+                        layout=layout, motor_anim=motor_anim,
+                        marco_estilo=marco_estilo,
+                        modo_interaccion=modo_interaccion,
+                        frames_fps=frames_fps,
+                        stickers_2d=bool(stickers_2d),
+                        subtitulos_activos=subtitulos_activos,
+                        progreso=_upd,
+                    )
                 else:
                     res = ra.renderizar_video_reaccion(
                         video_path, salida_mp4, personaje, intervenciones,
                         layout=layout, motor_animacion=motor_anim,
                         marco_estilo=marco_estilo,
+                        modo_interaccion=modo_interaccion,
+                        frames_fps=frames_fps,
+                        stickers_2d=bool(stickers_2d),
                         subtitulos_activos=subtitulos_activos, resolucion=res_wh,
                         ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
                         ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
@@ -3803,11 +4291,31 @@ def remoto_reaccionar():
         vid.save(in_mp4)
         out_mp4 = os.path.join(carpeta, "salida.mp4")
         personaje = dict(payload.get("personaje") or {})
-        p_guardado = rc.guardar_personaje({**personaje, "nombre": personaje.get("nombre") or f"Remoto {jid}"})
+        cid_rem = str(personaje.get("id") or "").strip().lower()
+        p_existente = rc.obtener_personaje(cid_rem) if cid_rem else None
+        if p_existente:
+            p_guardado = rc.guardar_personaje({**personaje, "nombre": personaje.get("nombre") or p_existente["nombre"]}, cid=cid_rem)
+            conservar_personaje = True
+        else:
+            p_guardado = rc.guardar_personaje({**personaje, "nombre": personaje.get("nombre") or f"Remoto {jid}"})
+            conservar_personaje = False
+
+        ff = FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg"
         for exp in rc.EXPRESIONES:
             f_sp = request.files.get(f"sprite_{exp}")
             if f_sp is not None:
                 rc.guardar_imagen_expresion(p_guardado["id"], exp, f_sp.read())
+            f_vid = request.files.get(f"pvideo_{exp}")
+            if f_vid is not None:
+                rc.guardar_video_expresion(p_guardado["id"], exp, f_vid.read(), filename=f"{exp}.mp4", ffmpeg_exe=ff)
+            pares_fr = []
+            for key_f in sorted(request.files.keys()):
+                if key_f.startswith(f"pframe_{exp}_"):
+                    ff_obj = request.files.get(key_f)
+                    if ff_obj is not None:
+                        pares_fr.append((ff_obj.filename or f"{key_f}.png", ff_obj.read()))
+            if pares_fr:
+                rc.guardar_frames_expresion(p_guardado["id"], exp, pares_fr, reemplazar=True)
 
         with _reacciones_lock:
             _reacciones_trabajos[jid] = {
@@ -3822,18 +4330,46 @@ def remoto_reaccionar():
                     _reacciones_trabajos[jid]["progreso"] = int(pct)
             try:
                 cal = str(payload.get("calidad") or "1080p")
-                res_wh = (1080, 1920) if cal == "1080p" else (720, 1280)
-                res = ra.renderizar_video_reaccion(
-                    in_mp4, out_mp4, p_guardado, payload.get("intervenciones") or [],
-                    layout=str(payload.get("layout") or "split"),
-                    motor_animacion=str(payload.get("motor_animacion") or "expresivo"),
-                    marco_estilo=str(payload.get("marco_estilo") or p_guardado.get("marco_estilo") or "streamer_pro"),
-                    subtitulos_activos=bool(payload.get("subtitulos", True)),
-                    resolucion=res_wh,
-                    ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
-                    ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
-                    progreso=_upd, log=log,
-                )
+                if payload.get("video_format"):
+                    res = _render_reaccion_con_smart_editor(
+                        in_mp4, out_mp4, p_guardado, payload.get("intervenciones") or [],
+                        opciones_edicion={
+                            "video_format": payload.get("video_format"),
+                            "export_profile": payload.get("export_profile") or ("quality" if cal == "1080p" else "balanced"),
+                            "upscale": payload.get("upscale") or "off",
+                            "style": payload.get("style") or "kinetik",
+                            "show_subtitles": bool(payload.get("subtitulos", True)),
+                            "auto_split": bool(payload.get("auto_split", False)),
+                            "auto_thumbnail": payload.get("auto_thumbnail") or "cover_and_jpg",
+                            "thumbnail_engine": payload.get("thumbnail_engine") or "ia_video",
+                            "reaction_expresion_fija": str(payload.get("reaction_expresion_fija") or ""),
+                            "reaction_duracion_gesto": str(payload.get("reaction_duracion_gesto") or "auto"),
+                        },
+                        layout=str(payload.get("layout") or "pip_arriba_centro"),
+                        motor_anim=str(payload.get("motor_animacion") or "auto"),
+                        marco_estilo=str(payload.get("marco_estilo") or "auto"),
+                        modo_interaccion=str(payload.get("modo_interaccion") or "silencioso"),
+                        frames_fps=payload.get("frames_fps") or 12,
+                        stickers_2d=bool(payload.get("stickers_2d", True)),
+                        subtitulos_activos=bool(payload.get("subtitulos", True)),
+                        progreso=_upd,
+                    )
+                else:
+                    res_wh = (1080, 1920) if cal == "1080p" else (720, 1280)
+                    res = ra.renderizar_video_reaccion(
+                        in_mp4, out_mp4, p_guardado, payload.get("intervenciones") or [],
+                        layout=str(payload.get("layout") or "split"),
+                        motor_animacion=str(payload.get("motor_animacion") or "expresivo"),
+                        marco_estilo=str(payload.get("marco_estilo") or p_guardado.get("marco_estilo") or "streamer_pro"),
+                        modo_interaccion=str(payload.get("modo_interaccion") or "mixto"),
+                        frames_fps=payload.get("frames_fps"),
+                        stickers_2d=payload.get("stickers_2d"),
+                        subtitulos_activos=bool(payload.get("subtitulos", True)),
+                        resolucion=res_wh,
+                        ffmpeg_exe=FFMPEG_EXE if "FFMPEG_EXE" in globals() else "ffmpeg",
+                        ffprobe_exe=FFPROBE_EXE if "FFPROBE_EXE" in globals() else "ffprobe",
+                        progreso=_upd, log=log,
+                    )
                 with _reacciones_lock:
                     _reacciones_trabajos[jid].update({
                         "estado": "listo", "progreso": 100, "mensaje": "Listo en Colab.",
@@ -3845,15 +4381,147 @@ def remoto_reaccionar():
                 with _reacciones_lock:
                     _reacciones_trabajos[jid].update({"estado": "error", "error": str(exc)[:600]})
             finally:
-                try:
-                    rc.borrar_personaje(p_guardado["id"])
-                except Exception:
-                    pass
+                if not conservar_personaje:
+                    try:
+                        rc.borrar_personaje(p_guardado["id"])
+                    except Exception:
+                        pass
 
         threading.Thread(target=_run_remote, daemon=True, name=f"rem-reacc-{jid}").start()
         return jsonify({"success": True, "job_id": jid})
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/bot/remoto/personaje/<pid>/estado", methods=["GET"])
+def remoto_personaje_estado(pid):
+    """Indica si Colab ya tiene cacheada esta misma versión del personaje (evita resubirlo en cada video)."""
+    import reaction_characters as rc
+    try:
+        carpeta = rc._carpeta_segura(pid)
+        firma_req = str(request.args.get("firma") or "").strip()
+        p = rc.obtener_personaje(pid)
+        firma_file = carpeta / ".sync_firma"
+        firma_local = firma_file.read_text(encoding="utf-8").strip() if firma_file.is_file() else ""
+        sincronizado = bool(p and firma_req and firma_local == firma_req)
+        return jsonify({"success": True, "existe": bool(p), "sincronizado": sincronizado})
+    except ValueError:
+        return jsonify({"success": True, "existe": False, "sincronizado": False})
+
+
+@app.route("/api/bot/remoto/personaje/sincronizar", methods=["POST"])
+def remoto_personaje_sincronizar():
+    """Recibe una vez el paquete compacto del personaje (~2 MB) para usarlo en /api/bot/remoto/cortar (1080p)."""
+    import reaction_characters as rc
+    try:
+        pid = str(request.form.get("pid") or "").strip().lower()
+        firma = str(request.form.get("firma") or "").strip()[:64]
+        datos_p = json.loads(request.form.get("personaje") or "{}")
+        if not pid:
+            return jsonify({"success": False, "error": "Falta el identificador del personaje."}), 400
+        carpeta = rc._carpeta_segura(pid)
+        carpeta.mkdir(parents=True, exist_ok=True)
+        p_guardado = rc.guardar_personaje(
+            {**datos_p, "nombre": datos_p.get("nombre") or pid},
+            cid=pid,
+        )
+        videos_dir = carpeta / "videos"
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        for exp in rc.EXPRESIONES:
+            f_img = request.files.get(f"pimg_{exp}")
+            if f_img is not None:
+                rc.guardar_imagen_expresion(p_guardado["id"], exp, f_img.read())
+            f_vid = request.files.get(f"pvideo_{exp}")
+            if f_vid is not None:
+                # Ya viene normalizado desde la PC: guardar directo sin recodificar para mantener máxima nitidez
+                raw_v = f_vid.read()
+                if len(raw_v) > 512:
+                    (videos_dir / f"{exp}.mp4").write_bytes(raw_v)
+            pares_fr = []
+            for key_f in sorted(request.files.keys()):
+                if key_f.startswith(f"pframe_{exp}_"):
+                    ff_obj = request.files.get(key_f)
+                    if ff_obj is not None:
+                        pares_fr.append((ff_obj.filename or f"{key_f}.png", ff_obj.read()))
+            if pares_fr:
+                rc.guardar_frames_expresion(p_guardado["id"], exp, pares_fr, reemplazar=True)
+        if firma:
+            (carpeta / ".sync_firma").write_text(firma, encoding="utf-8")
+        return jsonify({"success": True, "personaje": rc.obtener_personaje(p_guardado["id"])})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/bot/remoto/reaccion_generar_videos", methods=["POST"])
+def remoto_reaccion_generar_videos():
+    """Genera los clips MP4 del personaje directamente en Colab GPU y los deja también en caché de Colab."""
+    import reaction_characters as rc
+    try:
+        payload = json.loads(request.form.get("payload") or "{}")
+        personaje = dict(payload.get("personaje") or {})
+        cid_req = str(personaje.get("id") or "").strip().lower()
+        p_ex = rc.obtener_personaje(cid_req) if cid_req else None
+        if p_ex:
+            p_g = rc.guardar_personaje({**personaje, "nombre": personaje.get("nombre") or p_ex["nombre"]}, cid=cid_req)
+        else:
+            p_g = rc.guardar_personaje({**personaje, "nombre": personaje.get("nombre") or "Personaje Colab"})
+        for exp in rc.EXPRESIONES:
+            f_sp = request.files.get(f"sprite_{exp}")
+            if f_sp is not None:
+                rc.guardar_imagen_expresion(p_g["id"], exp, f_sp.read())
+
+        jid = "v_" + uuid.uuid4().hex[:10]
+        exps = payload.get("expresiones") or ["neutral", "sorprendido", "riendo", "serio", "pensando", "celebrando"]
+        modelo_vid = str(payload.get("modelo_video") or p_g.get("modelo_video_ia") or "ltx_video")
+        with _reacciones_lock:
+            _reacciones_trabajos[jid] = {
+                "estado": "en_curso", "progreso": 8, "mensaje": "Cargando modelo de video IA en Colab GPU…",
+                "cid": p_g["id"], "generados": [], "modelo_usado": modelo_vid, "error": "",
+            }
+
+        def _run_vids():
+            try:
+                res = rc.generar_videos_ia(p_g["id"], expresiones=exps, modelo_video=modelo_vid, log=log)
+                with _reacciones_lock:
+                    _reacciones_trabajos[jid].update({
+                        "estado": "listo", "progreso": 100, "mensaje": "Videos del personaje listos en Colab.",
+                        "generados": res.get("generados") or [],
+                        "modelo_usado": res.get("modelo_usado") or modelo_vid,
+                    })
+            except Exception as exc:
+                with _reacciones_lock:
+                    _reacciones_trabajos[jid].update({"estado": "error", "error": str(exc)[:600]})
+
+        threading.Thread(target=_run_vids, daemon=True, name=f"rem-vids-{jid}").start()
+        return jsonify({"success": True, "job_id": jid})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/bot/remoto/reaccion_videos/<jid>", methods=["GET"])
+def remoto_reaccion_videos_estado(jid):
+    with _reacciones_lock:
+        t = dict(_reacciones_trabajos.get(jid) or {})
+    if not t:
+        return jsonify({"success": False, "error": "Trabajo no encontrado."}), 404
+    return jsonify({
+        "success": True, "estado": t["estado"], "progreso": t.get("progreso", 0),
+        "mensaje": t.get("mensaje", ""), "error": t.get("error", ""),
+        "generados": t.get("generados") or [], "modelo_usado": t.get("modelo_usado", ""),
+    })
+
+
+@app.route("/api/bot/remoto/reaccion_videos/<jid>/<expresion>", methods=["GET"])
+def remoto_reaccion_videos_bajar(jid, expresion):
+    import reaction_characters as rc
+    with _reacciones_lock:
+        cid = (_reacciones_trabajos.get(jid) or {}).get("cid") or ""
+    if not cid:
+        return jsonify({"success": False, "error": "Trabajo no encontrado."}), 404
+    ruta = rc.ruta_video_expresion(cid, expresion)
+    if not ruta or not ruta.is_file():
+        return jsonify({"success": False, "error": "Clip no encontrado."}), 404
+    return send_from_directory(str(ruta.parent), ruta.name, mimetype="video/mp4")
 
 
 @app.route("/api/bot/remoto/reaccion/<jid>", methods=["GET"])
@@ -3968,7 +4636,7 @@ def health():
     from smart_remix import CAPACIDAD_ORIGINALIDAD
     mem = winproc.estado_memoria()
     return jsonify({"ok": True, "status": automation_status,
-                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", "voz_elevenlabs_v1", MOMENTOS_CAPACIDAD, CAPACIDAD_ORIGINALIDAD, "streaming_clips_v1"],
+                    "capabilities": [CAPACIDAD, "unique_clip_ranges_v1", "voz_elevenlabs_v1", MOMENTOS_CAPACIDAD, CAPACIDAD_ORIGINALIDAD, "streaming_clips_v1", "live_colab_v1"],
                     "commit_libre_gb": round(mem["commit_libre_gb"], 1)})
 
 

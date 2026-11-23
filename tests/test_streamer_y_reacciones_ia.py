@@ -1,12 +1,13 @@
 """Pruebas unitarias e integración para Encuadre 9:16 Streamer y Módulo 06 · Reacciones IA."""
 import io
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import wave
 
 import cv2
@@ -163,8 +164,10 @@ class ReaccionesIATests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             in_mp4 = os.path.join(tmp, "entrada.mp4")
             _crear_video_sintetico(in_mp4, w=320, h=180, fps=15, dur_s=1.8)
+            import portada_generativa as _pg
             with patch.object(rc, "raiz_personajes", return_value=Path(tmp) / "personajes"), \
-                 patch.object(ra.sc, "synthesize_commentary_line", side_effect=_escribir_wav_sintetico):
+                 patch.object(ra.sc, "synthesize_commentary_line", side_effect=_escribir_wav_sintetico), \
+                 patch.object(_pg, "generar_portada_segun_video", return_value=(None, "")):
                 p = rc.guardar_personaje({
                     "nombre": "Pana Bot", "personalidad": "hype", "voz": "male", "marco_estilo": "streamer_pro",
                 })
@@ -319,6 +322,94 @@ class ReaccionesIATests(unittest.TestCase):
             finally:
                 cli.s.close()
 
+    def test_modo_silencioso_video_ia_y_frames_secuencia(self):
+        # 1. Validación de 10 expresiones y detección automática por nombre de archivo
+        self.assertEqual(len(rc.EXPRESIONES), 10)
+        self.assertEqual(rc.detectar_expresion_por_nombre("01_neutral_base.mp4"), "neutral")
+        self.assertEqual(rc.detectar_expresion_por_nombre("personaje_riendo_v2.mp4"), "riendo")
+        self.assertEqual(rc.detectar_expresion_por_nombre("shock_sorprendido.mp4"), "sorprendido")
+        self.assertEqual(rc.detectar_expresion_por_nombre("clip_celebrando.mp4"), "celebrando")
+        self.assertEqual(rc.detectar_expresion_por_nombre("aplauso_clap.mp4"), "aplaudiendo")
+        self.assertIsNone(rc.detectar_expresion_por_nombre("random_xyz_123.mp4"))
+
+        # 2. Validación de intervenciones silenciosas (texto vacío permitido, modo gesto_silencioso)
+        sil_plan = sr.validar_intervenciones([
+            {"segundo": 0.4, "emocion": "surprised", "duracion_gesto": 2.0, "texto": ""},
+            {"segundo": 3.0, "emocion": "celebrating", "duracion_gesto": 2.5, "texto": "no se debe hablar"},
+        ], dur=10.0, modo_global="silencioso")
+        self.assertEqual(len(sil_plan), 2)
+        self.assertTrue(all(it["modo"] == "gesto_silencioso" and it["texto"] == "" for it in sil_plan))
+
+        if not shutil.which("ffmpeg"):
+            self.skipTest("FFmpeg no disponible en PATH")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            in_mp4 = os.path.join(tmp, "entrada.mp4")
+            _crear_video_sintetico(in_mp4, w=320, h=180, fps=15, dur_s=2.0)
+            char_vid_1 = os.path.join(tmp, "char_neutral.mp4")
+            char_vid_2 = os.path.join(tmp, "char_sorprendido.mp4")
+            _crear_video_sintetico(char_vid_1, w=240, h=240, fps=15, dur_s=1.2)
+            _crear_video_sintetico(char_vid_2, w=240, h=240, fps=15, dur_s=1.2)
+
+            with patch.object(rc, "raiz_personajes", return_value=Path(tmp) / "personajes"):
+                p = rc.guardar_personaje({
+                    "nombre": "Silent Bot", "personalidad": "hype", "voz": "male",
+                    "motor_animacion": "video_ia", "modelo_video_ia": "ltx_video", "frames_fps": 12,
+                })
+                # Guardar videos MP4 persistentes del personaje
+                p = rc.guardar_video_expresion(p["id"], "neutral", Path(char_vid_1).read_bytes(), filename="neutral.mp4")
+                p = rc.guardar_video_expresion(p["id"], "sorprendido", Path(char_vid_2).read_bytes(), filename="sorprendido.mp4")
+                self.assertEqual(p["total_videos"], 2)
+
+                # Guardar múltiples frames PNG + GIF animado
+                pares = []
+                for idx_f, col in enumerate(((255, 80, 0, 255), (232, 255, 0, 255), (0, 220, 255, 255))):
+                    b = io.BytesIO()
+                    Image.new("RGBA", (200, 200), col).save(b, format="PNG")
+                    pares.append((f"f_{idx_f:02d}.png", b.getvalue()))
+                p = rc.guardar_frames_expresion(p["id"], "neutral", pares)
+                gif_buf = io.BytesIO()
+                f_g1 = Image.new("RGB", (120, 120), (255, 0, 0))
+                f_g2 = Image.new("RGB", (120, 120), (0, 255, 0))
+                f_g1.save(gif_buf, format="GIF", save_all=True, append_images=[f_g2], duration=100, loop=0)
+                p = rc.guardar_frames_expresion(p["id"], "sorprendido", [("shock.gif", gif_buf.getvalue())])
+                self.assertEqual(p["frames_secuencia"]["neutral"]["cantidad"], 3)
+                self.assertEqual(p["frames_secuencia"]["sorprendido"]["cantidad"], 2)
+
+                # Prompts Google Flow listos para las 10 emociones
+                pr = rc.prompts_video_expresiones(p["id"])
+                self.assertEqual(len(pr), 10)
+
+                # Render MODO SILENCIOSO + VIDEO_IA (verifica 0 llamadas a TTS!)
+                import portada_generativa as _pg
+                with patch.object(ra.sc, "synthesize_commentary_line") as m_tts, \
+                     patch.object(_pg, "generar_portada_segun_video", return_value=(None, "")):
+                    out_vid_ia = os.path.join(tmp, "out_silencioso_video_ia.mp4")
+                    res_v = ra.renderizar_video_reaccion(
+                        in_mp4, out_vid_ia, p,
+                        [{"segundo": 0.4, "modo": "gesto_silencioso", "emocion": "surprised", "duracion_gesto": 1.2, "texto": ""}],
+                        layout="pip_arriba_centro", motor_animacion="video_ia", modo_interaccion="silencioso",
+                        stickers_2d=True, resolucion=(360, 640), fps=15,
+                    )
+                    m_tts.assert_not_called()
+                    self.assertTrue(res_v["silencioso"])
+                    self.assertEqual(res_v["motor_usado"], "video_ia")
+                    self.assertTrue(os.path.isfile(out_vid_ia))
+                    self.assertGreater(os.path.getsize(out_vid_ia), 5000)
+
+                    # Render MODO SILENCIOSO + FRAMES_SECUENCIA (12 FPS)
+                    out_frames = os.path.join(tmp, "out_silencioso_frames.mp4")
+                    res_f = ra.renderizar_video_reaccion(
+                        in_mp4, out_frames, p,
+                        [{"segundo": 0.4, "modo": "gesto_silencioso", "emocion": "surprised", "duracion_gesto": 1.2, "texto": ""}],
+                        layout="split_arriba", motor_animacion="frames_secuencia", modo_interaccion="silencioso",
+                        frames_fps=12, stickers_2d=True, resolucion=(360, 640), fps=15,
+                    )
+                    m_tts.assert_not_called()
+                    self.assertEqual(res_f["motor_usado"], "frames_secuencia")
+                    self.assertTrue(os.path.isfile(out_frames))
+                    self.assertGreater(os.path.getsize(out_frames), 5000)
+
     def test_vistas_previas_webp_y_ui_clip_presentes(self):
         for fname in (
             "encuadre_streamer_top_center.webp",
@@ -374,6 +465,14 @@ class ReaccionesIATests(unittest.TestCase):
             'id="rr-duracion-clip"',
             'id="rr-num-clips"',
             'id="rr-inicio-tramo"',
+            'value="silencioso"',
+            'value="video_ia"',
+            'value="frames_secuencia"',
+            'id="rp-modelo-vid"',
+            'id="rp-frames-fps"',
+            'id="rp-btn-gen-vid"',
+            'id="rp-btn-prompts-flow"',
+            'id="rr-stickers"',
             "renderizarTodosClipsReaccion()",
             "generarImagenBasePersonaje()",
             "prev_reaccion_split.mp4",
@@ -393,6 +492,301 @@ class ReaccionesIATests(unittest.TestCase):
         self.assertIn("photorealistic", rc.construir_prompt_personaje("streamer real", "realista"))
         st_ls = rl.estado()
         self.assertIn("disponible", st_ls)
+
+    def test_sincronizacion_picos_escenas_hojas_vision_y_onset_gestos(self):
+        # 1. Ritmo enriquecido en modo silencioso para clips de 60-90s
+        n_min_sil, n_max_sil = sr._calcular_rango_reacciones(60.0, "media", "silencioso")
+        n_min_hab, n_max_hab = sr._calcular_rango_reacciones(60.0, "media", "mixto")
+        self.assertGreaterEqual(n_min_sil, 6)
+        self.assertGreater(n_max_sil, n_max_hab)
+        _, n_max_90 = sr._calcular_rango_reacciones(90.0, "alta", "silencioso")
+        self.assertGreaterEqual(n_max_90, 14)
+
+        # 2. Recorte de duracion_gesto para que nunca pise el inicio exacto del siguiente gesto
+        plan_sil = sr.validar_intervenciones([
+            {"segundo": 2.0, "emocion": "surprised", "duracion_gesto": 4.2, "texto": ""},
+            {"segundo": 4.6, "emocion": "laughs", "duracion_gesto": 3.0, "texto": ""},
+        ], dur=20.0, modo_global="silencioso")
+        self.assertEqual(len(plan_sil), 2)
+        self.assertLessEqual(plan_sil[0]["duracion_gesto"], 2.36)
+
+        # 3. Ajuste fino de timestamps hacia picos reales (+0.12s de latencia humana)
+        afinadas = sr._afinar_tiempos_con_momentos(
+            [{"segundo": 5.6, "modo": "gesto_silencioso", "emocion": "surprised", "duracion_gesto": 2.5, "texto": ""}],
+            [{"segundo": 6.0, "intensidad": 0.88, "tipo": "impacto_audiovisual", "etiqueta": "golpe"}],
+            dur=20.0,
+        )
+        self.assertAlmostEqual(afinadas[0]["segundo"], 6.12, delta=0.05)
+
+        # 4. Empaquetado 2x2 de hasta 16 fotogramas dentro del límite de 5 imágenes de Groq Vision
+        import base64
+        frames_b64 = []
+        for idx in range(14):
+            img = np.full((180, 320, 3), (idx * 17 % 255, 80, 180), dtype=np.uint8)
+            ok, buf = cv2.imencode(".jpg", img)
+            self.assertTrue(ok)
+            frames_b64.append((round(idx * 2.5 + 0.5, 1), base64.b64encode(buf.tobytes()).decode("ascii")))
+        hojas = sr._construir_hojas_vision(frames_b64, max_imagenes=5)
+        self.assertGreaterEqual(len(hojas), 3)
+        self.assertLessEqual(len(hojas), 5)
+        self.assertIn("Hoja visual 1", hojas[0][0])
+
+        # 5. Detección automática del inicio real del gesto (salta intro neutral de Google Flow)
+        f_neutral = np.full((64, 64, 3), 30, dtype=np.uint8)
+        f_gesto = np.full((64, 64, 3), 210, dtype=np.uint8)
+        clip_sint = [f_neutral.copy() for _ in range(30)] + [f_gesto.copy() for _ in range(36)]
+        ini_g = ra._detectar_inicio_gesto(clip_sint, fps_v=24.0)
+        self.assertGreaterEqual(ini_g, 18)
+        self.assertLessEqual(ini_g, 28)
+
+        # 6. Reloj local de gesto en _render_panel_video_ia (t_local=0 entra en frame 0 aunque t_prev sea 14s)
+        f_rojo = np.full((64, 64, 3), (255, 0, 0), dtype=np.uint8)
+        f_azul = np.full((64, 64, 3), (0, 0, 255), dtype=np.uint8)
+        vids = {
+            "neutral": ([f_azul, f_azul, f_azul, f_azul], 24.0),
+            "sorprendido": ([f_rojo, f_azul, f_azul, f_azul], 24.0),
+        }
+        panel_ini = ra._render_panel_video_ia(
+            vids, 64, 64, t_local=0.0, exp_actual="sorprendido", exp_previa="neutral", blend_alpha=1.0, t_prev=14.0,
+        )
+        self.assertGreater(int(panel_ini[32, 32, 0]), 220)
+        self.assertLess(int(panel_ini[32, 32, 2]), 30)
+
+        # 7. Detección real de pico de audio + cambio de escena en un MP4 sintético con impacto en t=3.0s
+        if shutil.which("ffmpeg"):
+            with tempfile.TemporaryDirectory() as tmp:
+                vid_imp = os.path.join(tmp, "impacto.mp4")
+                wav_imp = os.path.join(tmp, "impacto.wav")
+                sr_hz = 16000
+                dur_s = 6.0
+                n_s = int(sr_hz * dur_s)
+                t_arr = np.arange(n_s, dtype=np.float32) / sr_hz
+                # Fondo suave + golpe fuerte en t=3.0..3.35s
+                audio = (np.sin(2 * np.pi * 220 * t_arr) * 0.04).astype(np.float32)
+                mask = (t_arr >= 2.95) & (t_arr <= 3.35)
+                audio[mask] = np.sin(2 * np.pi * 660 * t_arr[mask]) * 0.90
+                import wave as _wave
+                with _wave.open(wav_imp, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sr_hz)
+                    wf.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
+
+                raw_v = os.path.join(tmp, "raw.mp4")
+                vw = cv2.VideoWriter(raw_v, cv2.VideoWriter_fourcc(*"mp4v"), 15, (160, 120))
+                for f_i in range(int(15 * dur_s)):
+                    col = (20, 30, 180) if f_i < 45 else (235, 240, 20)
+                    vw.write(np.full((120, 160, 3), col, dtype=np.uint8))
+                vw.release()
+                subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-i", raw_v, "-i", wav_imp,
+                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", vid_imp],
+                    check=True,
+                )
+                momentos = sr.detectar_momentos_clave_video(vid_imp, dur_s)
+                self.assertTrue(momentos, "Debe detectar al menos un momento de impacto en t=3.0s")
+                self.assertTrue(
+                    any(abs(m["segundo"] - 3.0) <= 0.65 for m in momentos),
+                    f"Esperaba un evento cerca de 3.0s, obtuve: {momentos}",
+                )
+
+    def test_integracion_reaccion_en_smart_editor_edicion_ia_y_sync_colab(self):
+        # 1. Presets snapshot valida y conserva los campos reaction_*
+        from bot import presets as bot_presets
+        snap = bot_presets.snapshot({
+            **bot_presets.CALIDAD,
+            "video_format": "vertical_blur",
+            "reaction_character_id": "flawer_realista",
+            "reaction_mode": "silencioso",
+            "reaction_layout": "pip_arriba_centro",
+            "reaction_motor": "video_ia",
+            "reaction_marco": "streamer_pro",
+            "reaction_frecuencia": "alta",
+            "reaction_vision": True,
+            "reaction_stickers": True,
+            "reaction_frames_fps": 12,
+        })
+        self.assertEqual(snap["video_format"], "vertical_blur")
+        self.assertEqual(snap["reaction_character_id"], "flawer_realista")
+        self.assertEqual(snap["reaction_mode"], "silencioso")
+        self.assertEqual(snap["reaction_layout"], "pip_arriba_centro")
+
+        # 2. UI unificada presente en Edición IA, Añadir videos y Reacciones IA
+        html = (ROOT / "templates" / "bot.html").read_text(encoding="utf-8")
+        for tok in (
+            'id="ed-reacc-personaje"',
+            'id="ed-reacc-layout"',
+            'id="url-reacc-personaje"',
+            'id="rr-formato"',
+            'id="rr-preset"',
+            'id="rr-upscale"',
+            'id="rr-subs-estilo"',
+            'encolarReaccionIA()',
+        ):
+            self.assertIn(tok, html)
+
+        # 3. Sincronización inteligente del personaje con Colab (sube 1 vez, luego caché firma=True)
+        client = content.app.test_client()
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(rc, "raiz_personajes", return_value=Path(tmp) / "personajes_remoto"):
+                r0 = client.get("/api/bot/remoto/personaje/test_p/estado?firma=abc123")
+                self.assertEqual(r0.status_code, 200)
+                self.assertFalse(r0.get_json()["sincronizado"])
+
+                png_b = io.BytesIO()
+                Image.new("RGBA", (128, 128), (255, 80, 0, 255)).save(png_b, format="PNG")
+                r_sync = client.post(
+                    "/api/bot/remoto/personaje/sincronizar",
+                    data={
+                        "pid": "test_p",
+                        "firma": "abc123",
+                        "personaje": json.dumps({"nombre": "Test P", "motor_animacion": "video_ia"}),
+                        "pimg_neutral": (io.BytesIO(png_b.getvalue()), "neutral.png"),
+                        "pvideo_neutral": (io.BytesIO(b"ftypmp42" + b"0" * 1024), "neutral.mp4"),
+                    },
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(r_sync.status_code, 200)
+                self.assertTrue(r_sync.get_json()["success"])
+
+                r1 = client.get("/api/bot/remoto/personaje/test_p/estado?firma=abc123")
+                self.assertEqual(r1.status_code, 200)
+                self.assertTrue(r1.get_json()["sincronizado"])
+
+        # 4. Cliente.iniciar llama a sincronizar_personaje antes de /api/bot/remoto/cortar (0 subida de video)
+        from bot import remoto
+        cli = remoto.Cliente("https://colab.ejemplo.trycloudflare.com", "clave")
+        try:
+            fake_resp = MagicMock(status_code=200)
+            fake_resp.json.return_value = {"success": True, "id": "job99"}
+            with patch.object(cli, "sincronizar_personaje", return_value=True) as m_sync, \
+                 patch.object(cli, "_pedir", return_value=fake_resp) as m_pedir:
+                jid = cli.iniciar(
+                    "https://youtube.com/watch?v=abc",
+                    {**bot_presets.CALIDAD, "reaction_character_id": "flawer_realista"},
+                )
+                self.assertEqual(jid, "job99")
+                m_sync.assert_called_once_with("flawer_realista")
+                self.assertEqual(m_pedir.call_args[0][1], "/api/bot/remoto/cortar")
+        finally:
+            cli.s.close()
+
+        # 5. Render 1 sola pasada dentro de smart_editor.process_smart_split (vertical_blur + vertical tracking)
+        if shutil.which("ffmpeg"):
+            with tempfile.TemporaryDirectory() as tmp:
+                in_mp4 = os.path.join(tmp, "src169.mp4")
+                char_mp4 = os.path.join(tmp, "neutral_char.mp4")
+                _crear_video_sintetico(in_mp4, w=320, h=180, fps=15, dur_s=2.0)
+                _crear_video_sintetico(char_mp4, w=200, h=200, fps=15, dur_s=1.2)
+                with patch.object(rc, "raiz_personajes", return_value=Path(tmp) / "personajes"), \
+                     patch.object(ra.sc, "synthesize_commentary_line") as m_tts:
+                    p = rc.guardar_personaje({
+                        "nombre": "Smart Reacc", "personalidad": "hype",
+                        "motor_animacion": "video_ia", "marco_estilo": "streamer_pro",
+                    })
+                    rc.guardar_video_expresion(p["id"], "neutral", Path(char_mp4).read_bytes(), filename="neutral.mp4")
+                    for vfmt, rlay in (("vertical_blur", "pip_arriba_centro"), ("vertical", "split")):
+                        out_mp4 = os.path.join(tmp, f"smart_{vfmt}.mp4")
+                        meta_out = []
+                        rutas = smart_editor.process_smart_split(
+                            in_mp4, out_mp4,
+                            clip_duration=5, num_clips=1,
+                            clip_selection="sequential",
+                            video_format=vfmt,
+                            encuadre="difuminado" if vfmt == "vertical_blur" else "caras",
+                            export_profile="fast",
+                            show_subtitles=False,
+                            efectos=False,
+                            normalize_audio=False,
+                            politicas_tiktok="off",
+                            auto_thumbnail="off",
+                            meta_salida=meta_out,
+                            reaction_character_id=p["id"],
+                            reaction_mode="silencioso",
+                            reaction_layout=rlay,
+                            reaction_motor="video_ia",
+                            reaction_vision=False,
+                            reaction_intervenciones=[
+                                {"segundo": 0.4, "modo": "gesto_silencioso", "emocion": "surprised", "duracion_gesto": 1.2, "texto": ""}
+                            ],
+                        )
+                        m_tts.assert_not_called()
+                        self.assertEqual(len(rutas), 1)
+                        self.assertTrue(os.path.isfile(rutas[0]), vfmt)
+                        self.assertGreater(os.path.getsize(rutas[0]), 5000, vfmt)
+
+    def test_reacciones_largas_expresiones_fijas_y_lector_streaming(self):
+        # 1. Expresión fija única para todo un clip largo de 75 s (0 límite de 8 s!)
+        p_fake = {"nombre": "Flawer Realista"}
+        exps_1 = sr.parsear_expresiones_fijas("sorprendido")
+        res_1 = sr.generar_guion_expresiones_fijas(p_fake, 75.0, exps_1, modo_interaccion="silencioso", duracion_gesto="todo")
+        guion_1 = res_1["intervenciones"]
+        self.assertEqual(len(guion_1), 1)
+        self.assertEqual(guion_1[0]["emocion"], "surprised")
+        self.assertGreaterEqual(guion_1[0]["duracion_gesto"], 70.0)
+
+        # 2. Múltiples expresiones fijas en bloques largos de 60 s sobre clip de 180 s
+        exps_m = sr.parsear_expresiones_fijas("sorprendido,riendo,aplaudiendo")
+        res_m = sr.generar_guion_expresiones_fijas(p_fake, 180.0, exps_m, modo_interaccion="silencioso", duracion_gesto="60")
+        guion_multi = res_m["intervenciones"]
+        self.assertEqual(len(guion_multi), 3)
+        self.assertEqual([g["emocion"] for g in guion_multi], ["surprised", "laughs", "clapping"])
+        self.assertTrue(all(g["duracion_gesto"] >= 58.0 for g in guion_multi))
+
+        # 3. validar_intervenciones permite reacciones de 60 s y 180 s (antes truncaba a 8 s)
+        val = sr.validar_intervenciones(
+            [{"segundo": 0.2, "modo": "gesto_silencioso", "emocion": "laughs", "duracion_gesto": 95.0, "texto": ""}],
+            dur=120.0, modo_global="silencioso",
+        )
+        self.assertEqual(len(val), 1)
+        self.assertAlmostEqual(val[0]["duracion_gesto"], 95.0, delta=0.1)
+
+        # 4. Presets snapshot guarda y valida reaction_expresion_fija, reaction_duracion_gesto y thumbnail_engine='ia_video'
+        from bot import presets as bot_presets
+        snap = bot_presets.snapshot({
+            **bot_presets.CALIDAD,
+            "thumbnail_engine": "ia_video",
+            "reaction_character_id": "flawer_realista",
+            "reaction_expresion_fija": "sorprendido,riendo",
+            "reaction_duracion_gesto": "60",
+        })
+        self.assertEqual(snap["thumbnail_engine"], "ia_video")
+        self.assertEqual(snap["reaction_expresion_fija"], "sorprendido,riendo")
+        self.assertEqual(snap["reaction_duracion_gesto"], "60")
+
+        # 5. _LectorVideoExpresion lee clips largos (> 5 s) en bucle siempre hacia adelante sin truncar a 120 frames
+        if shutil.which("ffmpeg"):
+            with tempfile.TemporaryDirectory() as tmp:
+                vid_largo = os.path.join(tmp, "largo_7s.mp4")
+                _crear_video_sintetico(vid_largo, w=180, h=180, fps=24, dur_s=7.0)
+                lector = ra._LectorVideoExpresion(vid_largo, max_dim=320, es_neutral=True)
+                try:
+                    self.assertTrue(lector.valido)
+                    self.assertGreaterEqual(lector.total_frames, 160)
+                    f_inicio = lector.leer_en(0.5)
+                    f_6s = lector.leer_en(6.0)
+                    f_65s = lector.leer_en(65.0)  # > 1 minuto en bucle suave
+                    self.assertEqual(f_inicio.shape, (180, 180, 3))
+                    self.assertEqual(f_6s.shape, (180, 180, 3))
+                    self.assertEqual(f_65s.shape, (180, 180, 3))
+                finally:
+                    lector.cerrar()
+
+        # 6. Controles UI nuevos presentes en templates/bot.html
+        html = (ROOT / "templates" / "bot.html").read_text(encoding="utf-8")
+        for tok in (
+            'id="ed-reacc-expresion"',
+            'id="ed-reacc-duracion"',
+            'id="url-reacc-expresion"',
+            'id="url-reacc-duracion"',
+            'id="rr-expresion-fija"',
+            'id="rr-expresiones-chips"',
+            'id="rr-duracion-gesto"',
+            'id="rr-miniatura-motor"',
+            'id="rr-auto-thumbnail"',
+            'value="ia_video"',
+        ):
+            self.assertIn(tok, html)
 
 
 if __name__ == "__main__":

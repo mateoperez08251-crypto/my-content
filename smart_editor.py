@@ -622,7 +622,12 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         cold_open=False, jump_cuts=False, auto_split=False, ambient_music="off", clean_vocals=False,
                         auto_thumbnail="off", strip_metadata=True, auto_hashtags=True, politicas_tiktok="off",
                         thumbnail_engine="clasico", thumbnail_style="kinetik",
-                        streamer_corner="auto", streamer_game_mode="cam_arriba_centro", streamer_cam_ratio=0.26):
+                        streamer_corner="auto", streamer_game_mode="cam_arriba_centro", streamer_cam_ratio=0.26,
+                        reaction_character_id="", reaction_mode="silencioso", reaction_layout="pip_arriba_centro",
+                        reaction_motor="auto", reaction_marco="auto", reaction_frecuencia="media",
+                        reaction_vision=True, reaction_stickers=True, reaction_frames_fps=12,
+                        reaction_intervenciones=None,
+                        reaction_expresion_fija="", reaction_duracion_gesto="auto"):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import bisect
@@ -822,6 +827,16 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             streamer_corner, streamer_game_mode, streamer_cam_ratio
         )
 
+        personaje_reacc = None
+        reacc_pid = str(reaction_character_id or "").strip()
+        if reacc_pid:
+            import reaction_characters as _rc
+            personaje_reacc = _rc.obtener_personaje(reacc_pid)
+            if not personaje_reacc:
+                raise RuntimeError(
+                    f"No encontré el personaje reaccionador '{reacc_pid}'. Sincroniza o vuelve a elegir tu personaje."
+                )
+
         from calidad_video import origen as calidad_del_origen
         calidad_origen = calidad_del_origen(orig_w, orig_h, final_w, final_h, encuadre)
         for aviso in calidad_origen["advertencias"]:
@@ -956,6 +971,70 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                 if dubbing_language in ("ja", "ko") and show_subtitles:
                     opciones_sub["fuente"] = "cjk"
 
+                reacc_comp = None
+                reacc_meta_clip = None
+                if personaje_reacc is not None:
+                    import smart_reaction as _sr
+                    import reaction_animator as _ra
+                    ffmpeg_reacc = imageio_ffmpeg.get_ffmpeg_exe()
+                    interv_clip = None
+                    if isinstance(reaction_intervenciones, list) and reaction_intervenciones:
+                        if isinstance(reaction_intervenciones[0], list):
+                            if idx < len(reaction_intervenciones):
+                                interv_clip = reaction_intervenciones[idx]
+                        elif idx == 0:
+                            interv_clip = reaction_intervenciones
+                    if not interv_clip:
+                        write_progress(
+                            f"Sincronizando gestos de {personaje_reacc.get('nombre', 'Personaje')} · clip {parte_num}...",
+                            p0 + int(tramo * 0.29),
+                        )
+                        trans_clip = _sr._formatear_palabras_tramo(words, st, et) if words else ""
+                        res_reacc = _sr.analizar_video_para_reaccion(
+                            video_path,
+                            personaje_reacc,
+                            modo_interaccion=str(reaction_mode or "silencioso"),
+                            frecuencia=str(reaction_frecuencia or "media"),
+                            usar_vision=bool(reaction_vision),
+                            ffmpeg_exe=ffmpeg_reacc,
+                            log=print,
+                            transcripcion_previa=trans_clip,
+                            inicio_s=base + st,
+                            duracion_tramo=raw_dur,
+                            expresion_fija=str(reaction_expresion_fija or ""),
+                            duracion_gesto=str(reaction_duracion_gesto or "auto"),
+                        )
+                        interv_clip = res_reacc.get("intervenciones") or []
+                        reacc_meta_clip = {
+                            "personaje": personaje_reacc.get("nombre", reacc_pid),
+                            "modo": str(reaction_mode or "silencioso"),
+                            "layout": str(reaction_layout or "pip_arriba_centro"),
+                            "vision_usada": bool(res_reacc.get("vision_usada")),
+                            "intervenciones": len(interv_clip),
+                            "expresion_fija": str(reaction_expresion_fija or ""),
+                            "duracion_gesto": str(reaction_duracion_gesto or "auto"),
+                        }
+                    reacc_tmp = resources.enter_context(tempfile.TemporaryDirectory(prefix="smart_reacc_"))
+                    reacc_comp = _ra.CompositorReaccion(
+                        personaje_reacc,
+                        interv_clip,
+                        dur_clip=raw_dur,
+                        layout=str(reaction_layout or "pip_arriba_centro"),
+                        motor_animacion=str(reaction_motor or "auto"),
+                        marco_estilo=str(reaction_marco or "auto"),
+                        modo_interaccion=str(reaction_mode or "silencioso"),
+                        frames_fps=int(reaction_frames_fps) if reaction_frames_fps else None,
+                        stickers_2d=bool(reaction_stickers),
+                        subtitulos_reaccion=bool(show_subtitles),
+                        fps=int(round(min(subclip.fps or 30, 30) if export_profile == "fast" else (subclip.fps or 30))),
+                        tmp_dir=reacc_tmp,
+                        baja_ram=_baja_ram_local,
+                        log=print,
+                    )
+                    resources.callback(reacc_comp.cerrar)
+                    if "pos" not in opciones_sub:
+                        opciones_sub["pos"] = reacc_comp.posicion_subtitulos_recomendada(0.77)
+
                 momento_rel = (
                     float(info["momento_segundos"]) - st
                     if info.get("momento_segundos") is not None
@@ -971,13 +1050,15 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     commentary_mode != "off"
                     or co_plan is not None
                     or len(jc_intervals) > 1
+                    or (reacc_comp is not None and reacc_comp.necesita_linea_tiempo())
                 )
 
                 from render_progress import ProgresoRender
-                render_w, render_h = final_w, final_h
+                vid_w, vid_h = reacc_comp.dimensiones_panel_video(final_w, final_h) if reacc_comp is not None else (final_w, final_h)
+                render_w, render_h = vid_w, vid_h
                 if upscale == "ia":
-                    scale = 1.0 if encuadre == "difuminado" else min(1., orig_h / final_h, min(fixed_crop_w, orig_w) / final_w)
-                    render_w, render_h = max(2, int(final_w * scale / 2) * 2), max(2, int(final_h * scale / 2) * 2)
+                    scale = 1.0 if encuadre == "difuminado" else min(1., orig_h / vid_h, min(fixed_crop_w, orig_w) / vid_w)
+                    render_w, render_h = max(2, int(vid_w * scale / 2) * 2), max(2, int(vid_h * scale / 2) * 2)
 
                 def _encuadrar_origen(get_src, t_orig, rw, rh, zoom_extra=1.0, pulsos_ref=None, t_pulso=None):
                     t_clamped = max(0.0, min(raw_dur - 1e-3, float(t_orig)))
@@ -988,13 +1069,18 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         cx, modo_inst, par_cx = reencuadre.centro_en(tiempos, centros, t_clamped), "simple", None
                     modo_ef = "dividido" if modo_inst == "dividido" else encuadre_clip
                     z = (_zoom_en(pulsos_ref, t_pulso if t_pulso is not None else t_clamped) if pulsos_ref else 1.0) * zoom_extra
+                    crop_w_eff = (
+                        fixed_crop_w
+                        if (rw == final_w and rh == final_h)
+                        else max(2, min(orig_w, int(round(orig_h * (rw / max(rh, 1))))))
+                    )
                     if modo_ef == "streamer" and streamer_cfg_clip is not None:
-                        recorte = _encuadrar(frame, "streamer", cx, fixed_crop_w, rw, rh, 1.0, None, streamer_cfg_clip)
+                        recorte = _encuadrar(frame, "streamer", cx, crop_w_eff, rw, rh, 1.0, None, streamer_cfg_clip)
                     else:
                         recorte = (
-                            _encuadrar(frame, modo_ef, cx, fixed_crop_w, rw, rh, z, par_cx)
+                            _encuadrar(frame, modo_ef, cx, crop_w_eff, rw, rh, z, par_cx)
                             if par_cx is not None
-                            else _encuadrar(frame, modo_ef, cx, fixed_crop_w, rw, rh, z)
+                            else _encuadrar(frame, modo_ef, cx, crop_w_eff, rw, rh, z)
                         )
                     if anti_copyright_filter:
                         recorte = cv2.convertScaleAbs(recorte, alpha=1 + 0.01 * float(filter_strength), beta=float(filter_strength))
@@ -1005,9 +1091,9 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     if upscale in ("hd", "sharpen"):
                         from calidad_video import filtrar_frame
                         recorte = filtrar_frame(recorte, upscale)
-                    elif upscale == "off" and modo_ef != "difuminado" and rw > fixed_crop_w * 1.22 and getattr(recorte, "ndim", 0) == 3:
+                    elif upscale == "off" and modo_ef != "difuminado" and rw > crop_w_eff * 1.22 and getattr(recorte, "ndim", 0) == 3:
                         from calidad_video import realzar_detalle_ampliacion
-                        recorte = realzar_detalle_ampliacion(recorte, rw / max(fixed_crop_w, 1))
+                        recorte = realzar_detalle_ampliacion(recorte, rw / max(crop_w_eff, 1))
                     return recorte
 
                 try:
@@ -1050,7 +1136,11 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
                     def process_frame(get_frame, t, st=st, et=et, gen_title=gen_title, subs=subs, pulsos=pulsos, overlay=True):
                         recorte = _encuadrar_origen(get_frame, t, render_w, render_h, 1.0, pulsos_ref=pulsos, t_pulso=st + t)
-                        return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar) if overlay else recorte
+                        if not overlay:
+                            return recorte
+                        if reacc_comp is not None:
+                            recorte = reacc_comp.componer_frame(recorte, t, final_w, final_h)
+                        return _componer(recorte, st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar)
 
                     if upscale == "ia":
                         clean_dir = resources.enter_context(tempfile.TemporaryDirectory(prefix="smart_ia_"))
@@ -1060,15 +1150,29 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             ffmpeg_params=["-crf", "0"], fps=subclip.fps,
                             logger=ProgresoRender(write_progress, f"Preparando imagen para IA · clip {parte_num}", p0 + tramo * .35, p0 + tramo * .5))
                         _mejorar_calidad_video(
-                            clean_path, "ia", final_w, final_h,
+                            clean_path, "ia", vid_w, vid_h,
                             progress=lambda msg, pct: write_progress(f"Mejorando IA · clip {parte_num}: {msg}", int(p0 + tramo * (.5 + .25 * pct / 100))),
                             python_ia=upscale_python, modelo_ia=upscale_model, intermedio=True)
                         enhanced = resources.enter_context(VideoFileClip(clean_path))
                         processed_clip = enhanced.transform(lambda get, t: _componer(
-                            get(t), st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar))
+                            reacc_comp.componer_frame(get(t), t, final_w, final_h) if reacc_comp is not None else get(t),
+                            st + t, subs if show_subtitles else None, gen_title, st, et, final_w, final_h, show_progress_bar))
                     else:
                         processed_clip = subclip.transform(process_frame)
-                    processed_clip = processed_clip.with_audio(final_audio)
+                    audio_para_clip = final_audio
+                    if reacc_comp is not None and not reacc_comp.todo_silencioso:
+                        ra_dir = resources.enter_context(tempfile.TemporaryDirectory(prefix="smart_ra_"))
+                        if final_audio is not None:
+                            b_wav = os.path.join(ra_dir, "base_48k.wav")
+                            final_audio.write_audiofile(b_wav, fps=48000, codec="pcm_s16le", ffmpeg_params=["-ac", "2"], logger=None)
+                            b_pcm = _leer_wav_estereo_48k(b_wav)
+                        else:
+                            b_pcm = np.zeros((max(1, int(round(raw_dur * 48000))), 2), dtype=np.int16)
+                        mix_pcm = reacc_comp.aplicar_audio_continuo(b_pcm, sr_hz=48000)
+                        mix_wav = os.path.join(ra_dir, "mix_reacc_48k.wav")
+                        _escribir_wav_estereo_48k(mix_wav, mix_pcm)
+                        audio_para_clip = resources.enter_context(AudioFileClip(mix_wav))
+                    processed_clip = processed_clip.with_audio(audio_para_clip)
                     total_out_dur = subclip.duration
                     if efectos:
                         eventos.extend((g["inicio"] - st, "pop", 0.6) for g in subs.subs if g.get("emoji"))
@@ -1131,7 +1235,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         })
                         trozos_pcm.append(co_pcm)
 
-                    # 3C. Cuerpo principal (con o sin jump_cuts)
+                    # 3C. Cuerpo principal (con o sin jump_cuts y pausas de personaje reaccionador)
                     body_slices = []
                     jc_map = []  # (out_start, out_end, orig_start, zoom)
                     cursor_b = 0.0
@@ -1146,16 +1250,60 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         cursor_b += dur_sl
                         body_slices.append(sl)
                     body_pcm = np.concatenate(body_slices, axis=0) if body_slices else np.zeros((4800, 2), dtype=np.int16)
+                    if reacc_comp is not None and not reacc_comp.todo_silencioso:
+                        _map_t = (lambda t_o: remap_timestamp(t_o, jc_intervals)) if len(jc_intervals) > 1 else None
+                        body_pcm = reacc_comp.aplicar_audio_continuo(body_pcm, sr_hz=48000, mapeo_tiempo=_map_t)
                     body_dur = len(body_pcm) / 48000.0
                     subs_body = _crear_subs(
                         body_words_rel if show_subtitles else [], final_w, final_h, subtitle_style, subtitle_scale,
                         opciones_sub, emojis and clip_selection == "ai", motor_ia)
                     pulsos_body = _pulsos_zoom(subs_body) if encuadre == "zoom_dinamico" else []
-                    segmentos_tl.append({
-                        "kind": "body", "dur": body_dur, "jc_map": jc_map,
-                        "jc_starts": [x[0] for x in jc_map], "subs": subs_body, "pulsos": pulsos_body,
-                    })
-                    trozos_pcm.append(body_pcm)
+
+                    if reacc_comp is not None and reacc_comp.pausas:
+                        cur_b = 0.0
+                        jc_starts_full = [x[0] for x in jc_map]
+                        for p_it in reacc_comp.pausas:
+                            t_p_body = remap_timestamp(float(p_it["segundo"]), jc_intervals) if len(jc_intervals) > 1 else float(p_it["segundo"])
+                            if t_p_body is None:
+                                continue
+                            t_p_body = max(cur_b, min(body_dur - 0.05, float(t_p_body)))
+                            if t_p_body > cur_b + 0.03:
+                                i_a = max(0, min(len(body_pcm), int(round(cur_b * 48000))))
+                                i_b = max(i_a + 240, min(len(body_pcm), int(round(t_p_body * 48000))))
+                                trozo_b = body_pcm[i_a:i_b]
+                                segmentos_tl.append({
+                                    "kind": "body", "dur": len(trozo_b) / 48000.0,
+                                    "body_offset": cur_b, "jc_map": jc_map,
+                                    "jc_starts": jc_starts_full, "subs": subs_body, "pulsos": pulsos_body,
+                                })
+                                trozos_pcm.append(trozo_b)
+                            v_pcm = np.clip(p_it["pcm"].astype(np.float32) * 1.12, -32767, 32767).astype(np.int16)
+                            sil_pre = np.zeros((int(0.10 * 48000), 2), dtype=np.int16)
+                            sil_post = np.zeros((int(0.15 * 48000), 2), dtype=np.int16)
+                            p_pcm = np.concatenate([sil_pre, v_pcm, sil_post], axis=0)
+                            segmentos_tl.append({
+                                "kind": "reaction_pause", "dur": len(p_pcm) / 48000.0,
+                                "pause_t_orig": max(0.0, min(raw_dur - 0.05, float(p_it["segundo"]))),
+                                "pausa_it": p_it, "subs": None,
+                            })
+                            trozos_pcm.append(p_pcm)
+                            cur_b = t_p_body
+                        if cur_b < body_dur - 0.02:
+                            i_a = max(0, min(len(body_pcm), int(round(cur_b * 48000))))
+                            trozo_rest = body_pcm[i_a:]
+                            if len(trozo_rest) > 0:
+                                segmentos_tl.append({
+                                    "kind": "body", "dur": len(trozo_rest) / 48000.0,
+                                    "body_offset": cur_b, "jc_map": jc_map,
+                                    "jc_starts": jc_starts_full, "subs": subs_body, "pulsos": pulsos_body,
+                                })
+                                trozos_pcm.append(trozo_rest)
+                    else:
+                        segmentos_tl.append({
+                            "kind": "body", "dur": body_dur, "body_offset": 0.0, "jc_map": jc_map,
+                            "jc_starts": [x[0] for x in jc_map], "subs": subs_body, "pulsos": pulsos_body,
+                        })
+                        trozos_pcm.append(body_pcm)
 
                     # 3D. Comentario de cierre opcional
                     if commentary_mode == "intro_outro" and comm_meta and comm_meta.get("outro"):
@@ -1197,7 +1345,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                 eventos.append((seg["t1"], "whoosh_suave", 0.55))
                             elif seg["kind"] == "cold_open":
                                 eventos.append((seg["t1"], "whoosh", 0.72))
-                            elif seg["kind"] == "body":
+                            elif seg["kind"] == "body" and seg.get("body_offset", 0.0) == 0.0:
                                 eventos.extend((t0_seg + g["inicio"], "pop", 0.58) for g in seg["subs"].subs if g.get("emoji"))
                                 ultimo_fx = -3.0
                                 for tc in jc_cuts:
@@ -1243,25 +1391,49 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             return render_commentary_card_frame(base_f, base_f, rw, rh, tl, seg["dur"], seg["badge"], env_lvl)
                         if kind == "cold_open":
                             return _encuadrar_origen(subclip.get_frame, seg["co_ini"] + tl, rw, rh, 1.05)
+                        if kind == "reaction_pause":
+                            return _encuadrar_origen(subclip.get_frame, seg["pause_t_orig"], rw, rh, 1.0)
+                        t_body = float(seg.get("body_offset", 0.0)) + tl
                         jc_map_local = seg["jc_map"]
                         if not jc_map_local:
-                            return _encuadrar_origen(subclip.get_frame, tl, rw, rh, 1.0)
-                        j_idx = max(0, min(bisect.bisect_right(seg["jc_starts"], tl) - 1, len(jc_map_local) - 1))
+                            return _encuadrar_origen(subclip.get_frame, t_body, rw, rh, 1.0)
+                        j_idx = max(0, min(bisect.bisect_right(seg["jc_starts"], t_body) - 1, len(jc_map_local) - 1))
                         out_a, _, orig_a, z_jc = jc_map_local[j_idx]
-                        t_orig = orig_a + max(0.0, tl - out_a)
+                        t_orig = orig_a + max(0.0, t_body - out_a)
                         return _encuadrar_origen(
-                            subclip.get_frame, t_orig, rw, rh, z_jc, pulsos_ref=seg["pulsos"], t_pulso=tl)
+                            subclip.get_frame, t_orig, rw, rh, z_jc, pulsos_ref=seg["pulsos"], t_pulso=t_body)
 
                     def _aplicar_overlay_tl(cuadro, t_global):
                         seg, tl, tg = _localizar_seg(t_global)
                         kind = seg["kind"]
-                        titulo_seg = gen_title if kind == "body" else ""
-                        out = _componer(
-                            cuadro, tl, seg["subs"] if show_subtitles else None,
-                            titulo_seg, 0.0, total_out_dur, final_w, final_h, False)
-                        if kind == "cold_open":
-                            out = draw_teaser_badge(out, "ADELANTO")
-                            out = apply_flash_transition(out, tl, seg["dur"])
+                        if kind == "reaction_pause" and reacc_comp is not None:
+                            out = reacc_comp.componer_frame(
+                                cuadro, tg, final_w, final_h,
+                                pausa_it=seg["pausa_it"], t_en_pausa=tl,
+                            )
+                        else:
+                            if kind == "body" and reacc_comp is not None:
+                                t_body = float(seg.get("body_offset", 0.0)) + tl
+                                jc_map_local = seg["jc_map"]
+                                if jc_map_local:
+                                    j_idx = max(0, min(bisect.bisect_right(seg["jc_starts"], t_body) - 1, len(jc_map_local) - 1))
+                                    out_a, _, orig_a, _ = jc_map_local[j_idx]
+                                    t_orig_r = orig_a + max(0.0, t_body - out_a)
+                                else:
+                                    t_orig_r = t_body
+                                cuadro = reacc_comp.componer_frame(cuadro, t_orig_r, final_w, final_h)
+                            elif kind == "cold_open" and reacc_comp is not None:
+                                cuadro = reacc_comp.componer_frame(cuadro, float(seg.get("co_ini", 0.0)) + tl, final_w, final_h)
+                            elif cuadro.shape[1] != final_w or cuadro.shape[0] != final_h:
+                                cuadro = cv2.resize(cuadro, (final_w, final_h), interpolation=cv2.INTER_LANCZOS4)
+                            titulo_seg = gen_title if kind == "body" else ""
+                            t_sub_seg = float(seg.get("body_offset", 0.0)) + tl if kind == "body" else tl
+                            out = _componer(
+                                cuadro, t_sub_seg, seg["subs"] if show_subtitles else None,
+                                titulo_seg, 0.0, total_out_dur, final_w, final_h, False)
+                            if kind == "cold_open":
+                                out = draw_teaser_badge(out, "ADELANTO")
+                                out = apply_flash_transition(out, tl, seg["dur"])
                         if show_progress_bar and total_out_dur > 0:
                             prog = max(0.0, min(1.0, tg / total_out_dur))
                             bar_h = int(final_h * 0.008)
@@ -1281,14 +1453,14 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             ffmpeg_params=["-crf", "0"], fps=subclip.fps,
                             logger=ProgresoRender(write_progress, f"Preparando imagen para IA · clip {parte_num}", p0 + tramo * .35, p0 + tramo * .5))
                         _mejorar_calidad_video(
-                            clean_path, "ia", final_w, final_h,
+                            clean_path, "ia", vid_w, vid_h,
                             progress=lambda msg, pct: write_progress(f"Mejorando IA · clip {parte_num}: {msg}", int(p0 + tramo * (.5 + .25 * pct / 100))),
                             python_ia=upscale_python, modelo_ia=upscale_model, intermedio=True)
                         enhanced = resources.enter_context(VideoFileClip(clean_path))
                         processed_clip = enhanced.transform(lambda get, t: _aplicar_overlay_tl(get(t), t))
                     else:
                         processed_clip = VideoClip(
-                            frame_function=lambda t: _aplicar_overlay_tl(_render_tl_base(t, final_w, final_h), t),
+                            frame_function=lambda t: _aplicar_overlay_tl(_render_tl_base(t, vid_w, vid_h), t),
                             duration=total_out_dur)
                     processed_clip = processed_clip.with_audio(tl_audio)
 
@@ -1327,7 +1499,63 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     if getattr(best_thumb_frame, "ndim", 0) == 3:
                         thumb_candidate_path = os.path.splitext(out_name)[0] + "_miniatura.jpg"
                         portada_base = None
-                        if thumbnail_engine == "qwen":
+                        titulo_integrado_ia = False
+                        if thumbnail_engine == "ia_video" or (personaje_reacc is not None and thumbnail_engine == "qwen"):
+                            # Miniatura 9:16 creada DESDE 0 tomando personaje + video como referencia (expresión + escena + título 3D)
+                            import portada_generativa
+                            import reaction_characters as _rc_th
+                            from smart_thumbnail import _elegir_palabras_resaltadas
+                            write_progress(f"Creando miniatura IA desde 0 según el video · clip {parte_num}...", p0 + int(tramo * 0.36))
+                            _get_ref = lambda tc: subclip.get_frame(max(0.0, min(raw_dur - 1e-3, float(tc))))
+                            refs_portada = [np.ascontiguousarray(best_thumb_frame[:, :, :3])]
+                            for frac_r in (0.20, 0.55, 0.82):
+                                if len(refs_portada) >= 3:
+                                    break
+                                try:
+                                    fr_r = _get_ref(raw_dur * frac_r)
+                                    if getattr(fr_r, "ndim", 0) == 3:
+                                        refs_portada.append(np.ascontiguousarray(fr_r[:, :, :3]))
+                                except Exception:
+                                    pass
+                            rutas_exp_th = (
+                                _rc_th.rutas_expresiones_personaje(personaje_reacc["id"])
+                                if personaje_reacc and personaje_reacc.get("id")
+                                else {}
+                            )
+                            desc_p_th = (
+                                str(personaje_reacc.get("descripcion_visual") or personaje_reacc.get("nombre") or "")
+                                if personaje_reacc
+                                else ""
+                            )
+                            acento_p_th = (
+                                str(personaje_reacc.get("color_acento") or "#FF4D00")
+                                if personaje_reacc
+                                else "#FF4D00"
+                            )
+                            meta_ia_p: dict = {}
+                            portada_base, hl_vis = portada_generativa.generar_portada_segun_video(
+                                refs_portada,
+                                titulo=info.get("titulo", ""),
+                                frase=str(quote_meta.get("quote") or ""),
+                                transcripcion=texto_thumb,
+                                motor_ia=motor_ia,
+                                semilla=1000 + int(parte_num),
+                                personaje_desc=desc_p_th,
+                                personaje_imgs_por_exp=rutas_exp_th,
+                                color_acento=acento_p_th,
+                                preferir_qwen=True,
+                                avisar=print,
+                                meta_out=meta_ia_p,
+                            )
+                            titulo_integrado_ia = bool(portada_base is not None and meta_ia_p.get("titulo_integrado"))
+                            if hl_vis:
+                                quote_meta = {
+                                    **quote_meta,
+                                    "quote": hl_vis.upper(),
+                                    "highlight": _elegir_palabras_resaltadas(hl_vis),
+                                    "kicker": meta_ia_p.get("kicker") or quote_meta.get("kicker") or "REACCIÓN IA",
+                                }
+                        elif thumbnail_engine == "qwen":
                             # Escena nueva con los mismos personajes (Qwen-Image-Edit en GPU); si no, la clásica.
                             import portada_generativa
                             if portada_generativa.disponible():
@@ -1340,11 +1568,18 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                                 )
                             else:
                                 print("Portada IA: sin GPU de 14 GB o más; se usa la portada clásica.")
-                        thumb_rgb, saved_jpg = render_viral_thumbnail(
-                            portada_base if portada_base is not None else editar_portada_9_16(best_thumb_frame), quote_meta,
-                            out_w=PORTADA_W, out_h=PORTADA_H, jpg_path=thumb_candidate_path,
-                            style=thumbnail_style,
-                        )
+                        if titulo_integrado_ia and portada_base is not None:
+                            # La IA ya creó la miniatura completa desde 0 (personaje + expresión nueva + título 3D):
+                            # NO pegamos cintas/cajas encima para preservar el diseño integral.
+                            import portada_generativa
+                            saved_jpg = portada_generativa.guardar_portada_jpg_limpia(portada_base, thumb_candidate_path)
+                            thumb_rgb = cv2.resize(portada_base[:, :, :3], (PORTADA_W, PORTADA_H), interpolation=cv2.INTER_LANCZOS4)
+                        else:
+                            thumb_rgb, saved_jpg = render_viral_thumbnail(
+                                portada_base if portada_base is not None else editar_portada_9_16(best_thumb_frame), quote_meta,
+                                out_w=PORTADA_W, out_h=PORTADA_H, jpg_path=thumb_candidate_path,
+                                style=thumbnail_style,
+                            )
                         thumb_jpg_path = saved_jpg or ""
                         thumb_quote = str(quote_meta.get("quote") or "")
                         if thumb_jpg_path:
@@ -1448,6 +1683,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     "comentario": comm_meta,
                     "miniatura": thumb_jpg_path,
                     "miniatura_texto": thumb_quote,
+                    "reaccion_ia": reacc_meta_clip,
                 }
                 if meta_salida is not None:
                     meta_salida.append(clip_meta_item)
@@ -1605,7 +1841,19 @@ def main(argv):
                 thumbnail_style=cfg.get("thumbnail_style", "kinetik"),
                 streamer_corner=cfg.get("streamer_corner", "auto"),
                 streamer_game_mode=cfg.get("streamer_game_mode", "cam_arriba_centro"),
-                streamer_cam_ratio=cfg.get("streamer_cam_ratio", 0.26))
+                streamer_cam_ratio=cfg.get("streamer_cam_ratio", 0.26),
+                reaction_character_id=cfg.get("reaction_character_id", ""),
+                reaction_mode=cfg.get("reaction_mode", "silencioso"),
+                reaction_layout=cfg.get("reaction_layout", "pip_arriba_centro"),
+                reaction_motor=cfg.get("reaction_motor", "auto"),
+                reaction_marco=cfg.get("reaction_marco", "auto"),
+                reaction_frecuencia=cfg.get("reaction_frecuencia", "media"),
+                reaction_vision=cfg.get("reaction_vision", True),
+                reaction_stickers=cfg.get("reaction_stickers", True),
+                reaction_frames_fps=cfg.get("reaction_frames_fps", 12),
+                reaction_intervenciones=cfg.get("reaction_intervenciones"),
+                reaction_expresion_fija=cfg.get("reaction_expresion_fija", ""),
+                reaction_duracion_gesto=cfg.get("reaction_duracion_gesto", "auto"))
         except InicioFueraDeVideo as e:
             print("RESULT_ERROR:" + json.dumps({"code": "inicio_fuera_video"}))
             write_progress(f"Error: {e}", -1)

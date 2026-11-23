@@ -21,6 +21,8 @@ dist/
 *.env
 .env
 client_secret_*.json
+drive_client_secret.json
+token_drive.json
 client_secrets.json
 secrets.json
 youtube_token.json
