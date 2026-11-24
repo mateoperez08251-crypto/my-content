@@ -29,7 +29,8 @@ def validate_options(language='original', voice='female', volume=1):
 
 
 def validate_layout(video_format='vertical', preserve_background=False, background_volume=0.75):
-    if video_format not in ('vertical', 'horizontal', 'vertical_blur'):
+    # vertical_streamer: 9:16 con la cámara del streamer arriba (lo usa el encuadre de lives).
+    if video_format not in ('vertical', 'horizontal', 'vertical_blur', 'vertical_streamer'):
         raise ValueError('Formato de video no válido.')
     if not isinstance(preserve_background, bool):
         raise ValueError('Preservar fondo debe ser una casilla verdadera o falsa.')
