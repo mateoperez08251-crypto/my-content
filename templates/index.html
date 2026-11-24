@@ -3554,6 +3554,12 @@
                         <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer;">
                             <input type="checkbox" id="smart_titulo_video"> Mostrar el título dentro del video (opcional, discreto)
                         </label>
+                        <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer;">
+                            <input type="checkbox" id="smart_gancho_video" onchange="document.getElementById('smart_gancho_box').style.display=this.checked?'block':'none';"> Palabra de gancho en el video (opcional · cartel inicial 3 s)
+                        </label>
+                        <div id="smart_gancho_box" style="display:none; margin-top:6px;">
+                            <input type="text" id="smart_gancho_texto" class="form-control" maxlength="60" placeholder="Texto del gancho (déjalo vacío para que lo elija la IA)">
+                        </div>
                     </div>
                     <div class="form-group" style="margin-top: 15px;">
                         <label style="display:block; margin-bottom:5px;">Transcripción del audio</label>
@@ -4926,6 +4932,8 @@
                 efectos: document.getElementById('smart_efectos') ? document.getElementById('smart_efectos').checked : true,
                 vol_musica: (parseInt(document.getElementById('smart_vol_musica')?.value || '20', 10) / 100),
                 titulo_en_video: document.getElementById('smart_titulo_video') ? document.getElementById('smart_titulo_video').checked : false,
+                gancho_video: document.getElementById('smart_gancho_video') ? document.getElementById('smart_gancho_video').checked : false,
+                gancho_texto: document.getElementById('smart_gancho_texto') ? document.getElementById('smart_gancho_texto').value.trim() : '',
                 transcripcion: document.getElementById('smart_transcripcion') ? document.getElementById('smart_transcripcion').value : 'groq',
                 whisper_local: document.getElementById('smart_whisper_local') ? document.getElementById('smart_whisper_local').value : 'auto',
                 commentary_mode: ['off', 'intro', 'intro_outro'].includes(rawCommMode) ? rawCommMode : 'off',

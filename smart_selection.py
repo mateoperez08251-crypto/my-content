@@ -50,6 +50,7 @@ def needs_groq(options):
         or options.get('jump_cuts', False)
         or options.get('cold_open', False)
         or str(options.get('auto_thumbnail', 'off') or 'off') != 'off'
+        or (options.get('gancho_video', False) and not str(options.get('gancho_texto') or '').strip())
     )
     return needs_words and options.get('transcripcion', 'groq') != 'local'
 

@@ -177,7 +177,8 @@ class Queue(unittest.TestCase):
             config = json.loads(self.motor.db._uno('SELECT config FROM live_sesiones WHERE id=?', (jid,))['config'])
             self.assertFalse(config['options']['show_subtitles'])
             self.assertEqual(config['options']['video_format'], 'vertical_blur')
-            self.assertEqual(config['options']['export_profile'], 'fast')
+            self.assertEqual(config['options']['export_profile'], 'balanced')
+            self.assertEqual(config['options']['fps_max'], 30)
             capture.assert_called_once()
             with self.assertRaisesRegex(live.LiveError, 'Groq'):
                 self.manager.start(self.options(mode='ai'))

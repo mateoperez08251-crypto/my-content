@@ -26,11 +26,16 @@ ACTIVOS = ('conectando', 'capturando', 'reconectando', 'deteniendo')
 _ID = re.compile(r'[a-f0-9]{12}')
 
 
+def resolver_colab(url):
+    """Colab tiene ancho de banda y GPU: graba el live a 1080p para que el clip 1080p no salga reescalado."""
+    return resolve_live(url, 1080)
+
+
 # ───────────────────────────── Lado Colab ─────────────────────────────
 class ServidorLive:
     """Capturas de live que viven en el servidor de Colab (en memoria + disco temporal)."""
 
-    def __init__(self, carpeta, adquirir, editar, ffmpeg=None, resolver=resolve_live,
+    def __init__(self, carpeta, adquirir, editar, ffmpeg=None, resolver=resolver_colab,
                  min_libre_mb=1500, max_pendientes_mb=6144):
         import imageio_ffmpeg
         self.root = Path(carpeta).resolve()

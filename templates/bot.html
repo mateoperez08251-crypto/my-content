@@ -1627,6 +1627,8 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
             <div class="ajustes">
               <div><label for="ed-comentario">Comentario / Narrador IA</label><select id="ed-comentario" onchange="vistaComentario()"><option value="off">Sin comentario IA</option><option value="intro">Solo presentación inicial (3–5 s)</option><option value="intro_outro">Presentación + opinión/debate final</option></select></div>
               <div><label for="ed-cold-open">Adelanto del clímax (Cold Open)</label><select id="ed-cold-open"><option value="no">Desactivado</option><option value="si">Activado · 2–3 s con ADELANTO</option></select></div>
+              <div><label for="ed-gancho">Palabra de gancho en el video</label><select id="ed-gancho" onchange="if($('ed-gancho-texto-wrap'))$('ed-gancho-texto-wrap').hidden=this.value!=='si'"><option value="no">Desactivada</option><option value="si">Activada · cartel 3 s al inicio</option></select></div>
+              <div id="ed-gancho-texto-wrap" hidden><label for="ed-gancho-texto">Texto del gancho (vacío = lo escribe la IA)</label><input id="ed-gancho-texto" maxlength="60" placeholder="Ej.: ¡NO LO VAS A CREER!"></div>
               <div><label for="ed-jump-cuts">Recorte de silencios y zoom</label><select id="ed-jump-cuts"><option value="no">Desactivado</option><option value="si">Activado · ritmo ágil + zoom</option></select></div>
               <div><label for="ed-auto-split">Pantalla dividida en diálogos</label><select id="ed-auto-split"><option value="no">Desactivado</option><option value="si">Activado · 2 hablantes arriba/abajo</option></select></div>
               <div><label for="ed-ambiente">Música ambiente generada</label><select id="ed-ambiente"><option value="off">Sin ambiente generado</option><option value="auto">Automática según el estilo</option><option value="suave">Suave</option><option value="alegre">Alegre / comedia</option><option value="epico">Épica / impacto</option><option value="energica">Enérgica</option><option value="misterio">Misterio / intriga</option><option value="terror">Tensión / terror</option><option value="noticias">Informativa</option></select></div>
@@ -1710,7 +1712,9 @@ body.tema-kinetik .marca-bot img:hover{transform:scale(1.08) rotate(-3deg)}
         <div id="live-esquina-wrap" hidden><label for="live-streamer-esquina">Esquina de su cámara</label><select id="live-streamer-esquina"><option value="auto">Automático (detectar esquina)</option><option value="top_left">Arriba · Izquierda</option><option value="top_right">Arriba · Derecha</option><option value="bottom_left">Abajo · Izquierda</option><option value="bottom_right">Abajo · Derecha</option></select></div>
         <div><label for="live-buffer">Búfer máx. (MiB)</label><input id="live-buffer" type="number" min="256" max="16384" value="1024"></div>
         <div><label for="live-destino">Dónde grabar y editar</label><select id="live-destino" onchange="if($('live-rapido-wrap'))$('live-rapido-wrap').hidden=this.value==='colab'"><option value="pc">💻 Esta PC</option><option value="colab">☁️ Colab (GPU · 1080p)</option></select></div>
-        <div id="live-rapido-wrap"><label for="live-rapido">Velocidad de edición</label><label class="switch" title="Exporta a 720p y máx. 30 fps con codificación ultrarrápida. Desactívalo solo si tu PC edita cada bloque más rápido de lo que dura."><input id="live-rapido" type="checkbox" checked> ⚡ Rápida (720p · 30 fps)</label></div>
+        <div id="live-rapido-wrap"><label for="live-rapido">Velocidad de edición</label><label class="switch" title="Exporta a 1080p limitado a 30 fps con codificación rápida (veryfast). Desactívalo para usar la calidad completa del preset (más lento en CPU)."><input id="live-rapido" type="checkbox" checked> ⚡ Rápida (1080p · 30 fps)</label></div>
+        <div><label for="live-gancho">Palabra de gancho (opcional)</label><select id="live-gancho" onchange="if($('live-gancho-texto-wrap'))$('live-gancho-texto-wrap').hidden=this.value!=='texto'"><option value="">Usar la del preset</option><option value="auto">Activada · automática</option><option value="texto">Activada · escribir texto</option><option value="off">Desactivada</option></select></div>
+        <div id="live-gancho-texto-wrap" hidden><label for="live-gancho-texto">Texto del gancho</label><input id="live-gancho-texto" maxlength="60" placeholder="Ej.: ¡NO LO VAS A CREER!"></div>
       </div>
       <label>Cuentas de destino</label><div id="chips-live" class="chips"></div>
       <div class="fila" style="margin-top:8px">
@@ -3051,6 +3055,8 @@ async function iniciarLive() {
       streamer_corner:$('live-streamer-esquina')?.value || 'auto',
       rapido: $('live-rapido') ? $('live-rapido').checked : true,
       destino: $('live-destino')?.value || 'pc',
+      gancho_modo: $('live-gancho')?.value || '',
+      gancho_texto: $('live-gancho-texto')?.value?.trim() || '',
       accounts:[...selLive], text:$('live-text').value});
     toast(result.colab ? 'Colab recibió el live. Él graba y edita; los clips terminados bajan solos a esta PC.' : 'Solicitud de captura creada. El estado indicará si conecta con el live.');
     await cargarLives();
@@ -3819,6 +3825,9 @@ function seleccionarPreset() {
   if ($('ed-hashtags')) $('ed-hashtags').value = presetBase.auto_hashtags === false ? 'no' : 'si';
   if ($('ed-politicas')) $('ed-politicas').value = presetBase.politicas_tiktok || 'alto';
   $('ed-cold-open').value = presetBase.cold_open ? 'si' : 'no';
+  if ($('ed-gancho')) $('ed-gancho').value = presetBase.gancho_video ? 'si' : 'no';
+  if ($('ed-gancho-texto')) $('ed-gancho-texto').value = presetBase.gancho_texto || '';
+  if ($('ed-gancho-texto-wrap')) $('ed-gancho-texto-wrap').hidden = !presetBase.gancho_video;
   $('ed-jump-cuts').value = presetBase.jump_cuts ? 'si' : 'no';
   $('ed-auto-split').value = presetBase.auto_split ? 'si' : 'no';
   $('ed-limpiar-voz').value = presetBase.clean_vocals ? 'si' : 'no';
@@ -3926,6 +3935,8 @@ function ajustesEdicion() {
     auto_hashtags:($('ed-hashtags')?.value || 'si') !== 'no',
     politicas_tiktok:$('ed-politicas')?.value || 'alto',
     cold_open:$('ed-cold-open')?.value === 'si',
+    gancho_video:$('ed-gancho')?.value === 'si',
+    gancho_texto:$('ed-gancho-texto')?.value?.trim() || '',
     jump_cuts:$('ed-jump-cuts')?.value === 'si',
     auto_split:$('ed-auto-split')?.value === 'si',
     clean_vocals:$('ed-limpiar-voz')?.value === 'si',

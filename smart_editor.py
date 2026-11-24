@@ -1,4 +1,5 @@
 import bisect
+import functools
 import json
 import math
 import os
@@ -332,6 +333,102 @@ def _componer(frame, t, subs, gen_title, clip_st, clip_et, w, h, show_progress_b
     return frame
 
 
+# ── Palabra de gancho dentro del video (opcional) ─────────────────────────────
+GANCHO_SEGUNDOS = 3.0
+
+
+def texto_gancho(info, texto_fijo="", fallback=""):
+    """Frase corta en mayúsculas para el cartel inicial: texto propio, título viral o frase real."""
+    fijo = str(texto_fijo or "").strip()
+    if fijo:
+        limpio = re.sub(r"[#@\"“”«»\r\n\t]+", " ", fijo)
+        return re.sub(r"\s+", " ", limpio).strip()[:48].upper()
+    candidatos = []
+    if isinstance(info, dict):
+        tit = str(info.get("titulo") or "").strip()
+        if tit and not re.fullmatch(r"parte\s+\d+", tit, re.I):
+            candidatos.append(tit)
+    if fallback:
+        candidatos.append(str(fallback).strip())
+    if isinstance(info, dict) and info.get("gancho"):
+        candidatos.append(str(info.get("gancho")).strip())
+    texto = next((c for c in candidatos if c), "")
+    texto = re.split(r"[\n.!?¡¿…:;|]", texto.strip("¡¿!?. "))[0] if texto else ""
+    texto = re.sub(r"\s+", " ", re.sub(r"[#@\"“”«»]", "", texto)).strip()
+    palabras = texto.split()[:7]
+    while palabras and len(" ".join(palabras)) > 48:
+        palabras.pop()
+    return (" ".join(palabras) or texto[:48]).strip().upper()
+
+
+@functools.lru_cache(maxsize=64)
+def _imagen_gancho(texto, w, h):
+    """Cartel RGBA (caja amarilla, letra negra Anton) cacheado por texto y tamaño."""
+    import subtitulos
+    ancho_max = int(w * 0.86)
+    tam = int(h * 0.052)
+    lienzo = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    while True:
+        fuente = subtitulos.fuente("anton", tam)
+        palabras, lineas, actual = texto.split(), [], ""
+        for p in palabras:
+            prueba = (actual + " " + p).strip()
+            if actual and lienzo.textbbox((0, 0), prueba, font=fuente)[2] > ancho_max - int(tam * 0.8):
+                lineas.append(actual)
+                actual = p
+            else:
+                actual = prueba
+        if actual:
+            lineas.append(actual)
+        cajas_tmp = [lienzo.textbbox((0, 0), l, font=fuente) for l in lineas] if lineas else [(0, 0, 0, 0)]
+        ancho_max_linea = max(b[2] - b[0] for b in cajas_tmp) + int(tam * 0.9)
+        if (len(lineas) <= 2 and ancho_max_linea <= ancho_max) or tam <= 20:
+            break
+        tam -= 4
+    pad_x, pad_y, sep = int(tam * 0.45), int(tam * 0.22), int(tam * 0.12)
+    cajas = [lienzo.textbbox((0, 0), l, font=fuente) for l in lineas]
+    alto_l = max(b[3] - b[1] for b in cajas)
+    ancho = min(w, max(b[2] - b[0] for b in cajas) + pad_x * 2)
+    alto = len(lineas) * (alto_l + pad_y * 2) + sep * (len(lineas) - 1)
+    img = Image.new("RGBA", (ancho + 12, alto + 12), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    y = 6
+    for linea, b in zip(lineas, cajas):
+        lw = b[2] - b[0]
+        x0 = (img.width - lw) // 2 - pad_x
+        d.rectangle((x0 + 6, y + 6, x0 + lw + pad_x * 2 + 6, y + alto_l + pad_y * 2 + 6), fill=(0, 0, 0, 150))
+        d.rectangle((x0, y, x0 + lw + pad_x * 2, y + alto_l + pad_y * 2), fill=(255, 230, 0, 255))
+        d.text((x0 + pad_x - b[0], y + pad_y - b[1]), linea, font=fuente, fill=(10, 10, 10, 255))
+        y += alto_l + pad_y * 2 + sep
+    return np.array(img)
+
+
+def dibujar_gancho(frame, t, texto, w, h, duracion=GANCHO_SEGUNDOS, y_rel=0.20):
+    """Pega el gancho los primeros segundos con entrada «pop» y salida suave."""
+    if not texto or t < 0 or t >= duracion:
+        return frame
+    base = _imagen_gancho(texto, w, h)
+    entrada = min(1.0, max(0.0, t) / 0.22)
+    escala = 0.6 + 0.5 * entrada - 0.1 * max(0.0, min(1.0, (t - 0.22) / 0.12))  # rebote 0.6→1.1→1.0
+    alfa = 1.0 - max(0.0, min(1.0, (t - (duracion - 0.35)) / 0.35))
+    if escala <= 0 or alfa <= 0:
+        return frame
+    bw, bh = max(2, int(base.shape[1] * escala)), max(2, int(base.shape[0] * escala))
+    cartel = cv2.resize(base, (bw, bh), interpolation=cv2.INTER_LINEAR if escala < 1 else cv2.INTER_CUBIC)
+    out = np.array(frame, copy=True, order="C")
+    fh, fw = out.shape[:2]
+    x = (fw - bw) // 2
+    y = int(fh * y_rel) - bh // 2
+    x0, y0, x1, y1 = max(0, x), max(0, y), min(fw, x + bw), min(fh, y + bh)
+    if x1 <= x0 or y1 <= y0:
+        return frame
+    trozo = cartel[y0 - y:y1 - y, x0 - x:x1 - x].astype(np.float32)
+    a = (trozo[:, :, 3:4] / 255.0) * alfa
+    zona = out[y0:y1, x0:x1, :3].astype(np.float32)
+    out[y0:y1, x0:x1, :3] = (zona * (1 - a) + trozo[:, :, :3] * a).astype(np.uint8)
+    return out
+
+
 def _suavizar_bordes_pcm(pcm: np.ndarray, sr: int = 48000, fade_ms: float = 8.0) -> np.ndarray:
     """Aplica micro-fundido lineal en los extremos de un tramo PCM int16 para evitar clics."""
     if pcm.shape[0] < 16:
@@ -627,7 +724,8 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         reaction_motor="auto", reaction_marco="auto", reaction_frecuencia="media",
                         reaction_vision=True, reaction_stickers=True, reaction_frames_fps=12,
                         reaction_intervenciones=None,
-                        reaction_expresion_fija="", reaction_duracion_gesto="auto"):
+                        reaction_expresion_fija="", reaction_duracion_gesto="auto", fps_max=0,
+                        gancho_video=False, gancho_texto=""):
     """Genera los clips virales. Devuelve la lista de archivos; si `meta_salida` es una
     lista, añade en ella los datos de cada clip (título, descripción, hashtags...)."""
     import bisect
@@ -731,6 +829,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
             or cold_open
             or commentary_mode != "off"
             or auto_thumbnail != "off"
+            or (gancho_video and not str(gancho_texto or "").strip())
         )
         if needs_transcription:
             local = transcripcion == "local"
@@ -807,6 +906,19 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
         from smart_speakers import validate_performance
         validate_performance(export_profile)
         final_w, final_h = (720, 1280) if export_profile == "fast" else (1080, 1920)
+        try:
+            fps_max = max(0, int(fps_max or 0))
+        except (TypeError, ValueError):
+            fps_max = 0
+
+        def _fps_salida(fps_origen):
+            """fps del clip: «fast» a 30 como siempre; fps_max (p. ej. lives) limita sin bajar la resolución."""
+            fps_o = fps_origen or 30
+            if export_profile == "fast":
+                fps_o = min(fps_o, 30)
+            if fps_max:
+                fps_o = min(fps_o, fps_max)
+            return fps_o
         if video_format == "horizontal":
             final_w, final_h = final_h, final_w
         if video_format == "vertical_streamer":
@@ -1026,7 +1138,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         frames_fps=int(reaction_frames_fps) if reaction_frames_fps else None,
                         stickers_2d=bool(reaction_stickers),
                         subtitulos_reaccion=bool(show_subtitles),
-                        fps=int(round(min(subclip.fps or 30, 30) if export_profile == "fast" else (subclip.fps or 30))),
+                        fps=int(round(_fps_salida(subclip.fps or 30))),
                         tmp_dir=reacc_tmp,
                         baja_ram=_baja_ram_local,
                         log=print,
@@ -1147,7 +1259,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         clean_path = os.path.join(clean_dir, "imagen.mp4")
                         subclip.transform(lambda get, t: process_frame(get, t, overlay=False)).write_videofile(
                             clean_path, audio=False, codec="libx264rgb", preset="ultrafast",
-                            ffmpeg_params=["-crf", "0"], fps=subclip.fps,
+                            ffmpeg_params=["-crf", "0"], fps=_fps_salida(subclip.fps),
                             logger=ProgresoRender(write_progress, f"Preparando imagen para IA · clip {parte_num}", p0 + tramo * .35, p0 + tramo * .5))
                         _mejorar_calidad_video(
                             clean_path, "ia", vid_w, vid_h,
@@ -1450,7 +1562,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                             duration=total_out_dur)
                         raw_tl_clip.write_videofile(
                             clean_path, audio=False, codec="libx264rgb", preset="ultrafast",
-                            ffmpeg_params=["-crf", "0"], fps=subclip.fps,
+                            ffmpeg_params=["-crf", "0"], fps=_fps_salida(subclip.fps),
                             logger=ProgresoRender(write_progress, f"Preparando imagen para IA · clip {parte_num}", p0 + tramo * .35, p0 + tramo * .5))
                         _mejorar_calidad_video(
                             clean_path, "ia", vid_w, vid_h,
@@ -1478,6 +1590,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
 
                 thumb_jpg_path = ""
                 thumb_quote = ""
+                portada_video = None
                 if auto_thumbnail != "off":
                     write_progress(f"Creando miniatura automática · clip {parte_num} de {len(seleccion)}...", p0 + int(tramo * 0.34))
                     texto_thumb = translated if (dubbing_language != "original" and translated) else " ".join(
@@ -1589,12 +1702,33 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                         # Una portada 9:16 no cabe dentro de un MP4 horizontal: ahí queda solo el JPG.
                         if auto_thumbnail == "cover_and_jpg" and getattr(thumb_rgb, "ndim", 0) == 3 and final_h >= final_w:
                             portada_video = cv2.resize(thumb_rgb, (final_w, final_h), interpolation=cv2.INTER_AREA)
-                            audio_ref = getattr(processed_clip, "audio", None)
-                            processed_clip = processed_clip.transform(
-                                lambda get, t, cover=portada_video: cover if t < 0.12 else get(t)
-                            )
-                            if audio_ref is not None and getattr(processed_clip, "audio", None) is None:
-                                processed_clip = processed_clip.with_audio(audio_ref)
+
+                # Palabra de gancho dentro del video (opcional): siempre antes de la portada 0..0.12s.
+                _gancho_fb = thumb_quote
+                if gancho_video and not str(gancho_texto or "").strip() and not _gancho_fb and palabras_rel:
+                    if re.fullmatch(r"parte\s+\d+", str(info.get("titulo") or "").strip(), re.I) or not info.get("titulo"):
+                        _gancho_fb = str(extract_interesting_quote(
+                            palabras_rel, clip_info=info, duration=raw_dur, motor=motor_ia,
+                            use_llm=False, is_live=bool("live" in os.path.basename(str(video_path)).lower()),
+                        ).get("quote") or "")
+                gancho_clip = texto_gancho(info, gancho_texto, fallback=_gancho_fb) if gancho_video else ""
+                if gancho_clip:
+                    _arriba_ocupado = (encuadre_clip == "streamer" or (
+                        reacc_comp is not None and str(reaction_layout or "") in ("pip_arriba_centro", "split", "split_arriba")))
+                    _y_gancho = 0.40 if _arriba_ocupado else (0.26 if gen_title else 0.20)
+                    audio_g = getattr(processed_clip, "audio", None)
+                    processed_clip = processed_clip.transform(
+                        lambda get, t, txt=gancho_clip, yg=_y_gancho: dibujar_gancho(get(t), t, txt, final_w, final_h, y_rel=yg))
+                    if audio_g is not None and getattr(processed_clip, "audio", None) is None:
+                        processed_clip = processed_clip.with_audio(audio_g)
+
+                if portada_video is not None:
+                    audio_ref = getattr(processed_clip, "audio", None)
+                    processed_clip = processed_clip.transform(
+                        lambda get, t, cover=portada_video: cover if t < 0.12 else get(t)
+                    )
+                    if audio_ref is not None and getattr(processed_clip, "audio", None) is None:
+                        processed_clip = processed_clip.with_audio(audio_ref)
 
                 import gpu_video
                 _preset_cpu_map = {"quality": "veryfast" if _baja_ram_local else "slow", "balanced": "veryfast", "fast": "ultrafast"}
@@ -1615,7 +1749,7 @@ def process_smart_split(video_path, output_path, clip_duration=60, num_clips=1, 
                     threads=_hilos_encode,
                     logger=ProgresoRender(write_progress, f"Exportando clip {parte_num} de {len(seleccion)}",
                                           p0 + tramo * (.75 if upscale == "ia" else .35), p0 + tramo * .94),
-                    fps=min(subclip.fps, 30) if export_profile == "fast" else subclip.fps, **opciones)
+                    fps=_fps_salida(subclip.fps), **opciones)
                 try:
                     processed_clip.close()
                 except Exception:
@@ -1853,7 +1987,10 @@ def main(argv):
                 reaction_frames_fps=cfg.get("reaction_frames_fps", 12),
                 reaction_intervenciones=cfg.get("reaction_intervenciones"),
                 reaction_expresion_fija=cfg.get("reaction_expresion_fija", ""),
-                reaction_duracion_gesto=cfg.get("reaction_duracion_gesto", "auto"))
+                reaction_duracion_gesto=cfg.get("reaction_duracion_gesto", "auto"),
+                fps_max=cfg.get("fps_max", 0),
+                gancho_video=bool(cfg.get("gancho_video", False)),
+                gancho_texto=str(cfg.get("gancho_texto", "") or "")[:60])
         except InicioFueraDeVideo as e:
             print("RESULT_ERROR:" + json.dumps({"code": "inicio_fuera_video"}))
             write_progress(f"Error: {e}", -1)

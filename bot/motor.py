@@ -881,10 +881,11 @@ class Motor:
                         raise RuntimeError('No se encuentra el segmento local del live.')
                 opciones = json.loads(t.get('opciones') or '{}') or (self.cargar_preset(t['preset']) or {})
                 if local:
-                    # Lives: edición rápida salvo que se desactivara al iniciar la captura.
-                    # También acelera los segmentos que ya estaban en cola con «quality».
+                    # Lives: edición rápida (1080p a 30 fps, x264 veryfast) salvo que se desactivara
+                    # al iniciar la captura. También aplica a segmentos que ya estaban en cola.
                     if opciones.pop('live_rapido', True) is not False:
-                        opciones['export_profile'] = 'fast'
+                        opciones['export_profile'] = 'balanced'
+                        opciones['fps_max'] = 30
                 carpeta_t = self.carpeta_clips(t)
 
                 def _al_clip_local_listo(ev_clip):

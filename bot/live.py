@@ -161,17 +161,45 @@ def _access_error(error, logger, has_cookies, nombre='YouTube'):
     return LiveError(messages[kind], retryable=kind in ('network', 'unknown'))
 
 
-FORMATO_YOUTUBE = 'bestvideo[height<=720][vcodec^=avc1][protocol*=m3u8]+bestaudio[acodec^=mp4a][protocol*=m3u8]/bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]/best[height<=720][vcodec^=avc1][acodec^=mp4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/worstvideo+bestaudio/worst'
+def formato_youtube(alto=1080):
+    alto = int(alto)
+    partes = []
+    # Si se pide 1080p, priorizar 1080p (incluso HLS combinado como itag 96/301) antes de bajar a 720p.
+    if alto >= 900:
+        partes += [
+            f'bestvideo[height<={alto}][height>=900][vcodec^=avc1][protocol*=m3u8]+bestaudio[acodec^=mp4a][protocol*=m3u8]',
+            f'best[height<={alto}][height>=900][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]',
+            f'bestvideo[height<={alto}][height>=900][vcodec^=avc1]+bestaudio[acodec^=mp4a]',
+            f'best[height<={alto}][height>=900][vcodec^=avc1][acodec^=mp4a]',
+            f'bestvideo[height<={alto}][height>=900]+bestaudio',
+            f'best[height<={alto}][height>=900]',
+        ]
+    partes += [
+        f'bestvideo[height<={alto}][vcodec^=avc1][protocol*=m3u8]+bestaudio[acodec^=mp4a][protocol*=m3u8]',
+        f'best[height<={alto}][vcodec^=avc1][acodec^=mp4a][protocol*=m3u8]',
+        f'bestvideo[height<={alto}][vcodec^=avc1]+bestaudio[acodec^=mp4a]',
+        f'best[height<={alto}][vcodec^=avc1][acodec^=mp4a]',
+        f'bestvideo[height<={alto}]+bestaudio',
+        f'best[height<={alto}]',
+        'worstvideo+bestaudio',
+        'worst',
+    ]
+    return '/'.join(partes)
 
 
-def resolve_live(url):
+FORMATO_YOUTUBE = formato_youtube(1080)
+
+
+def resolve_live(url, max_altura=1080):
+    """max_altura: 1080 por defecto para no perder nitidez al recortar 9:16."""
     url = live_url(url)
     clave, nombre = plataforma(url), nombre_plataforma(url)
     import yt_dlp
     import yt_downloader
     logger = QuietLogger()
-    formato = (FORMATO_YOUTUBE if clave == 'youtube' else
-               'best[height<=720][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo[height<=720]+bestaudio/best')
+    alto = int(max_altura)
+    formato = (formato_youtube(alto) if clave == 'youtube' else
+               f'best[height<={alto}][vcodec!=none][acodec!=none]/bestvideo[height<={alto}]+bestaudio/best[vcodec!=none][acodec!=none]/best')
     opts = dict(yt_downloader.opciones_base(), quiet=True, noplaylist=True,
                 socket_timeout=15, retries=1, extractor_retries=1, logger=logger, no_warnings=False,
                 format=formato)
@@ -413,6 +441,16 @@ class LiveManager:
                     'subir_tiktok','subir_youtube','subir_facebook'):
             config.pop(key, None)
         config.update(clip_selection=mode, clip_duration=seconds, num_clips=1)
+        gancho_modo = str(data.get('gancho_modo') or '').strip().lower()
+        if gancho_modo == 'off':
+            config['gancho_video'] = False
+            config['gancho_texto'] = ''
+        elif gancho_modo == 'auto':
+            config['gancho_video'] = True
+            config['gancho_texto'] = ''
+        elif gancho_modo == 'texto':
+            config['gancho_video'] = True
+            config['gancho_texto'] = str(data.get('gancho_texto') or '').strip()[:60]
         en_colab = str(data.get('destino') or 'pc').strip().lower() == 'colab'
         if en_colab:
             # Colab tiene GPU: calidad del preset (o 1080p si no hay preset). Nunca el modo 720p.
@@ -421,13 +459,15 @@ class LiveManager:
             config['respetar_perfil_remoto'] = True
             config['live_rapido'] = False
         else:
-            # Edición rápida (por defecto): 720x1280, máx. 30 fps y codificación ultrarrápida.
-            # Un preset en «quality» exporta 1080x1920 a 60 fps con x264 «slow» en CPU y cada
-            # bloque tarda varias veces lo que dura: la cola del live crece sin parar.
+            # Edición rápida (por defecto): 1080x1920 a máx. 30 fps con x264 «veryfast».
+            # Un preset en «quality» exporta a 60 fps con x264 «slow» en CPU y cada bloque
+            # tarda varias veces lo que dura (la cola crece). El antiguo modo 720p/ultrafast
+            # bajaba demasiado la calidad.
             rapido = data.get('rapido', True) is not False
             config['live_rapido'] = rapido
             if rapido:
-                config['export_profile'] = 'fast'
+                config['export_profile'] = 'balanced'
+                config['fps_max'] = 30
         from smart_selection import needs_groq
         from app_secrets import get_secret
         if not en_colab and needs_groq(config) and not get_secret('groq', 'api_key', env='GROQ_API_KEY'):

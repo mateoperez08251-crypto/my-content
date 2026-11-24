@@ -2099,6 +2099,9 @@ def run_smart_split_thread(data):
             "reaction_intervenciones": data.get("reaction_intervenciones"),
             "reaction_expresion_fija": str(data.get("reaction_expresion_fija", "") or "").strip(),
             "reaction_duracion_gesto": str(data.get("reaction_duracion_gesto", "auto") or "auto").strip(),
+            "fps_max": int(data.get("fps_max") or 0) if str(data.get("fps_max") or "0").isdigit() else 0,
+            "gancho_video": data.get("gancho_video") is True,
+            "gancho_texto": str(data.get("gancho_texto") or "").strip()[:60],
             "_trabajo_id": data.get("_trabajo_id"),
         }
         if cfg_datos['upscale'] == 'ia':

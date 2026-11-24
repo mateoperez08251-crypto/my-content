@@ -1,0 +1,21 @@
+{
+  "nombre": "Flawer Realista",
+  "personalidad": "hype",
+  "prompt_extra": "",
+  "muletillas": "",
+  "idioma": "es",
+  "intensidad": 4,
+  "voz": "male",
+  "motor_animacion": "video_ia",
+  "layout_defecto": "split",
+  "color_acento": "#FF4D00",
+  "estilo_visual": "realista",
+  "modelo_generacion": "auto",
+  "modelo_video_ia": "ltx_video",
+  "frames_fps": 12,
+  "stickers_2d": true,
+  "marco_estilo": "streamer_pro",
+  "descripcion_visual": "joven streamer latino en estudio gaming con hoodie gris oscuro, detalles naranjas y audifonos negros",
+  "creado": 1795134723,
+  "actualizado": 1795134723
+}

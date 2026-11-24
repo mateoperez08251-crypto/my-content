@@ -22,6 +22,7 @@ CALIDAD = {
     'reaction_motor': 'auto', 'reaction_marco': 'auto', 'reaction_frecuencia': 'media',
     'reaction_vision': True, 'reaction_stickers': True, 'reaction_frames_fps': 12,
     'reaction_expresion_fija': '', 'reaction_duracion_gesto': 'auto',
+    'gancho_video': False, 'gancho_texto': '',
 }
 
 
@@ -142,6 +143,10 @@ def snapshot(opciones):
         result['politicas_tiktok'] = validate_policy_mode(result['politicas_tiktok'])
     if not isinstance(result.get('auto_hashtags', True), bool):
         raise ValueError('La opción de hashtags debe ser verdadero o falso.')
+    if 'gancho_video' in result:
+        result['gancho_video'] = bool(result.get('gancho_video', False))
+    if 'gancho_texto' in result:
+        result['gancho_texto'] = str(result.get('gancho_texto') or '').strip()[:60]
     mode = result.get('clip_selection', 'ai')
     if mode not in ('ai', 'sequential'):
         raise ValueError('Elige partes consecutivas o mejores momentos.')
